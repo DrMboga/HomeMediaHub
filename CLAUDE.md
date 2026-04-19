@@ -2,6 +2,14 @@
 
 Self-hosted home photo and video library. Replaces manual iPhone → MacBook → USB drive workflow with automated ingestion, AI tagging, and semantic search. Runs on a single Dell Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack.
 
+## Server Access
+
+| | |
+|--|--|
+| SSH | `ssh mike@192.168.0.192` |
+| IP | `192.168.0.192` (static DHCP — reserved by MAC address in home router) |
+| App directory | `/opt/homemediahub/app` |
+
 ## Hardware
 
 | Component | Spec |

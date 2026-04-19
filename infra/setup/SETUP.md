@@ -9,13 +9,13 @@ Run these steps once on a fresh OS over SSH.
 Run this on your **Windows machine**:
 
 ```powershell
-# Replace 192.168.1.100 with your server's LAN IP
-scp -r C:\Users\Mike\Projects\HomeMediaHub mike@192.168.1.100:/opt/homemediahub/app
+# Replace 192.168.0.192 with your server's LAN IP
+scp -r C:\Users\Mike\Projects\HomeMediaHub mike@192.168.0.192:/opt/homemediahub/app
 ```
 
 Or use `rsync` if available:
 ```bash
-rsync -av /mnt/c/Users/Mike/Projects/HomeMediaHub/ mike@192.168.1.100:/opt/homemediahub/app/
+rsync -av /mnt/c/Users/Mike/Projects/HomeMediaHub/ mike@192.168.0.192:/opt/homemediahub/app/
 ```
 
 ---
@@ -53,7 +53,7 @@ You will be prompted to set a Samba password for your user.
 **After the script finishes — log out and back in:**
 ```bash
 exit
-ssh mike@192.168.1.100
+ssh mike@192.168.0.192
 ```
 This activates the `docker` group so you can run Docker without `sudo`.
 
@@ -76,7 +76,7 @@ nano .env.prod    # same fields
 ```
 
 Fill in for each file:
-- `SERVER_IP` — your server's LAN IP (e.g. `192.168.1.100`)
+- `SERVER_IP` — your server's LAN IP (e.g. `192.168.0.192`)
 - `POSTGRES_PASSWORD` — any strong password
 - `IMMICH_DB_PASSWORD` — any strong password
 
