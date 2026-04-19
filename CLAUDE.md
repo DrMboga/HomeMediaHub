@@ -49,8 +49,35 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 | `n8n_db` | postgres:5432 | n8n internal — workflow definitions, execution history, credentials |
 | Immich DB | immich-postgres:5433 | Immich internal — not accessed by custom services |
 
+## Environments
+
+Two isolated environments run from the same `docker-compose.yml` via separate env files. Only one runs at a time (they share ports 80, 8080, etc.).
+
+| Environment | Command | Photo library | Data root |
+|-------------|---------|---------------|-----------|
+| **stage** | `docker compose --env-file .env.stage up -d` | `/opt/homemediahub/stage/TestPhoto` (SSD) | `/opt/homemediahub/stage/data/` |
+| **prod** | `docker compose --env-file .env.prod up -d` | `/mnt/usb-hdd/Photo` (USB HDD) | `/opt/homemediahub/data/` |
+
+Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so the USB HDD is not required during development. Switch to prod when the USB HDD is attached and the full library is ready.
+
 ## Key Paths on Disk
 
+### Stage (SSD)
+```
+/opt/homemediahub/stage/
+├── TestPhoto/            ← small curated test library (copied from Windows laptop)
+│   └── iPhone/          ← Immich uploads in stage
+├── thumbnails/           ← generated, recreatable
+├── video-cache/          ← H.264 transcodes, recreatable
+└── data/
+    ├── postgres/         ← stage Postgres data volume
+    ├── immich-postgres/  ← stage Immich Postgres data volume
+    └── n8n/              ← stage n8n data volume
+
+/tmp/homemediahub-stage/  ← shared temp (stage)
+```
+
+### Prod (USB HDD)
 ```
 /mnt/usb-hdd/
 ├── Photo/               ← single source of truth for all originals
@@ -59,13 +86,12 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 ├── thumbnails/          ← 400 px WebP, recreatable from originals
 └── video-cache/         ← H.264 MP4 transcodes of iPhone HEVC videos, recreatable
 
-/opt/homemediahub/
-└── data/
-    ├── postgres/         ← custom Postgres data volume
-    ├── immich-postgres/  ← Immich Postgres data volume
-    └── n8n/              ← n8n data volume
+/opt/homemediahub/data/
+├── postgres/            ← prod Postgres data volume
+├── immich-postgres/     ← prod Immich Postgres data volume
+└── n8n/                 ← prod n8n data volume
 
-/tmp/homemediahub-work/   ← shared temp for HEIC→JPEG and video frame extraction
+/tmp/homemediahub-prod/  ← shared temp (prod)
 ```
 
 ## Samba Share
@@ -87,28 +113,32 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Docker Compose Commands
 
-```bash
-# Start all services
-docker compose up -d
+Always pass `--env-file` to target the right environment. Omitting it defaults to `.env` which may not exist.
 
-# View logs
-docker compose logs -f api
-docker compose logs -f n8n
-docker compose logs -f ai-sidecar
+```bash
+# Start stage (TestPhoto on SSD)
+docker compose --env-file .env.stage up -d
+
+# Start prod (USB HDD — ensure drive is mounted first)
+docker compose --env-file .env.prod up -d
+
+# View logs (same flag required)
+docker compose --env-file .env.stage logs -f api
+docker compose --env-file .env.stage logs -f n8n
 
 # Restart a single service
-docker compose restart api
+docker compose --env-file .env.stage restart api
 
-# Stop everything
-docker compose down
+# Stop an environment
+docker compose --env-file .env.stage down
 
-# Rebuild custom images (after code changes)
-docker compose build api
-docker compose build ai-sidecar
-docker compose build n8n   # custom image with ffmpeg + libheif-tools
+# Rebuild custom images after code changes
+docker compose --env-file .env.stage build api
+docker compose --env-file .env.stage build ai-sidecar
+docker compose --env-file .env.stage build n8n
 
-# Run a one-off Postgres command
-docker compose exec postgres psql -U postgres -d homemediahub_db
+# Run a one-off Postgres command (stage example)
+docker compose --env-file .env.stage exec postgres psql -U postgres -d homemediahub_db
 ```
 
 ## Authentication

@@ -1,0 +1,162 @@
+services:
+
+  # ── Custom PostgreSQL with pgvector ────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - ${DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - homemediahub
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Immich PostgreSQL (isolated — not accessed by custom services) ──────────
+  immich-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${IMMICH_DB_USER}
+      POSTGRES_PASSWORD: ${IMMICH_DB_PASSWORD}
+      POSTGRES_DB: immich
+    volumes:
+      - ${DATA_DIR}/immich-postgres:/var/lib/postgresql/data
+    networks:
+      - homemediahub
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IMMICH_DB_USER} -d immich"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (Immich only) ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - homemediahub
+
+  # ── Immich server (iPhone backup endpoint — no Immich UI used) ────────────
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    restart: unless-stopped
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_PORT: 5432
+      DB_DATABASE_NAME: immich
+      DB_USERNAME: ${IMMICH_DB_USER}
+      DB_PASSWORD: ${IMMICH_DB_PASSWORD}
+      REDIS_HOSTNAME: redis
+      IMMICH_MEDIA_LOCATION: /usr/src/app/upload
+    volumes:
+      - ${PHOTO_DIR}/iPhone:/usr/src/app/upload
+    ports:
+      - "2283:2283"
+    networks:
+      - homemediahub
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # ── n8n (custom image: base + ffmpeg + libheif-tools) ─────────────────────
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile.n8n
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n_db
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_HOST: ${SERVER_IP}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      N8N_PATH: /n8n/
+      WEBHOOK_URL: http://${SERVER_IP}/n8n/
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: true
+    volumes:
+      - ${DATA_DIR}/n8n:/home/node/.n8n
+      - ${PHOTO_DIR}:/photo:ro
+      - ${WORK_DIR}:/shared-temp
+    networks:
+      - homemediahub
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── .NET 10 API ───────────────────────────────────────────────────────────
+  api:
+    build:
+      context: src/Api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Production
+    volumes:
+      - ${PHOTO_DIR}:/photo:ro
+      - ${THUMBNAILS_DIR}:/thumbnails
+      - ${VIDEO_CACHE_DIR}:/video-cache
+      - ${WORK_DIR}:/shared-temp
+    networks:
+      - homemediahub
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Python AI sidecar (YOLOv8n + CLIP — baked in at build) ───────────────
+  ai-sidecar:
+    build:
+      context: src/AiSidecar
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ${PHOTO_DIR}:/photo:ro
+    networks:
+      - homemediahub
+
+  # ── React frontend (Phase 1: placeholder; Phase 6: production Vite build) ─
+  frontend:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx/frontend-placeholder.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      - homemediahub
+
+  # ── NGINX reverse proxy (single public ingress on :80) ────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${THUMBNAILS_DIR}:/thumbs:ro
+    ports:
+      - "80:80"
+    networks:
+      - homemediahub
+    depends_on:
+      - frontend
+      - api
+      - n8n
+      - immich-server
+
+networks:
+  homemediahub:
+    driver: bridge

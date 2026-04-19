@@ -146,7 +146,26 @@
 
 ---
 
-## 3. Storage Layout
+## 3. Environments
+
+Two isolated environments share the same `docker-compose.yml`. Path-sensitive values are injected via env files. Only one environment runs at a time (they bind the same ports).
+
+| Variable | Stage | Prod |
+|----------|-------|------|
+| `COMPOSE_PROJECT_NAME` | `hmh-stage` | `hmh-prod` |
+| `PHOTO_DIR` | `/opt/homemediahub/stage/TestPhoto` | `/mnt/usb-hdd/Photo` |
+| `THUMBNAILS_DIR` | `/opt/homemediahub/stage/thumbnails` | `/mnt/usb-hdd/thumbnails` |
+| `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/usb-hdd/video-cache` |
+| `WORK_DIR` | `/tmp/homemediahub-stage` | `/tmp/homemediahub-prod` |
+| `DATA_DIR` | `/opt/homemediahub/stage/data` | `/opt/homemediahub/data` |
+
+`COMPOSE_PROJECT_NAME` gives each environment distinct container names so a mistaken `docker compose up` cannot silently overwrite the other environment's state.
+
+**Stage** uses a small curated `TestPhoto` folder on the server SSD (no USB HDD required). It is used for all development and phase validation. **Prod** uses the real archive on the USB HDD and is only switched to after each phase is stable on stage.
+
+---
+
+## 4. Storage Layout
 
 All originals live under a single directory tree. No duplication.
 
@@ -169,7 +188,7 @@ All originals live under a single directory tree. No duplication.
 
 ---
 
-## 4. n8n Workflows
+## 5. n8n Workflows
 
 ### Workflow 1 — Process Single File (core pipeline)
 

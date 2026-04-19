@@ -2,6 +2,20 @@
 
 Each phase produces a running, testable increment. Later phases build on earlier ones without requiring rework of completed pieces.
 
+## Development strategy: stage → prod
+
+All phases are validated on the **stage** environment first (TestPhoto folder on server SSD, no USB HDD required). When a phase is stable on stage, it is smoke-tested on **prod** (USB HDD, full Photo library). The same `docker-compose.yml` is used for both; only the env file differs.
+
+| Env | Photo source | How to start |
+|-----|-------------|--------------|
+| stage | `/opt/homemediahub/stage/TestPhoto` | `docker compose --env-file .env.stage up -d` |
+| prod  | `/mnt/usb-hdd/Photo` | `docker compose --env-file .env.prod up -d` |
+
+**TestPhoto setup (one-time):** Create a `TestPhoto` folder on your Windows laptop with a small representative sample (a handful of JPEGs, HEICs, and one short video). Copy it to the server:
+```bash
+scp -r "C:\Users\Mike\TestPhoto" mike@<server-ip>:/opt/homemediahub/stage/TestPhoto
+```
+
 ---
 
 ## Phase 1 — Infrastructure Skeleton
@@ -20,11 +34,23 @@ Each phase produces a running, testable increment. Later phases build on earlier
 - Volume mounts wired: `/mnt/usb-hdd/Photo`, `/mnt/usb-hdd/thumbnails`, `/mnt/usb-hdd/video-cache`, `/tmp/homemediahub-work`
 - Immich + its Postgres + Redis declared and wired to iPhone storage path
 
-### Done when
+### Done when (validate on stage first)
 
 ```bash
-docker compose up -d   # all containers reach healthy/running state
-docker compose exec postgres psql -U postgres -d homemediahub_db -c "\dt"  # tables exist
+# Start stage
+docker compose --env-file .env.stage up -d
+
+# All containers running?
+docker compose --env-file .env.stage ps
+
+# Schema applied?
+docker compose --env-file .env.stage exec postgres \
+    psql -U postgres -d homemediahub_db -c "\dt"
+# Expected: 10 tables listed
+
+# Health checks?
+curl http://localhost:8080/health   # → {"status":"ok","phase":1}
+curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 ```
 
 ---
