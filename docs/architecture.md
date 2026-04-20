@@ -117,7 +117,8 @@
 - **Responsibility:** Stateless inference service.
   - `POST /process { filePath }` → `{ tags: [{label, confidence}], embedding: [512 floats] }`
   - `POST /embed/text { text }` → `{ embedding: [512 floats] }` (for search queries)
-- **Models:** YOLOv8n (object detection, 6 MB) + CLIP ViT-B/32 (semantic embeddings, 151 MB). Both baked into the image.
+  - `POST /classify-origin { filePath }` → `{ originClass, confidence }` — CLIP zero-shot classification of whether a file is a real photo, document, meme, screenshot, or artwork. Used to populate `origin_class` / `origin_confidence` on `media_files`.
+- **Models:** YOLOv8n (object detection, 6 MB) + CLIP ViT-B/32 (semantic embeddings and origin classification, 151 MB). Both baked into the image.
 
 ### postgres (custom)
 - **Image:** `pgvector/pgvector:pg16`
@@ -266,6 +267,15 @@ All originals live under a single directory tree. No duplication.
   │
   ├─[Postgres] INSERT INTO media_embeddings (media_file_id, embedding)
   │
+  ├─[HTTP Request] POST ai-sidecar:8000/classify-origin { filePath: workPath }
+  │   → { originClass: "real_photo"|"document"|"meme"|"screenshot"|"artwork",
+  │       confidence: 0.0–1.0 }
+  │   (continue-on-fail — classification is enrichment, not required)
+  │
+  ├─[Postgres] UPDATE media_files
+  │             SET origin_class = {{ originClass }}, origin_confidence = {{ confidence }}
+  │             WHERE id = {{ id }}
+  │
   └─[Postgres] UPDATE processing_jobs SET status='completed', completed_at=NOW()
                WHERE id = {{ jobId }}
 ```
@@ -377,11 +387,14 @@ CREATE TABLE media_files (
     taken_at        TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     is_deleted      BOOLEAN DEFAULT FALSE,
-    is_favorite     BOOLEAN DEFAULT FALSE
+    is_favorite     BOOLEAN DEFAULT FALSE,
+    origin_class    TEXT,                    -- 'real_photo' | 'document' | 'meme' | 'screenshot' | 'artwork' | NULL (not yet classified)
+    origin_confidence FLOAT                  -- CLIP classification confidence [0.0–1.0]
 );
 CREATE INDEX ON media_files (taken_at DESC);
 CREATE INDEX ON media_files (file_hash);
 CREATE INDEX ON media_files (is_deleted, taken_at DESC);
+CREATE INDEX ON media_files (origin_class) WHERE origin_class IS NOT NULL;
 
 CREATE TABLE media_metadata (
     media_file_id   UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
@@ -504,6 +517,8 @@ CREATE INDEX ON processing_jobs (started_at DESC);
 | GET | `/api/media/{id}/stream` | Browser-compatible video stream. Checks `video_transcodes` cache; if absent, transcodes original → H.264 MP4 via ffmpeg on first request, caches result, then streams. Returns 404 for non-video media. |
 | PATCH | `/api/media/{id}` | `{ isFavorite?, seriesId? }` |
 | DELETE | `/api/media/{id}` | Soft delete |
+| GET | `/api/media/review` | Returns media where `origin_class` is `meme`, `screenshot`, or `artwork`, sorted by `origin_confidence DESC`. Used by the Review page so the user can inspect and delete non-real photos. |
+| DELETE | `/api/media/bulk` | `{ ids: [uuid, ...] }` — hard-deletes files from disk and DB. Used by the Review page bulk-delete action. |
 
 ### Search
 
@@ -580,6 +595,20 @@ n8n Workflow 1 calls:
   → returns { tags: [{label, confidence, model: "yolov8"}],
                embedding: [512 floats] }
 
+  POST ai-sidecar:8000/classify-origin { filePath }
+      │
+      └─ CLIP ViT-B/32 zero-shot classification
+            candidates:
+              "a photograph of people, places, or real life events"
+              "a financial document, receipt, invoice, or payment confirmation"
+              "a meme, joke, or internet image with text captions"
+              "a screenshot of a phone or computer screen"
+              "a painting, artwork, or illustration"
+            → pick highest cosine similarity
+
+  → returns { originClass: "real_photo"|"document"|"meme"|"screenshot"|"artwork",
+               confidence: 0.0–1.0 }
+
   POST ai-sidecar:8000/embed/text { text: "birthday cake" }
   → returns { embedding: [512 floats] }
 
@@ -587,6 +616,11 @@ Semantic search:
   .NET API receives GET /api/search?q="birthday cake"
   → POST ai-sidecar:8000/embed/text
   → pgvector: SELECT ... ORDER BY embedding <=> $vec LIMIT 50
+
+Origin classification (runs after /process in Workflow 1):
+  → result stored in media_files.origin_class / origin_confidence
+  → GET /api/media/review queries WHERE origin_class IN ('meme','screenshot','artwork')
+  → user reviews flagged items in UI and bulk-deletes via DELETE /api/media/bulk
 ```
 
 **Model choices:**

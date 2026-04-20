@@ -14,11 +14,14 @@ CREATE TABLE media_files (
     taken_at        TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     is_deleted      BOOLEAN DEFAULT FALSE,
-    is_favorite     BOOLEAN DEFAULT FALSE
+    is_favorite     BOOLEAN DEFAULT FALSE,
+    origin_class    TEXT,                    -- 'real_photo' | 'document' | 'meme' | 'screenshot' | 'artwork' | NULL (not yet classified)
+    origin_confidence FLOAT                  -- CLIP classification confidence [0.0–1.0]
 );
 CREATE INDEX ON media_files (taken_at DESC);
 CREATE INDEX ON media_files (file_hash);
 CREATE INDEX ON media_files (is_deleted, taken_at DESC);
+CREATE INDEX ON media_files (origin_class) WHERE origin_class IS NOT NULL;
 
 CREATE TABLE media_metadata (
     media_file_id   UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,

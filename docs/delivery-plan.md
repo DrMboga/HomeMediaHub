@@ -123,9 +123,11 @@ curl -s -X POST http://localhost:8080/api/tools/hash \
 - Endpoints:
   - `POST /process { filePath }` → `{ tags: [{label, confidence}], embedding: [512] }`
   - `POST /embed/text { text }` → `{ embedding: [512] }`
+  - `POST /classify-origin { filePath }` → `{ originClass, confidence }` — CLIP zero-shot; classifies as `real_photo`, `document`, `meme`, `screenshot`, or `artwork`
 - Confidence threshold: ≥ 0.40 for YOLOv8 tags
 - L2-normalised CLIP embeddings
 - Workflow 1 already calls `/process`; simply uncomment the AI step (it was `continue-on-fail`)
+- Workflow 1 also calls `/classify-origin` after `/process` (continue-on-fail); result written to `media_files.origin_class` / `origin_confidence`
 
 ### Done when
 
@@ -161,6 +163,9 @@ Re-run Library Scanner or re-process test files and confirm `media_tags` and `me
 - Albums CRUD (`/api/albums/*`)
 - Series endpoints (`/api/series/*`)
 - Admin job endpoints (`/api/admin/jobs`, `/api/admin/jobs/{id}`, `/api/admin/jobs/{id}/retry`)
+- Review endpoints:
+  - `GET /api/media/review` — items flagged as meme/screenshot/artwork, sorted by confidence desc
+  - `DELETE /api/media/bulk` — `{ ids: [...] }` hard-deletes files from disk and DB
 - SignalR hub `/hubs/library` — `media.added` and `media.deleted` events
 - NGINX updated: `X-Accel-Redirect` internal location for `/thumbs/`; WebSocket upgrade for `/hubs/`
 
@@ -197,6 +202,7 @@ curl -s "http://localhost/api/search?q=birthday+cake" \
 - Favorites toggle (star icon)
 - Admin jobs panel: list jobs by status, view error detail, trigger retry
 - SignalR integration: new photos appear in grid without page reload
+- **Review page** (`/review`): grid of items flagged as `meme`, `screenshot`, or `artwork` by CLIP, sorted by confidence. Checkbox multi-select with a "Delete selected" button that calls `DELETE /api/media/bulk`. Lets users clean non-real photos out of the library without any automatic routing.
 
 ### Done when
 
