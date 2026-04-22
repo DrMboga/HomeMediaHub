@@ -120,6 +120,40 @@ services:
       postgres:
         condition: service_healthy
 
+  # ── GeoService PostgreSQL (geoservice_db — address cache) ───────────────
+  geoservice-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: geoservice
+      POSTGRES_PASSWORD: ${GEOSERVICE_DB_PASSWORD}
+      POSTGRES_DB: geoservice_db
+    volumes:
+      - ${DATA_DIR}/geoservice-postgres:/var/lib/postgresql/data
+    networks:
+      - homemediahub
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geoservice -d geoservice_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── GeoService (.NET 10 — reverse geocoding cache) ────────────────────────
+  geoservice:
+    build:
+      context: src/GeoService
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__GeoDb: "Host=geoservice-postgres;Port=5432;Database=geoservice_db;Username=geoservice;Password=${GEOSERVICE_DB_PASSWORD}"
+      ASPNETCORE_URLS: http://+:8001
+      ASPNETCORE_ENVIRONMENT: Production
+    networks:
+      - homemediahub
+    depends_on:
+      geoservice-postgres:
+        condition: service_healthy
+
   # ── Python AI sidecar (YOLOv8n + CLIP — baked in at build) ───────────────
   ai-sidecar:
     build:

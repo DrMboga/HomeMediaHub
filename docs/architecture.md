@@ -34,7 +34,7 @@
                  │  │  Workflow 3: Photo of the Day     (daily cron → Telegram)     │   │
                  │  │  Workflow 4: Error Handler        (global error trigger)      │   │
                  │  └───────┬───────────────────────────────────────────────────────┘  │
-                 │          │ HTTP calls to tools endpoints & AI sidecar               │
+                 │          │ HTTP calls to tools endpoints, AI sidecar & geoservice   │
                  │  ┌───────▼──────────────────────────────────────────────────────┐   │
                  │  │  .NET API  :8080                                              │   │
                  │  │   • REST endpoints for the React frontend                    │   │
@@ -51,6 +51,11 @@
                  │  │  + pgvector           │  │   POST /process  → tags + embedding │ │
                  │  └──────────────────────┘  │   POST /embed/text → query vector   │ │
                  │                            └─────────────────────────────────────┘ │
+                 │  ┌──────────────────────┐  ┌──────────────────────────────────────┐ │
+                 │  │  GeoService  :8001   │  │  GeoService PostgreSQL  :5434        │ │
+                 │  │  (.NET 10 — reverse  │  │  geoservice_db (address cache,       │ │
+                 │  │   geocoding cache)   │  │  keyed by rounded lat/lon)           │ │
+                 │  └──────────────────────┘  └──────────────────────────────────────┘ │
                  │  ┌──────────────────────┐  ┌──────────────────────────────────────┐ │
                  │  │  Immich PostgreSQL   │  │  Redis  :6379  (Immich only)         │ │
                  │  │  :5433               │  └──────────────────────────────────────┘ │
@@ -94,7 +99,7 @@
 ### n8n
 - **Image:** custom build — `FROM n8nio/n8n:latest` + `RUN apk add --no-cache ffmpeg libheif-tools`
 - **Port:** 5678
-- **Responsibility:** All multi-step processing logic. See Workflow definitions in Section 4. Replaces all background workers. Calls .NET tool endpoints, AI sidecar, Nominatim, and Telegram Bot API. Runs `heif-convert` and `ffprobe`/`ffmpeg` via Execute Command nodes for format conversion.
+- **Responsibility:** All multi-step processing logic. See Workflow definitions in Section 4. Replaces all background workers. Calls .NET tool endpoints, AI sidecar, geoservice, and Telegram Bot API. Runs `heif-convert` and `ffprobe`/`ffmpeg` via Execute Command nodes for format conversion.
 - **Internal database:** Uses `n8n_db` on the shared custom Postgres instance (separate database from `homemediahub_db`). Configured via `DB_TYPE=postgresdb`. Execution history, workflow definitions, and credentials stored there — included automatically in `pg_dump` backups.
 - **No Immich webhook.** Immich writes files to disk; the Library Scanner workflow (Workflow 2) is the only ingest entry point, run manually or on a monthly cron.
 
@@ -119,6 +124,31 @@
   - `POST /embed/text { text }` → `{ embedding: [512 floats] }` (for search queries)
   - `POST /classify-origin { filePath }` → `{ originClass, confidence }` — CLIP zero-shot classification of whether a file is a real photo, document, meme, screenshot, or artwork. Used to populate `origin_class` / `origin_confidence` on `media_files`.
 - **Models:** YOLOv8n (object detection, 6 MB) + CLIP ViT-B/32 (semantic embeddings and origin classification, 151 MB). Both baked into the image.
+
+### geoservice
+- **Image:** custom `.NET 10` build
+- **Port:** 8001 (internal only)
+- **Responsibility:** Reverse geocoding cache. Single endpoint: `GET /reverse?lat={lat}&lon={lon}` → `{ "address": "..." }`.
+  - Rounds coordinates to 4 decimal places (~11 m precision) and looks up the result in `geoservice_db`.
+  - On a cache miss, calls `nominatim.openstreetmap.org/reverse` with a proper `User-Agent`, persists the result, and returns it.
+  - Enforces Nominatim's 1 req/sec policy internally via a semaphore + 1 s delay.
+  - Designed as a standalone microservice — no dependency on any other HomeMediaHub service or database. Reusable in other projects.
+- **What it does NOT do:** no EXIF parsing, no media storage, no authentication.
+
+### geoservice-postgres
+- **Image:** `postgres:16`
+- **Port:** 5434 (internal)
+- **Responsibility:** Geoservice's private database (`geoservice_db`). Single table:
+  ```sql
+  CREATE TABLE geo_cache (
+      lat        FLOAT8 NOT NULL,
+      lon        FLOAT8 NOT NULL,
+      address    TEXT NOT NULL,
+      cached_at  TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (lat, lon)
+  );
+  ```
+  Not accessed by any other service.
 
 ### postgres (custom)
 - **Image:** `pgvector/pgvector:pg16`
@@ -159,6 +189,7 @@ Two isolated environments share the same `docker-compose.yml`. Path-sensitive va
 | `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/usb-hdd/video-cache` |
 | `WORK_DIR` | `/tmp/homemediahub-stage` | `/tmp/homemediahub-prod` |
 | `DATA_DIR` | `/opt/homemediahub/stage/data` | `/opt/homemediahub/data` |
+| `GEOSERVICE_DB_PASSWORD` | (set in .env.stage) | (set in .env.prod) |
 
 `COMPOSE_PROJECT_NAME` gives each environment distinct container names so a mistaken `docker compose up` cannot silently overwrite the other environment's state.
 
@@ -246,7 +277,7 @@ All originals live under a single directory tree. No duplication.
   │   └─[Execute Command] rm "/shared-temp/{{ uuid }}.jpg"  ← cleanup
   │
   ├─[IF] lat and lon present?
-  │   └─[HTTP Request] GET nominatim.openstreetmap.org/reverse?lat=&lon=&format=json
+  │   └─[HTTP Request] GET geoservice:8001/reverse?lat=&lon=
   │       → { address: "..." }
   │
   ├─[Postgres] INSERT INTO media_files (file_path, file_hash, source, mime_type,
@@ -282,7 +313,7 @@ All originals live under a single directory tree. No duplication.
 
 **Node-level error settings:**
 - HEIC convert, ffprobe, ffmpeg, metadata, thumbnail: **Stop on fail** — these are blocking; a corrupt file must not silently produce a partial record.
-- Geocoding (Nominatim): **Continue on fail** — address is enrichment, not required. HTTP Request node configured with 2 retries, 5 s timeout.
+- Geocoding (geoservice): **Continue on fail** — address is enrichment, not required. HTTP Request node configured with 2 retries, 5 s timeout.
 - AI sidecar: **Continue on fail** — photo is still stored without tags/embedding; can be re-processed later.
 
 **Shared temp volume:** n8n and api both mount `/shared-temp` → host path `/tmp/homemediahub-work`. Files created by `heif-convert` or `ffmpeg` in n8n are readable by the .NET API container at the same path. Files are deleted by n8n after use.
@@ -645,6 +676,7 @@ Origin classification (runs after /process in Workflow 1):
 | nginx | `/thumbs` | `/mnt/usb-hdd/thumbnails` | ro |
 | postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/postgres` | rw |
 | immich-postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/immich-postgres` | rw |
+| geoservice-postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/geoservice-postgres` | rw |
 | n8n | `/home/node/.n8n` | `/opt/homemediahub/data/n8n` | rw |
 
 **Samba (native Ubuntu):**
@@ -692,7 +724,7 @@ Users in the `mediahub` group get read-write access. macOS connects via Finder �
 | ffprobe / ffmpeg | Corrupt video, unsupported codec | Stop on fail | Job marked failed; original untouched |
 | .NET metadata extraction | File unreadable, EXIF parse error | Stop on fail | Job marked failed |
 | .NET thumbnail generation | ImageSharp error, disk full | Stop on fail | Job marked failed |
-| Geocoding (Nominatim) | Rate limit (1 req/sec), timeout, no result | Continue on fail | Photo stored without address; can be re-geocoded later |
+| Geocoding (geoservice) | geoservice down, timeout, Nominatim unavailable | Continue on fail | Photo stored without address; can be re-geocoded later |
 | AI sidecar (YOLOv8 + CLIP) | OOM, model error, timeout | Continue on fail | Photo stored without tags/embedding; re-processable via Archive Scanner |
 | Postgres INSERT | Constraint violation, connection lost | Stop on fail | Job marked failed; no partial record written |
 

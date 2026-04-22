@@ -29,6 +29,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 | Frontend | React + TypeScript |
 | Database | PostgreSQL 16 + pgvector |
 | AI | Python 3.11 — YOLOv8n (object detection) + CLIP ViT-B/32 (semantic embeddings) |
+| Geocoding | .NET 10 — standalone geoservice microservice (Nominatim cache) |
 | Media processing | ffmpeg, libheif, SixLabors.ImageSharp |
 | Reverse proxy | NGINX |
 | Notifications | Telegram Bot API (called from n8n) |
@@ -44,9 +45,11 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 | frontend | 3000 | Internal only |
 | n8n | 5678 | Admin only — restricted by nginx IP filter |
 | ai-sidecar | 8000 | Internal only |
+| geoservice | 8001 | Internal only — reverse geocoding cache |
 | postgres | 5432 | Internal only — hosts both `homemediahub_db` and `n8n_db` |
 | immich-server | 2283 | iPhone app connects here |
 | immich-postgres | 5433 | Internal only |
+| geoservice-postgres | 5434 | Internal only — hosts `geoservice_db` |
 | redis | 6379 | Internal only — Immich only |
 
 ## Databases
@@ -56,6 +59,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 | `homemediahub_db` | postgres:5432 | Application data — media, tags, embeddings, users |
 | `n8n_db` | postgres:5432 | n8n internal — workflow definitions, execution history, credentials |
 | Immich DB | immich-postgres:5433 | Immich internal — not accessed by custom services |
+| `geoservice_db` | geoservice-postgres:5434 | Geoservice cache — reverse geocoding results keyed by rounded lat/lon |
 
 ## Environments
 
@@ -78,9 +82,10 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 ├── thumbnails/           ← generated, recreatable
 ├── video-cache/          ← H.264 transcodes, recreatable
 └── data/
-    ├── postgres/         ← stage Postgres data volume
-    ├── immich-postgres/  ← stage Immich Postgres data volume
-    └── n8n/              ← stage n8n data volume
+    ├── postgres/           ← stage Postgres data volume
+    ├── immich-postgres/    ← stage Immich Postgres data volume
+    ├── geoservice-postgres/ ← stage GeoService Postgres data volume
+    └── n8n/                ← stage n8n data volume
 
 /tmp/homemediahub-stage/  ← shared temp (stage)
 ```
@@ -95,9 +100,10 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 └── video-cache/         ← H.264 MP4 transcodes of iPhone HEVC videos, recreatable
 
 /opt/homemediahub/data/
-├── postgres/            ← prod Postgres data volume
-├── immich-postgres/     ← prod Immich Postgres data volume
-└── n8n/                 ← prod n8n data volume
+├── postgres/              ← prod Postgres data volume
+├── immich-postgres/       ← prod Immich Postgres data volume
+├── geoservice-postgres/   ← prod GeoService Postgres data volume
+└── n8n/                   ← prod n8n data volume
 
 /tmp/homemediahub-prod/  ← shared temp (prod)
 ```
@@ -144,6 +150,7 @@ docker compose --env-file .env.stage down
 docker compose --env-file .env.stage build api
 docker compose --env-file .env.stage build ai-sidecar
 docker compose --env-file .env.stage build n8n
+docker compose --env-file .env.stage build geoservice
 
 # Run a one-off Postgres command (stage example)
 docker compose --env-file .env.stage exec postgres psql -U postgres -d homemediahub_db
@@ -161,7 +168,8 @@ ASP.NET Core Identity. Two users: Mike and his wife. No roles — both users sha
 - **Thumbnails on filesystem.** nginx serves thumbnails directly via `X-Accel-Redirect` — no Postgres or .NET involved per thumbnail request.
 - **Video on-demand transcoding.** iPhone HEVC videos are transcoded to H.264 MP4 on first play request by the .NET API. Cached in `/mnt/usb-hdd/video-cache/`. Original is never modified.
 - **Single storage tree.** All originals (archive + new iPhone uploads) live under `/mnt/usb-hdd/Photo/`. No duplication. Immich's storage template writes new uploads to `Photo/iPhone/{y}/{y-MM-dd}/`.
-- **Separate Postgres instances.** Immich gets its own Postgres (port 5433). The custom stack uses a separate container (port 5432) with two databases: `homemediahub_db` and `n8n_db`.
+- **Separate Postgres instances.** Immich gets its own Postgres (port 5433). The custom stack uses a separate container (port 5432) with two databases: `homemediahub_db` and `n8n_db`. GeoService gets its own Postgres (port 5434) so it is fully self-contained and portable to other projects.
+- **GeoService is a standalone microservice.** Reverse geocoding is extracted into its own .NET 10 service (`geoservice:8001`) with its own database. n8n calls `GET geoservice:8001/reverse?lat=&lon=` instead of Nominatim directly. The service looks up coordinates (rounded to 4 decimal places, ~11 m precision) in its local cache first; only on a cache miss does it call Nominatim, then persists the result. Nominatim's 1 req/sec policy is enforced inside the service.
 - **Samba native, not containerised.** Running Samba in a container requires `--privileged` and `--network host`, eliminating isolation benefits.
 - **All AI runs locally.** No cloud ML APIs. YOLOv8n for object detection, CLIP ViT-B/32 for semantic embeddings and natural-language search. Face recognition is explicitly out of scope.
 

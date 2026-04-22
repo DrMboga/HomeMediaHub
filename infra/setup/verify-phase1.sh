@@ -71,7 +71,7 @@ fi
 # ── 4. Containers running ──────────────────────────────────────────────────
 echo ""
 echo "[4] Container status"
-expected_services="postgres immich-postgres redis immich-server n8n api ai-sidecar frontend nginx"
+expected_services="postgres immich-postgres geoservice-postgres redis immich-server n8n api ai-sidecar geoservice frontend nginx"
 ps_output=$(compose ps --format "table {{.Service}}\t{{.Status}}" 2>/dev/null)
 
 for svc in $expected_services; do
@@ -135,6 +135,13 @@ if echo "$ai_resp" | grep -q '"status"'; then
     pass "AI sidecar /health → $ai_resp"
 else
     fail "AI sidecar not responding on :8000" "$ai_resp"
+fi
+
+geo_resp=$(ssh_run "curl -sf http://localhost:8001/health")
+if echo "$geo_resp" | grep -q '"status"'; then
+    pass "GeoService /health → $geo_resp"
+else
+    fail "GeoService not responding on :8001" "$geo_resp"
 fi
 
 nginx_resp=$(ssh_run "curl -sf -o /dev/null -w '%{http_code}' http://localhost:80/")
