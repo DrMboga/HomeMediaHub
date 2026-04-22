@@ -39,7 +39,7 @@ sudo apt-get install -y samba
 echo "==> [4/6] Create host directories"
 
 # App directory
-sudo mkdir -p /opt/homemediahub/app
+# sudo mkdir -p /opt/homemediahub/app
 
 # ── Stage (SSD — no USB HDD required) ──────────────────────────────────────
 sudo mkdir -p /opt/homemediahub/stage/TestPhoto/iPhone
@@ -56,44 +56,47 @@ sudo mkdir -p /tmp/homemediahub-stage
 sudo mkdir -p /opt/homemediahub/data/postgres
 sudo mkdir -p /opt/homemediahub/data/immich-postgres
 sudo mkdir -p /opt/homemediahub/data/n8n
-sudo mkdir -p /mnt/usb-hdd/Photo/iPhone
-sudo mkdir -p /mnt/usb-hdd/thumbnails
-sudo mkdir -p /mnt/usb-hdd/video-cache
+# TODO: 1 Make this when HDD mounted
+# sudo mkdir -p /mnt/usb-hdd/Photo/iPhone
+# sudo mkdir -p /mnt/usb-hdd/thumbnails
+# sudo mkdir -p /mnt/usb-hdd/video-cache
 sudo mkdir -p /tmp/homemediahub-prod
 
 # Fix ownership so docker containers (running as non-root) can write
 sudo chown -R "$USER":"$USER" /opt/homemediahub
-sudo chown -R "$USER":"$USER" /mnt/usb-hdd
+# TODO: 2 Make this when HDD mounted
+# sudo chown -R "$USER":"$USER" /mnt/usb-hdd
 sudo chown -R "$USER":"$USER" /tmp/homemediahub-stage
 sudo chown -R "$USER":"$USER" /tmp/homemediahub-prod
 
-echo "==> [5/6] Configure Samba share"
-# Create mediahub group and add current user
-sudo groupadd -f mediahub
-sudo usermod -aG mediahub "$USER"
+# TODO: 3 Make this when HDD mounted
+# echo "==> [5/6] Configure Samba share"
+# # Create mediahub group and add current user
+# sudo groupadd -f mediahub
+# sudo usermod -aG mediahub "$USER"
 
-# Back up original smb.conf then append our share
-sudo cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
+# # Back up original smb.conf then append our share
+# sudo cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
 
-sudo tee -a /etc/samba/smb.conf > /dev/null <<'SAMBA'
+# sudo tee -a /etc/samba/smb.conf > /dev/null <<'SAMBA'
 
-[Photo]
-   path = /mnt/usb-hdd/Photo
-   browseable = yes
-   read only = no
-   guest ok = no
-   valid users = @mediahub
-   create mask = 0664
-   directory mask = 0775
-SAMBA
+# [Photo]
+#    path = /mnt/usb-hdd/Photo
+#    browseable = yes
+#    read only = no
+#    guest ok = no
+#    valid users = @mediahub
+#    create mask = 0664
+#    directory mask = 0775
+# SAMBA
 
-# Set a Samba password for the current user
-echo ""
-echo "    Set a Samba password for user '$USER' (used from Windows/macOS):"
-sudo smbpasswd -a "$USER"
+# # Set a Samba password for the current user
+# echo ""
+# echo "    Set a Samba password for user '$USER' (used from Windows/macOS):"
+# sudo smbpasswd -a "$USER"
 
-sudo systemctl enable smbd
-sudo systemctl restart smbd
+# sudo systemctl enable smbd
+# sudo systemctl restart smbd
 
 echo "==> [6/6] Make postgres init script executable"
 chmod +x /opt/homemediahub/app/infra/postgres/init/01-init.sh

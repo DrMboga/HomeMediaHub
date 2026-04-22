@@ -4,6 +4,10 @@ Run these steps once on a fresh OS over SSH.
 
 ---
 
+```bash
+sudo mkdir -p /opt/homemediahub/app
+```
+
 ## 1. Copy project files to the server
 
 Run this on your **Windows machine**:
@@ -91,7 +95,7 @@ On your **Windows machine**, create a `TestPhoto` folder with a small sample:
 
 Then copy it to the server:
 ```powershell
-scp -r "C:\Users\Mike\TestPhoto" mike@<server-ip>:/opt/homemediahub/stage/TestPhoto
+scp -r "C:\Users\Mike\TestPhoto" mike@192.168.0.192:/opt/homemediahub/stage/TestPhoto
 ```
 
 Also create the `iPhone` subfolder that Immich expects:
