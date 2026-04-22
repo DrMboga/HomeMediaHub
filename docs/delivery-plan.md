@@ -18,9 +18,17 @@ scp -r "C:\Users\Mike\TestPhoto" mike@<server-ip>:/opt/homemediahub/stage/TestPh
 
 ---
 
-## Phase 1 — Infrastructure Skeleton
+## Phase 1 — Infrastructure Skeleton ✅ COMPLETE (2026-04-22)
 
 **Goal:** Docker Compose stack boots; all containers start and can reach each other.
+
+### Notes from implementation
+
+- `immich-postgres` image changed from `postgres:16` to `pgvector/pgvector:pg16` — Immich v2.7.5 requires the vector extension.
+- `Dockerfile.n8n` changed from `FROM n8nio/n8n:latest` + `apk add` to `FROM node:20-alpine` + `npm install -g n8n` — the current n8n:latest image ships without a package manager.
+- Added loopback port bindings (`127.0.0.1:8080`, `127.0.0.1:8000`, `127.0.0.1:8001`) for api, ai-sidecar, and geoservice so health endpoints are reachable from the server via SSH.
+- Added `N8N_SECURE_COOKIE=false` to n8n env — required for HTTP access on a LAN without TLS.
+- nginx n8n `proxy_pass` uses trailing slash (`http://n8n/`) to strip the `/n8n/` prefix before forwarding, which is required for n8n's Vite asset paths to resolve correctly.
 
 ### Deliverables
 
@@ -90,7 +98,7 @@ curl -s -X POST http://localhost:8080/api/tools/hash \
 
 ### Deliverables
 
-- Custom n8n image (`Dockerfile.n8n`): `FROM n8nio/n8n:latest` + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
+- Custom n8n image (`Dockerfile.n8n`): `FROM node:20-alpine` + `npm install -g n8n` + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
 - n8n configured to use `n8n_db` (`DB_TYPE=postgresdb`)
 - **Workflow 1 — Process Single File** (JSON export committed to `n8n/workflows/`)
   - All branches: HEIC, VIDEO (ffprobe + frame extract), JPEG/PNG pass-through

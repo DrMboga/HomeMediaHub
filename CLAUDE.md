@@ -2,6 +2,10 @@
 
 Self-hosted home photo and video library. Replaces manual iPhone → MacBook → USB drive workflow with automated ingestion, AI tagging, and semantic search. Runs on a single Dell Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack.
 
+## Current Status
+
+**Phase 1 complete** (2026-04-22). The full Docker Compose stack is deployed and running on the server under the **stage** environment. All containers are healthy, n8n is accessible at `http://192.168.0.192/n8n/`, and the stub health endpoints respond on their loopback ports. Next: Phase 2 — .NET tool endpoints.
+
 ## Server Access
 
 | | |

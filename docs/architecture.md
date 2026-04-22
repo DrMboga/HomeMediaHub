@@ -87,7 +87,7 @@
 - **Boundaries:** Owns its own Postgres and Redis. Not accessed by any custom service directly.
 
 ### immich-postgres
-- **Image:** `postgres:16`
+- **Image:** `pgvector/pgvector:pg16`
 - **Port:** 5433 (internal)
 - **Responsibility:** Immich's private database. Not accessed by custom services.
 
@@ -97,7 +97,7 @@
 - **Responsibility:** Immich's job queue. Not shared.
 
 ### n8n
-- **Image:** custom build — `FROM n8nio/n8n:latest` (Alpine Linux) + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
+- **Image:** custom build — `FROM node:20-alpine` + `npm install -g n8n` + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
 - **Port:** 5678
 - **Responsibility:** All multi-step processing logic. See Workflow definitions in Section 4. Replaces all background workers. Calls .NET tool endpoints, AI sidecar, geoservice, and Telegram Bot API. Runs `heif-convert` and `ffprobe`/`ffmpeg` via Execute Command nodes for format conversion.
 - **Internal database:** Uses `n8n_db` on the shared custom Postgres instance (separate database from `homemediahub_db`). Configured via `DB_TYPE=postgresdb`. Execution history, workflow definitions, and credentials stored there — included automatically in `pg_dump` backups.

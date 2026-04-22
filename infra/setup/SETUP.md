@@ -6,6 +6,7 @@ Run these steps once on a fresh OS over SSH.
 
 ```bash
 sudo mkdir -p /opt/homemediahub/app
+sudo chown -R mike:mike /opt/homemediahub
 ```
 
 ## 1. Copy project files to the server
@@ -20,6 +21,12 @@ scp -r C:\Users\Mike\Projects\HomeMediaHub mike@192.168.0.192:/opt/homemediahub/
 Or use `rsync` if available:
 ```bash
 rsync -av /mnt/c/Users/Mike/Projects/HomeMediaHub/ mike@192.168.0.192:/opt/homemediahub/app/
+```
+
+```bash
+  mv /opt/homemediahub/app/HomeMediaHub/* /opt/homemediahub/app/
+  mv /opt/homemediahub/app/HomeMediaHub/.* /opt/homemediahub/app/ 2>/dev/null
+  rmdir /opt/homemediahub/app/HomeMediaHub
 ```
 
 ---
@@ -95,7 +102,7 @@ On your **Windows machine**, create a `TestPhoto` folder with a small sample:
 
 Then copy it to the server:
 ```powershell
-scp -r "C:\Users\Mike\TestPhoto" mike@192.168.0.192:/opt/homemediahub/stage/TestPhoto
+scp -r "C:\Users\Mike\Projects\TestPhoto" mike@192.168.0.192:/opt/homemediahub/stage
 ```
 
 Also create the `iPhone` subfolder that Immich expects:
@@ -108,6 +115,8 @@ mkdir -p /opt/homemediahub/stage/TestPhoto/iPhone
 ## 6. Build images and start the stack (stage)
 
 ```bash
+chmod -R 755 /opt/homemediahub/app/infra/postgres/init 
+
 cd /opt/homemediahub/app
 
 # Build custom images (n8n with ffmpeg, .NET API stub, Python AI sidecar stub)

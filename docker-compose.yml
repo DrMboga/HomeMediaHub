@@ -23,7 +23,7 @@ services:
 
   # ── Immich PostgreSQL (isolated — not accessed by custom services) ──────────
   immich-postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${IMMICH_DB_USER}
@@ -93,6 +93,7 @@ services:
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
       EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: true
+      N8N_SECURE_COOKIE: "false"
     volumes:
       - ${DATA_DIR}/n8n:/home/node/.n8n
       - ${PHOTO_DIR}:/photo:ro
@@ -118,6 +119,8 @@ services:
       - ${THUMBNAILS_DIR}:/thumbnails
       - ${VIDEO_CACHE_DIR}:/video-cache
       - ${WORK_DIR}:/shared-temp
+    ports:
+      - "127.0.0.1:8080:8080"
     networks:
       - homemediahub
     depends_on:
@@ -154,6 +157,8 @@ services:
       ConnectionStrings__GeoDb: "Host=geoservice-postgres;Port=5432;Database=geoservice_db;Username=geoservice;Password=${GEOSERVICE_DB_PASSWORD}"
       ASPNETCORE_URLS: http://+:8001
       ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "127.0.0.1:8001:8001"
     networks:
       - homemediahub
     depends_on:
@@ -168,6 +173,8 @@ services:
     restart: unless-stopped
     volumes:
       - ${PHOTO_DIR}:/photo:ro
+    ports:
+      - "127.0.0.1:8000:8000"
     networks:
       - homemediahub
 
