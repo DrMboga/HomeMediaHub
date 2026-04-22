@@ -97,7 +97,7 @@
 - **Responsibility:** Immich's job queue. Not shared.
 
 ### n8n
-- **Image:** custom build — `FROM n8nio/n8n:latest` + `RUN apk add --no-cache ffmpeg libheif-tools`
+- **Image:** custom build — `FROM n8nio/n8n:latest` (Alpine Linux) + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
 - **Port:** 5678
 - **Responsibility:** All multi-step processing logic. See Workflow definitions in Section 4. Replaces all background workers. Calls .NET tool endpoints, AI sidecar, geoservice, and Telegram Bot API. Runs `heif-convert` and `ffprobe`/`ffmpeg` via Execute Command nodes for format conversion.
 - **Internal database:** Uses `n8n_db` on the shared custom Postgres instance (separate database from `homemediahub_db`). Configured via `DB_TYPE=postgresdb`. Execution history, workflow definitions, and credentials stored there — included automatically in `pg_dump` backups.
@@ -246,7 +246,12 @@ All originals live under a single directory tree. No duplication.
   │
   ├─── BRANCH: HEIC ──────────────────────────────────────────────────────────
   │  [IF] ext == "heic" or "heif"
-  │   ├─[Execute Command] heif-convert "{{ filePath }}" "/shared-temp/{{ uuid }}.jpg"
+  │   ├─[Execute Command]
+  │   │   heif-convert -q 90 "{{ filePath }}" "/shared-temp/{{ uuid }}.jpg"
+  │   │   && exiftool -overwrite_original -TagsFromFile "{{ filePath }}"
+  │   │      -EXIF:All -GPS:All -XMP:All "/shared-temp/{{ uuid }}.jpg"
+  │   │   (two steps: pixel conversion then metadata copy — heif-convert does not
+  │   │    preserve EXIF/GPS on its own; exiftool copies all tags from the original)
   │   └─[Set] workPath = "/shared-temp/{{ uuid }}.jpg"  ← temp JPEG for .NET calls
   │
   ├─── BRANCH: VIDEO ─────────────────────────────────────────────────────────

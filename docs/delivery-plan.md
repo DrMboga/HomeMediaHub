@@ -90,7 +90,7 @@ curl -s -X POST http://localhost:8080/api/tools/hash \
 
 ### Deliverables
 
-- Custom n8n image (`Dockerfile.n8n`): `FROM n8nio/n8n:latest` + `apk add ffmpeg libheif-tools`
+- Custom n8n image (`Dockerfile.n8n`): `FROM n8nio/n8n:latest` + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
 - n8n configured to use `n8n_db` (`DB_TYPE=postgresdb`)
 - **Workflow 1 — Process Single File** (JSON export committed to `n8n/workflows/`)
   - All branches: HEIC, VIDEO (ffprobe + frame extract), JPEG/PNG pass-through
@@ -101,6 +101,7 @@ curl -s -X POST http://localhost:8080/api/tools/hash \
   - Calls `GET /api/tools/scan`, splits into batches of 10, calls W1 per file
   - Trigger: Manual button + monthly cron `0 2 1 * *`
 - n8n Nominatim geocoding: 1 req/sec rate limit enforced via Wait node (1 000 ms)
+- HEIC conversion is a two-command Execute Command node: `heif-convert -q 90` then `exiftool -TagsFromFile` to copy EXIF/GPS from the original — `heif-convert` alone does not preserve metadata
 
 ### Done when
 

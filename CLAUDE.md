@@ -30,7 +30,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 | Database | PostgreSQL 16 + pgvector |
 | AI | Python 3.11 — YOLOv8n (object detection) + CLIP ViT-B/32 (semantic embeddings) |
 | Geocoding | .NET 10 — standalone geoservice microservice (Nominatim cache) |
-| Media processing | ffmpeg, libheif, SixLabors.ImageSharp |
+| Media processing | ffmpeg, libheif + libde265 (HEIC/HEVC), ExifTool, SixLabors.ImageSharp |
 | Reverse proxy | NGINX |
 | Notifications | Telegram Bot API (called from n8n) |
 | File sharing | Samba (native Ubuntu, not containerized) |
@@ -164,7 +164,7 @@ ASP.NET Core Identity. Two users: Mike and his wife. No roles — both users sha
 
 - **n8n is the orchestrator.** The .NET API contains no background workers, no Quartz jobs, no multi-step logic. n8n owns all workflow execution.
 - **Tool endpoints pattern.** n8n calls small atomic .NET endpoints for operations it cannot perform natively: SHA-256 hashing, EXIF extraction, thumbnail generation, directory scanning.
-- **HEIC/video conversion in n8n.** `heif-convert` and `ffmpeg` run as Execute Command nodes in n8n (installed in the custom n8n image). Converted temp files go to `/tmp/homemediahub-work/` (shared with the api container).
+- **HEIC/video conversion in n8n.** HEIC conversion is a two-step Execute Command node: `heif-convert -q 90` converts pixels, then `exiftool -TagsFromFile` copies all EXIF/GPS/XMP metadata from the original — `heif-convert` alone strips metadata. `ffmpeg` handles video frame extraction. Both run as Execute Command nodes in n8n (installed in the custom n8n Alpine image via `apk add libheif-tools libde265 perl-image-exiftool ffmpeg`). Converted temp files go to `/tmp/homemediahub-work/` (shared with the api container).
 - **Thumbnails on filesystem.** nginx serves thumbnails directly via `X-Accel-Redirect` — no Postgres or .NET involved per thumbnail request.
 - **Video on-demand transcoding.** iPhone HEVC videos are transcoded to H.264 MP4 on first play request by the .NET API. Cached in `/mnt/usb-hdd/video-cache/`. Original is never modified.
 - **Single storage tree.** All originals (archive + new iPhone uploads) live under `/mnt/usb-hdd/Photo/`. No duplication. Immich's storage template writes new uploads to `Photo/iPhone/{y}/{y-MM-dd}/`.

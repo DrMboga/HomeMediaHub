@@ -1,4 +1,8 @@
 FROM n8nio/n8n:latest
 USER root
-RUN apk add --no-cache ffmpeg libheif-tools
+RUN apk add --no-cache \
+    ffmpeg \
+    libheif-tools \
+    libde265 \
+    perl-image-exiftool
 USER node

@@ -31,7 +31,7 @@ Self-hosted home photo and video library running on a single Dell Precision 3620
 | Frontend | React + TypeScript |
 | Database | PostgreSQL 16 + pgvector |
 | AI | Python 3.11 — YOLOv8n + CLIP ViT-B/32 |
-| Media processing | ffmpeg, libheif, SixLabors.ImageSharp |
+| Media processing | ffmpeg, libheif + libde265 (HEIC/HEVC), ExifTool, SixLabors.ImageSharp |
 | Reverse proxy | NGINX |
 | Notifications | Telegram Bot API |
 | File sharing | Samba (native Ubuntu) |
