@@ -15,7 +15,7 @@ public sealed class NominatimClient(HttpClient http, ILogger<NominatimClient> lo
         try
         {
             var response = await http.GetFromJsonAsync<NominatimResponse>(
-                $"reverse?lat={lat:F4}&lon={lon:F4}&format=jsonv2&addressdetails=0",
+                FormattableString.Invariant($"reverse?lat={lat:F4}&lon={lon:F4}&format=jsonv2&addressdetails=0"),
                 ct);
 
             logger.LogInformation("Nominatim {Lat},{Lon} → {Ms}ms hit={Hit}",
