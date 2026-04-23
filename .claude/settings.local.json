@@ -17,7 +17,9 @@
       "Bash(git commit *)",
       "Bash(dotnet nuget *)",
       "Bash(dotnet fsi -e ' *)",
-      "Bash(powershell -Command ' *)"
+      "Bash(powershell -Command ' *)",
+      "Bash(dotnet test *)",
+      "Bash(dotnet add *)"
     ]
   }
 }
