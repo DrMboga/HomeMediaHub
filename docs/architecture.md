@@ -600,7 +600,7 @@ CREATE INDEX ON processing_jobs (started_at DESC);
 | POST | `/api/auth/refresh` | Refresh token → new JWT |
 | POST | `/api/auth/logout` | Invalidate refresh token |
 
-**Auth model:** ASP.NET Core Identity, two fixed users (Mike, wife). No roles — both users share the full library with equal read-write access. JWT issued on login, 15-minute expiry, refresh token with 30-day sliding window.
+**Auth model:** ASP.NET Core Identity, two fixed users (Mike, Badger). No roles — both users share the full library with equal read-write access. JWT issued on login, 15-minute expiry, refresh token with 30-day sliding window.
 
 ### SignalR
 

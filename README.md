@@ -105,7 +105,7 @@ Models are baked into the `ai-sidecar` Docker image at build time.
 
 ## Authentication
 
-ASP.NET Core Identity with two users (Mike + wife). No roles — both share the full library with equal access. JWT (15-minute expiry) + refresh token (30-day sliding window).
+ASP.NET Core Identity with two users (Mike + Badger). No roles — both share the full library with equal access. JWT (15-minute expiry) + refresh token (30-day sliding window).
 
 ## Samba Share
 

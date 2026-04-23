@@ -112,6 +112,8 @@ services:
     restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Seed__MikePassword: ${MIKE_PASSWORD}
+      Seed__BadgerPassword: ${BADGER_PASSWORD}
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Production
     volumes:

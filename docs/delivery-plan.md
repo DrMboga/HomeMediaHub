@@ -63,15 +63,16 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 
 ---
 
-## Phase 2 — .NET Tool Endpoints
+## Phase 2 — .NET Tool Endpoints + GeoService ✅ COMPLETE (2026-04-23)
 
-**Goal:** n8n can call all four `.NET` tool endpoints; each returns correct output against real files.
+**Goal:** n8n can call all four `.NET` tool endpoints and the reverse-geocoding service; each returns correct output against real files.
 
 ### Deliverables
 
-- `.NET 10` Web API project (`src/Api/`)
+**API (`src/Api/`)**
+- `.NET 10` Web API project
 - ASP.NET Core Identity schema via EF Core migration (users table only — no auth wired yet)
-- Seed script: create Mike and wife accounts
+- Seed script: create Mike and Badger accounts
 - Four tool controllers:
   - `POST /api/tools/hash` — SHA-256 via `System.Security.Cryptography`
   - `POST /api/tools/metadata` — EXIF via `MetadataExtractor`; accepts JPEG only
@@ -80,14 +81,30 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 - Serilog structured JSON logging (file path, duration_ms, outcome per request)
 - Docker image build (`src/Api/Dockerfile`)
 
+**GeoService (`src/GeoService/`)**
+- `.NET 10` minimal API project — standalone microservice on port 8001
+- `GET /reverse?lat=&lon=` — rounds coordinates to 4 decimal places (~11 m), looks up in local cache first, calls Nominatim on miss, persists result; enforces Nominatim's 1 req/sec policy
+- `GET /health` — liveness check
+- EF Core with `geoservice_db` on its own Postgres container (port 5434)
+- Serilog structured JSON logging (cache hit/miss, Nominatim latency)
+- Docker image build (`src/GeoService/Dockerfile`)
+
 ### Done when
 
 ```bash
-# From outside the container:
+# API tool endpoint
 curl -s -X POST http://localhost:8080/api/tools/hash \
      -H 'Content-Type: application/json' \
      -d '{"filePath":"/photo/2005/img001.jpg"}' | jq .hash
 # Returns a SHA-256 hex string
+
+# GeoService — first call (cache miss → Nominatim)
+curl -s "http://localhost:8001/reverse?lat=48.8584&lon=2.2945" | jq .displayName
+# Returns a place name string
+
+# GeoService — second call (cache hit, no Nominatim request)
+curl -s "http://localhost:8001/reverse?lat=48.8584&lon=2.2945" | jq .cached
+# Returns true
 ```
 
 ---

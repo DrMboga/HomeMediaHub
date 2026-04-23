@@ -5,7 +5,15 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Skill(git-commit)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(dotnet --version)",
+      "Bash(dotnet tool *)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet ef *)",
+      "Bash(dotnet new *)",
+      "Bash(dotnet sln *)",
+      "Bash(awk 'BEGIN {FS=\"/\"} {for\\(i=1;i<NF;i++\\) printf \"  \"; print \"  \" $NF}')",
+      "Bash(dotnet restore *)"
     ]
   }
 }

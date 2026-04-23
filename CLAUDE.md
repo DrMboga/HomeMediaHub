@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 1 complete** (2026-04-22). The full Docker Compose stack is deployed and running on the server under the **stage** environment. All containers are healthy, n8n is accessible at `http://192.168.0.192/n8n/`, and the stub health endpoints respond on their loopback ports. Next: Phase 2 — .NET tool endpoints.
+**Phase 2 complete** (2026-04-23). Both .NET projects (`src/Api`, `src/GeoService`) are fully implemented and build clean. EF Core migrations generated for Identity schema (`identity` schema, snake_case) and `geo_cache` table. Docker Compose updated with `Seed__MikePassword` / `Seed__BadgerPassword` env vars. Next: rebuild Docker images on server, add `MIKE_PASSWORD` and `BADGER_PASSWORD` to `.env.stage`, then validate phase 2 endpoints.
 
 ## Server Access
 
@@ -162,7 +162,7 @@ docker compose --env-file .env.stage exec postgres psql -U postgres -d homemedia
 
 ## Authentication
 
-ASP.NET Core Identity. Two users: Mike and his wife. No roles — both users share the full library with equal access. JWT (15 min expiry) + refresh token (30-day sliding window).
+ASP.NET Core Identity. Two users: Mike and Badger. No roles — both users share the full library with equal access. JWT (15 min expiry) + refresh token (30-day sliding window).
 
 ## Design Decisions
 
