@@ -110,7 +110,7 @@
   1. **Frontend API** — REST endpoints and SignalR for the React frontend (browse, search, albums, auth)
   2. **Tool endpoints** — stateless atomic operations n8n calls:
      - `POST /api/tools/hash` — SHA-256 of a file
-     - `POST /api/tools/metadata` — EXIF extraction via MetadataExtractor; **always receives a JPEG** (n8n converts HEIC first; video metadata comes from ffprobe, not this endpoint)
+     - `POST /api/tools/metadata` — EXIF extraction via SixLabors.ImageSharp; **always receives a JPEG** (n8n converts HEIC first; video metadata comes from ffprobe, not this endpoint)
      - `POST /api/tools/thumbnail` — generate 400 px WebP thumbnail via ImageSharp; **always receives a JPEG**
      - `GET  /api/tools/scan` — list files under a path not yet in the DB
   3. **On-demand video transcoding** — `GET /api/media/{id}/stream` transcodes HEVC/H.265 (iPhone `.mov`) to H.264 MP4 via `ffmpeg` subprocess on first request. Cached to `/mnt/usb-hdd/video-cache/`. Subsequent requests stream the cached file. Original is never modified.

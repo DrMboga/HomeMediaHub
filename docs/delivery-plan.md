@@ -63,9 +63,16 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 
 ---
 
-## Phase 2 — .NET Tool Endpoints + GeoService ✅ COMPLETE (2026-04-23)
+## Phase 2 — .NET Tool Endpoints + GeoService ✅ VALIDATED (2026-04-24)
 
 **Goal:** n8n can call all four `.NET` tool endpoints and the reverse-geocoding service; each returns correct output against real files.
+
+### Notes from implementation
+
+- `MetadataExtractor` replaced with `SixLabors.ImageSharp` for EXIF extraction — ImageSharp is already a dependency for thumbnail generation, removing a redundant package.
+- `ImplicitUsings` and `Nullable` must be declared explicitly in each `.csproj` — the Docker build context (`src/Api`, `src/GeoService`) does not include the root `src/Directory.Build.props`, so MSBuild cannot walk up to find it inside the container.
+- Identity tables land in PascalCase (`AspNetUsers`, `AspNetRoles`, etc.) despite `UseSnakeCaseNamingConvention()` — ASP.NET Core Identity sets table names explicitly, and the naming convention plugin does not override explicit names. Functionally correct; `UserManager` uses the EF model names, not raw SQL. Fix in a future migration if consistency with snake_case application tables matters.
+- `docker compose down -v` only removes named Docker volumes, not bind mounts. The Postgres data directories (`/opt/homemediahub/stage/data/postgres`, etc.) are bind mounts and survive `down -v`. Wipe them manually when a clean slate is needed.
 
 ### Deliverables
 
@@ -73,9 +80,9 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 - `.NET 10` Web API project
 - ASP.NET Core Identity schema via EF Core migration (users table only — no auth wired yet)
 - Seed script: create Mike and Badger accounts
-- Four tool controllers:
+- Four tool endpoints:
   - `POST /api/tools/hash` — SHA-256 via `System.Security.Cryptography`
-  - `POST /api/tools/metadata` — EXIF via `MetadataExtractor`; accepts JPEG only
+  - `POST /api/tools/metadata` — EXIF via `SixLabors.ImageSharp`; accepts JPEG only
   - `POST /api/tools/thumbnail` — 400 px WebP via `SixLabors.ImageSharp`; writes to `/thumbnails/<id>.webp`
   - `GET  /api/tools/scan?path=` — walks directory, excludes paths already in `media_files`
 - Serilog structured JSON logging (file path, duration_ms, outcome per request)
@@ -89,23 +96,19 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 - Serilog structured JSON logging (cache hit/miss, Nominatim latency)
 - Docker image build (`src/GeoService/Dockerfile`)
 
-### Done when
+### Validation results (stage, 2026-04-24)
 
-```bash
-# API tool endpoint
-curl -s -X POST http://localhost:8080/api/tools/hash \
-     -H 'Content-Type: application/json' \
-     -d '{"filePath":"/photo/2005/img001.jpg"}' | jq .hash
-# Returns a SHA-256 hex string
-
-# GeoService — first call (cache miss → Nominatim)
-curl -s "http://localhost:8001/reverse?lat=48.8584&lon=2.2945" | jq .displayName
-# Returns a place name string
-
-# GeoService — second call (cache hit, no Nominatim request)
-curl -s "http://localhost:8001/reverse?lat=48.8584&lon=2.2945" | jq .cached
-# Returns true
-```
+| Check | Result |
+|---|---|
+| `GET /health` (api + geoservice) | ✅ `{"status":"ok","phase":2}` |
+| `GET /api/tools/scan?path=/photo` | ✅ returns file list |
+| `POST /api/tools/hash` | ✅ SHA-256 hex string |
+| `POST /api/tools/metadata` | ✅ EXIF, GPS, camera make/model |
+| `POST /api/tools/thumbnail` | ✅ WebP written to `/thumbnails/<id>.webp` |
+| `GET /reverse` — cache miss | ✅ `{"address":"...","cached":false}` |
+| `GET /reverse` — cache hit | ✅ `{"address":"...","cached":true}` |
+| Identity schema migrated | ✅ `identity` schema, 7 ASP.NET tables |
+| Users seeded | ✅ `mike` and `badger` in `identity."AspNetUsers"` |
 
 ---
 

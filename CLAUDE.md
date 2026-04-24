@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 2 complete** (2026-04-23). Both .NET projects (`src/Api`, `src/GeoService`) are fully implemented and build clean. EF Core migrations generated for Identity schema (`identity` schema, snake_case) and `geo_cache` table. Docker Compose updated with `Seed__MikePassword` / `Seed__BadgerPassword` env vars. Next: rebuild Docker images on server, add `MIKE_PASSWORD` and `BADGER_PASSWORD` to `.env.stage`, then validate phase 2 endpoints.
+**Phase 2 validated** (2026-04-24). Both services deployed and verified on stage. All tool endpoints confirmed working: scan, hash, metadata (EXIF + GPS), thumbnail (WebP). GeoService reverse geocoding confirmed with Nominatim cache miss + hit. Identity schema migrated, `mike` and `badger` users seeded. JWT auth endpoints are next (future phase — tool endpoints are intentionally open for n8n internal calls).
 
 ## Server Access
 
