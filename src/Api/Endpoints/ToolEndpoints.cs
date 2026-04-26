@@ -1,3 +1,4 @@
+using Api.Features.Tools.Dedup;
 using Api.Features.Tools.Hash;
 using Api.Features.Tools.Metadata;
 using Api.Features.Tools.Scan;
@@ -20,6 +21,13 @@ public static class ToolEndpoints
                 return Results.NotFound(new { error = $"Directory not found: {path}" });
             var result = await m.Send(new ScanDirectoryRequest(path), ct);
             return Results.Ok(result);
+        });
+
+        g.MapGet("/dedup", async (string hash, IMediator m, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(hash))
+                return Results.BadRequest(new { error = "hash is required" });
+            return Results.Ok(await m.Send(new DedupRequest(hash), ct));
         });
     }
 }

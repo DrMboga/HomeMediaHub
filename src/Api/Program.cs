@@ -60,10 +60,11 @@ try
     {
         var ok = await db.Database.CanConnectAsync(ct);
         return ok
-            ? Results.Ok(new { status = "ok", phase = 2 })
-            : Results.Json(new { status = "unhealthy", phase = 2 }, statusCode: 503);
+            ? Results.Ok(new { status = "ok", phase = 3 })
+            : Results.Json(new { status = "unhealthy", phase = 3 }, statusCode: 503);
     });
     app.MapToolEndpoints();
+    app.MapMediaEndpoints();
 
     app.Run();
 }
