@@ -1,0 +1,317 @@
+{
+  "name": "W1 - Process Single File",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-file",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [100, 300],
+      "webhookId": "process-file-w1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const { randomUUID } = require('crypto');\n\nconst filePath = $input.first().json.filePath;\nconst source = $input.first().json.source || 'library';\nconst mediaFileId = randomUUID();\nconst ext = filePath.split('.').pop().toLowerCase();\n\nconst isHeic = ['heic', 'heif'].includes(ext);\nconst isVideo = ['mp4', 'mov', 'm4v', 'avi'].includes(ext);\nconst fileType = isHeic ? 'heic' : isVideo ? 'video' : 'image';\nconst workFilePath = (isHeic || isVideo)\n  ? `/shared-temp/${mediaFileId}.jpg`\n  : filePath;\n\nconst esc = p => p.replace(/'/g, \"'\\\\'' \".trimEnd());\n\nlet convertCmd = '';\nif (isHeic) {\n  convertCmd = `heif-convert -q 90 '${esc(filePath)}' '${esc(workFilePath)}' && exiftool -TagsFromFile '${esc(filePath)}' '${esc(workFilePath)}' -overwrite_original`;\n} else if (isVideo) {\n  convertCmd = `ffmpeg -i '${esc(filePath)}' -ss 00:00:01 -vframes 1 -q:v 2 '${esc(workFilePath)}' -y`;\n}\n\nconst needsConversion = convertCmd !== '';\nconst cleanupCmd = needsConversion\n  ? `rm -f '${esc(workFilePath)}' 2>/dev/null || true`\n  : 'true';\n\nreturn [{\n  json: { mediaFileId, filePath, source, ext, fileType, workFilePath, needsConversion, convertCmd, cleanupCmd }\n}];"
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "name": "Code: Init",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/tools/hash",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filePath: $json.filePath }) }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "name": "HTTP: Hash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api:8080/api/tools/dedup?hash={{ $json.hash }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "name": "HTTP: Dedup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "dup-check",
+              "leftValue": "={{ $json.exists }}",
+              "operator": { "type": "boolean", "operation": "true", "name": "filter.operator.true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440005",
+      "name": "IF: Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {},
+      "id": "550e8400-e29b-41d4-a716-446655440006",
+      "name": "NoOp: Already processed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1400, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "conv-check",
+              "leftValue": "={{ $('Code: Init').item.json.needsConversion }}",
+              "operator": { "type": "boolean", "operation": "true", "name": "filter.operator.true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440007",
+      "name": "IF: Needs conversion?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "command": "={{ $('Code: Init').item.json.convertCmd }}"
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440008",
+      "name": "Cmd: Convert",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1660, 180]
+    },
+    {
+      "parameters": {},
+      "id": "550e8400-e29b-41d4-a716-446655440009",
+      "name": "NoOp: No conversion",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1660, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/tools/metadata",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath }) }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440010",
+      "name": "HTTP: Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/tools/thumbnail",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath, mediaFileId: $('Code: Init').item.json.mediaFileId }) }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440011",
+      "name": "HTTP: Thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2180, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "gps-check",
+              "leftValue": "={{ $('HTTP: Metadata').item.json.lat !== null && $('HTTP: Metadata').item.json.lat !== undefined }}",
+              "operator": { "type": "boolean", "operation": "true", "name": "filter.operator.true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440012",
+      "name": "IF: Has GPS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://geoservice:8001/reverse?lat={{ $('HTTP: Metadata').item.json.lat }}&lon={{ $('HTTP: Metadata').item.json.lon }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440013",
+      "name": "HTTP: Geocode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2700, 180]
+    },
+    {
+      "parameters": {},
+      "id": "550e8400-e29b-41d4-a716-446655440014",
+      "name": "NoOp: No GPS",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2700, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const init = $('Code: Init').item.json;\nconst hash = $('HTTP: Hash').item.json.hash;\nconst meta = $('HTTP: Metadata').item.json;\nconst thumb = $('HTTP: Thumbnail').item.json;\n\nlet address = null;\ntry { address = $('HTTP: Geocode').item.json.address; } catch (_) {}\n\nreturn [{\n  json: {\n    id: init.mediaFileId,\n    filePath: init.filePath,\n    fileHash: hash,\n    source: init.source,\n    immichAssetId: null,\n    mimeType: meta.mimeType,\n    fileSize: meta.fileSize,\n    width: meta.width,\n    height: meta.height,\n    durationSec: null,\n    takenAt: meta.takenAt || null,\n    lat: meta.lat !== undefined ? meta.lat : null,\n    lon: meta.lon !== undefined ? meta.lon : null,\n    address: address,\n    cameraMake: meta.cameraMake || null,\n    cameraModel: meta.cameraModel || null,\n    thumbnailPath: thumb.thumbnailPath,\n    tags: []\n  }\n}];"
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440015",
+      "name": "Code: Assemble",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8080/api/media",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440016",
+      "name": "HTTP: Save",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3220, 300]
+    },
+    {
+      "parameters": {
+        "command": "={{ $('Code: Init').item.json.cleanupCmd }}"
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440017",
+      "name": "Cmd: Cleanup",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [3480, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Code: Init", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Init": {
+      "main": [
+        [{ "node": "HTTP: Hash", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Hash": {
+      "main": [
+        [{ "node": "HTTP: Dedup", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Dedup": {
+      "main": [
+        [{ "node": "IF: Duplicate?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Duplicate?": {
+      "main": [
+        [{ "node": "NoOp: Already processed", "type": "main", "index": 0 }],
+        [{ "node": "IF: Needs conversion?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Needs conversion?": {
+      "main": [
+        [{ "node": "Cmd: Convert", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: No conversion", "type": "main", "index": 0 }]
+      ]
+    },
+    "Cmd: Convert": {
+      "main": [
+        [{ "node": "HTTP: Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "NoOp: No conversion": {
+      "main": [
+        [{ "node": "HTTP: Metadata", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Metadata": {
+      "main": [
+        [{ "node": "HTTP: Thumbnail", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Thumbnail": {
+      "main": [
+        [{ "node": "IF: Has GPS?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF: Has GPS?": {
+      "main": [
+        [{ "node": "HTTP: Geocode", "type": "main", "index": 0 }],
+        [{ "node": "NoOp: No GPS", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Geocode": {
+      "main": [
+        [{ "node": "Code: Assemble", "type": "main", "index": 0 }]
+      ]
+    },
+    "NoOp: No GPS": {
+      "main": [
+        [{ "node": "Code: Assemble", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code: Assemble": {
+      "main": [
+        [{ "node": "HTTP: Save", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: Save": {
+      "main": [
+        [{ "node": "Cmd: Cleanup", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "homemediahub"
+  }
+}
