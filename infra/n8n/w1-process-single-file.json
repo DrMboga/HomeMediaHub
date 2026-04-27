@@ -29,7 +29,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const filePath = $('Webhook').item.json.filePath;\nconst source = $('Webhook').item.json.source || 'library';\nconst mediaFileId = $('HTTP: New ID').item.json.id;\nconst ext = filePath.split('.').pop().toLowerCase();\n\nconst isHeic = ['heic', 'heif'].includes(ext);\nconst isVideo = ['mp4', 'mov', 'm4v', 'avi'].includes(ext);\nconst fileType = isHeic ? 'heic' : isVideo ? 'video' : 'image';\nconst workFilePath = (isHeic || isVideo)\n  ? `/shared-temp/${mediaFileId}.jpg`\n  : filePath;\n\nconst esc = p => p.replace(/'/g, \"'\\\\'' \".trimEnd());\n\nlet convertCmd = '';\nif (isHeic) {\n  convertCmd = `heif-convert -q 90 '${esc(filePath)}' '${esc(workFilePath)}' && exiftool -TagsFromFile '${esc(filePath)}' '${esc(workFilePath)}' -overwrite_original`;\n} else if (isVideo) {\n  convertCmd = `ffmpeg -i '${esc(filePath)}' -ss 00:00:01 -vframes 1 -q:v 2 '${esc(workFilePath)}' -y`;\n}\n\nconst needsConversion = convertCmd !== '';\nconst cleanupCmd = needsConversion\n  ? `rm -f '${esc(workFilePath)}' 2>/dev/null || true`\n  : 'true';\n\nreturn [{\n  json: { mediaFileId, filePath, source, ext, fileType, workFilePath, needsConversion, convertCmd, cleanupCmd }\n}];"
+        "jsCode": "const filePath = $('Webhook').item.json.body.filePath;\nconst source = $('Webhook').item.json.body.source || 'library';\nconst mediaFileId = $('HTTP: New ID').item.json.id;\nconst ext = filePath.split('.').pop().toLowerCase();\n\nconst isHeic = ['heic', 'heif'].includes(ext);\nconst isVideo = ['mp4', 'mov', 'm4v', 'avi'].includes(ext);\nconst fileType = isHeic ? 'heic' : isVideo ? 'video' : 'image';\nconst workFilePath = (isHeic || isVideo)\n  ? `/shared-temp/${mediaFileId}.jpg`\n  : filePath;\nconst needsConversion = isHeic || isVideo;\n\nreturn [{\n  json: { mediaFileId, filePath, source, ext, fileType, workFilePath, needsConversion }\n}];"
       },
       "id": "550e8400-e29b-41d4-a716-446655440002",
       "name": "Code: Init",
@@ -116,12 +116,17 @@
     },
     {
       "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst cmd = $('Code: Init').item.json.convertCmd;\nexecSync(cmd, { shell: '/bin/sh', encoding: 'utf8' });\nreturn $input.all();"
+        "method": "POST",
+        "url": "http://api:8080/api/tools/convert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sourceFilePath: $('Code: Init').item.json.filePath, destFilePath: $('Code: Init').item.json.workFilePath, fileType: $('Code: Init').item.json.fileType }) }}",
+        "options": {}
       },
       "id": "550e8400-e29b-41d4-a716-446655440008",
-      "name": "Cmd: Convert",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "HTTP: Convert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [1660, 180]
     },
     {
@@ -230,12 +235,17 @@
     },
     {
       "parameters": {
-        "jsCode": "const { execSync } = require('child_process');\nconst cmd = $('Code: Init').item.json.cleanupCmd;\ntry { execSync(cmd, { shell: '/bin/sh', encoding: 'utf8' }); } catch (_) {}\nreturn $input.all();"
+        "method": "POST",
+        "url": "http://api:8080/api/tools/cleanup",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath }) }}",
+        "options": {}
       },
       "id": "550e8400-e29b-41d4-a716-446655440017",
-      "name": "Cmd: Cleanup",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "HTTP: Cleanup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [3480, 300]
     }
   ],
@@ -273,11 +283,11 @@
     },
     "IF: Needs conversion?": {
       "main": [
-        [{ "node": "Cmd: Convert", "type": "main", "index": 0 }],
+        [{ "node": "HTTP: Convert", "type": "main", "index": 0 }],
         [{ "node": "NoOp: No conversion", "type": "main", "index": 0 }]
       ]
     },
-    "Cmd: Convert": {
+    "HTTP: Convert": {
       "main": [
         [{ "node": "HTTP: Metadata", "type": "main", "index": 0 }]
       ]
@@ -320,7 +330,7 @@
     },
     "HTTP: Save": {
       "main": [
-        [{ "node": "Cmd: Cleanup", "type": "main", "index": 0 }]
+        [{ "node": "HTTP: Cleanup", "type": "main", "index": 0 }]
       ]
     }
   },

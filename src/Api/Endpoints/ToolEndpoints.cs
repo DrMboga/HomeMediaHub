@@ -1,3 +1,4 @@
+using Api.Features.Tools.Convert;
 using Api.Features.Tools.Dedup;
 using Api.Features.Tools.Hash;
 using Api.Features.Tools.Metadata;
@@ -31,5 +32,18 @@ public static class ToolEndpoints
         });
 
         g.MapGet("/new-id", () => Results.Ok(new { id = Guid.NewGuid() }));
+
+        g.MapPost("/convert", (ConvertFileRequest req, IMediator m, CancellationToken ct) => m.Send(req, ct));
+
+        g.MapPost("/cleanup", (CleanupRequest req) =>
+        {
+            if (!req.FilePath.StartsWith("/shared-temp/"))
+                return Results.Ok(new { deleted = false });
+            if (File.Exists(req.FilePath))
+                File.Delete(req.FilePath);
+            return Results.Ok(new { deleted = true });
+        });
     }
 }
+
+public sealed record CleanupRequest(string FilePath);
