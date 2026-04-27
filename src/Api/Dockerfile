@@ -5,11 +5,13 @@ RUN dotnet restore
 COPY . .
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS final
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libheif-examples \
+    libheif-plugin-libde265 \
+    libheif-plugin-aomdec \
     libimage-exiftool-perl \
     && rm -rf /var/lib/apt/lists/*
 EXPOSE 8080
