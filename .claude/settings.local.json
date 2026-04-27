@@ -19,7 +19,10 @@
       "Bash(dotnet fsi -e ' *)",
       "Bash(powershell -Command ' *)",
       "Bash(dotnet test *)",
-      "Bash(dotnet add *)"
+      "Bash(dotnet add *)",
+      "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); const code = f.nodes.find\\(n=>n.name==='Code: Init'\\).parameters.jsCode; console.log\\(code\\);\")",
+      "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); const c = f.nodes.find\\(n=>n.name==='Code: Assemble'\\).parameters.jsCode; console.log\\(c\\);\")",
+      "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); console.log\\('Nodes:', f.nodes.length\\); console.log\\('Connections:', Object.keys\\(f.connections\\).length\\); Object.entries\\(f.connections\\).forEach\\(\\([k,v]\\) => { const targets = v.main.flat\\(\\).map\\(c => c.node\\); console.log\\(' ', k, '->', targets.join\\(', '\\)\\); }\\);\")"
     ]
   }
 }

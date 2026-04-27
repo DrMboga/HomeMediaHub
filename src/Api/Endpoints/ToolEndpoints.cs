@@ -29,5 +29,7 @@ public static class ToolEndpoints
                 return Results.BadRequest(new { error = "hash is required" });
             return Results.Ok(await m.Send(new DedupRequest(hash), ct));
         });
+
+        g.MapGet("/new-id", () => Results.Ok(new { id = Guid.NewGuid() }));
     }
 }

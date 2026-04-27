@@ -17,7 +17,19 @@
     },
     {
       "parameters": {
-        "jsCode": "const { randomUUID } = require('crypto');\n\nconst filePath = $input.first().json.filePath;\nconst source = $input.first().json.source || 'library';\nconst mediaFileId = randomUUID();\nconst ext = filePath.split('.').pop().toLowerCase();\n\nconst isHeic = ['heic', 'heif'].includes(ext);\nconst isVideo = ['mp4', 'mov', 'm4v', 'avi'].includes(ext);\nconst fileType = isHeic ? 'heic' : isVideo ? 'video' : 'image';\nconst workFilePath = (isHeic || isVideo)\n  ? `/shared-temp/${mediaFileId}.jpg`\n  : filePath;\n\nconst esc = p => p.replace(/'/g, \"'\\\\'' \".trimEnd());\n\nlet convertCmd = '';\nif (isHeic) {\n  convertCmd = `heif-convert -q 90 '${esc(filePath)}' '${esc(workFilePath)}' && exiftool -TagsFromFile '${esc(filePath)}' '${esc(workFilePath)}' -overwrite_original`;\n} else if (isVideo) {\n  convertCmd = `ffmpeg -i '${esc(filePath)}' -ss 00:00:01 -vframes 1 -q:v 2 '${esc(workFilePath)}' -y`;\n}\n\nconst needsConversion = convertCmd !== '';\nconst cleanupCmd = needsConversion\n  ? `rm -f '${esc(workFilePath)}' 2>/dev/null || true`\n  : 'true';\n\nreturn [{\n  json: { mediaFileId, filePath, source, ext, fileType, workFilePath, needsConversion, convertCmd, cleanupCmd }\n}];"
+        "method": "GET",
+        "url": "http://api:8080/api/tools/new-id",
+        "options": {}
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440018",
+      "name": "HTTP: New ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [230, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const filePath = $('Webhook').item.json.filePath;\nconst source = $('Webhook').item.json.source || 'library';\nconst mediaFileId = $('HTTP: New ID').item.json.id;\nconst ext = filePath.split('.').pop().toLowerCase();\n\nconst isHeic = ['heic', 'heif'].includes(ext);\nconst isVideo = ['mp4', 'mov', 'm4v', 'avi'].includes(ext);\nconst fileType = isHeic ? 'heic' : isVideo ? 'video' : 'image';\nconst workFilePath = (isHeic || isVideo)\n  ? `/shared-temp/${mediaFileId}.jpg`\n  : filePath;\n\nconst esc = p => p.replace(/'/g, \"'\\\\'' \".trimEnd());\n\nlet convertCmd = '';\nif (isHeic) {\n  convertCmd = `heif-convert -q 90 '${esc(filePath)}' '${esc(workFilePath)}' && exiftool -TagsFromFile '${esc(filePath)}' '${esc(workFilePath)}' -overwrite_original`;\n} else if (isVideo) {\n  convertCmd = `ffmpeg -i '${esc(filePath)}' -ss 00:00:01 -vframes 1 -q:v 2 '${esc(workFilePath)}' -y`;\n}\n\nconst needsConversion = convertCmd !== '';\nconst cleanupCmd = needsConversion\n  ? `rm -f '${esc(workFilePath)}' 2>/dev/null || true`\n  : 'true';\n\nreturn [{\n  json: { mediaFileId, filePath, source, ext, fileType, workFilePath, needsConversion, convertCmd, cleanupCmd }\n}];"
       },
       "id": "550e8400-e29b-41d4-a716-446655440002",
       "name": "Code: Init",
@@ -104,12 +116,12 @@
     },
     {
       "parameters": {
-        "command": "={{ $('Code: Init').item.json.convertCmd }}"
+        "jsCode": "const { execSync } = require('child_process');\nconst cmd = $('Code: Init').item.json.convertCmd;\nexecSync(cmd, { shell: '/bin/sh', encoding: 'utf8' });\nreturn $input.all();"
       },
       "id": "550e8400-e29b-41d4-a716-446655440008",
       "name": "Cmd: Convert",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [1660, 180]
     },
     {
@@ -218,17 +230,22 @@
     },
     {
       "parameters": {
-        "command": "={{ $('Code: Init').item.json.cleanupCmd }}"
+        "jsCode": "const { execSync } = require('child_process');\nconst cmd = $('Code: Init').item.json.cleanupCmd;\ntry { execSync(cmd, { shell: '/bin/sh', encoding: 'utf8' }); } catch (_) {}\nreturn $input.all();"
       },
       "id": "550e8400-e29b-41d4-a716-446655440017",
       "name": "Cmd: Cleanup",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [3480, 300]
     }
   ],
   "connections": {
     "Webhook": {
+      "main": [
+        [{ "node": "HTTP: New ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: New ID": {
       "main": [
         [{ "node": "Code: Init", "type": "main", "index": 0 }]
       ]
