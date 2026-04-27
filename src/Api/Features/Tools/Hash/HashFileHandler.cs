@@ -9,6 +9,6 @@ public sealed class HashFileHandler : IRequestHandler<HashFileRequest, HashFileR
     {
         await using var stream = File.OpenRead(request.FilePath);
         var bytes = await SHA256.HashDataAsync(stream, cancellationToken);
-        return new HashFileResponse(Convert.ToHexString(bytes).ToLowerInvariant());
+        return new HashFileResponse(System.Convert.ToHexString(bytes).ToLowerInvariant());
     }
 }
