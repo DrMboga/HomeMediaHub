@@ -11,11 +11,13 @@ public sealed class GenerateThumbnailHandler : IRequestHandler<GenerateThumbnail
     {
         var thumbnailPath = $"/thumbnails/{request.MediaFileId}.webp";
         using var image = await Image.LoadAsync(request.FilePath, cancellationToken);
-        image.Mutate(x => x.Resize(new ResizeOptions
-        {
-            Mode = ResizeMode.Max,
-            Size = new Size(400, 400)
-        }));
+        image.Mutate(x => x
+            .AutoOrient()
+            .Resize(new ResizeOptions
+            {
+                Mode = ResizeMode.Max,
+                Size = new Size(400, 400)
+            }));
         await image.SaveAsync(thumbnailPath, new WebpEncoder { Quality = 80 }, cancellationToken);
         return new ThumbnailResult(thumbnailPath);
     }

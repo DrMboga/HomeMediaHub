@@ -13,11 +13,20 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         using var image = await Image.LoadAsync(request.FilePath, cancellationToken);
         var exif = image.Metadata.ExifProfile;
 
+        var orientation = GetOrientation(exif);
+        // EXIF orientations 5-8 involve a 90° or 270° rotation, so raw pixel
+        // dimensions are transposed relative to the display dimensions.
+        // 5 = 90° CW + horizontal flip, 6 = 90° CW (iPhone portrait),
+        // 7 = 90° CCW + horizontal flip, 8 = 90° CCW (iPhone portrait upside-down).
+        var (displayWidth, displayHeight) = orientation is 5 or 6 or 7 or 8
+            ? (image.Height, image.Width)
+            : (image.Width, image.Height);
+
         return new MetadataResult(
             MimeType:    DetectMimeType(request.FilePath),
             FileSize:    fileInfo.Length,
-            Width:       image.Width,
-            Height:      image.Height,
+            Width:       displayWidth,
+            Height:      displayHeight,
             TakenAt:     ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal)),
             Lat:         ToDecimalDegrees(TryGet(exif, ExifTag.GPSLatitude),
                                           TryGet(exif, ExifTag.GPSLatitudeRef)),
@@ -26,6 +35,13 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             CameraMake:  TryGet(exif, ExifTag.Make),
             CameraModel: TryGet(exif, ExifTag.Model)
         );
+    }
+
+    private static ushort GetOrientation(ExifProfile? exif)
+    {
+        if (exif is null) return 1;
+        exif.TryGetValue(ExifTag.Orientation, out var entry);
+        return entry?.Value ?? 1;
     }
 
     private static TValue? TryGet<TValue>(ExifProfile? exif, ExifTag<TValue> tag) where TValue : class
