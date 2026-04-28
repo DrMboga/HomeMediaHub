@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 2 validated** (2026-04-24). Both services deployed and verified on stage. All tool endpoints confirmed working: scan, hash, metadata (EXIF + GPS), thumbnail (WebP). GeoService reverse geocoding confirmed with Nominatim cache miss + hit. Identity schema migrated, `mike` and `badger` users seeded. JWT auth endpoints are next (future phase — tool endpoints are intentionally open for n8n internal calls).
+**Phase 3 validated** (2026-04-28). W1 (Process Single File) and W2 (Library Scanner) deployed and verified on stage. Full pipeline confirmed across JPEG, HEIC, and MOV files. W2 processed 281 files with 0 errors after reliability fixes (Npgsql keepalive, retry policies, `Image.IdentifyAsync`, ExifTool timeout). Phase 4 (AI Sidecar) is next.
 
 ## Server Access
 

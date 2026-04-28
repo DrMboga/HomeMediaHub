@@ -112,9 +112,19 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 
 ---
 
-## Phase 3 — n8n Ingest Pipeline
+## Phase 3 — n8n Ingest Pipeline ✅ VALIDATED (2026-04-28)
 
 **Goal:** Library Scanner finds files and fully processes them through Workflow 1 into the database.
+
+### Notes from implementation
+
+- W1 deployed as a webhook-triggered workflow. W2 calls it via `POST http://n8n:5678/webhook/process-file` (HTTP Request node with `continueOnFail: true`) rather than n8n's Execute Workflow node — each W1 call becomes a discrete execution in n8n history, making failures easier to inspect individually.
+- W2 processes files sequentially (one at a time), not in parallel batches of 10 — the HTTP Request node iterates items one at a time. This is simpler, avoids concurrency pressure, and throughput is adequate for the library size.
+- EF Core entity classes (`MediaFile`, `MediaMetadata`, `MediaThumbnail`, `MediaTag`) added to the API with `ExcludeFromMigrations()` — tables already exist via init SQL. EF entities enable `SaveChangesAsync` which is compatible with Npgsql's `EnableRetryOnFailure` policy (raw `ExecuteSqlAsync` inside `BeginTransactionAsync` is not retry-compatible).
+- Npgsql connection reliability hardened on both API and GeoService: `Keepalive=30;Connection Idle Lifetime=300` in the connection string; `EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: 5 s)` and `CommandTimeout(60)` on each `DbContext`. Docker's bridge network silently drops idle TCP connections via conntrack; without these settings, any connection idle for ~4 minutes fails the next request with "connection closed unexpectedly".
+- `Image.LoadAsync` (full pixel decode) replaced with `Image.IdentifyAsync` (header-only) in the metadata handler — avoids memory spikes under concurrent load that caused Kestrel to drop connections.
+- ExifTool subprocess capped at 30 seconds with `proc.Kill(entireProcessTree: true)` on cancellation — prevents indefinite hangs on malformed video containers.
+- `processing_jobs` table write deferred to Phase 7 (Error Handler workflow). W2's final `Code: Build Summary` node provides interim run observability: total/succeeded/failed counts and a list of failed file paths with error messages.
 
 ### Deliverables
 
@@ -135,7 +145,20 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 
 1. Drop a test HEIC and JPEG into `/mnt/usb-hdd/Photo/test/`
 2. Trigger Library Scanner manually
-3. Confirm rows appear in `media_files`, `media_metadata`, `media_thumbnails`, `media_tags` (tags may be empty — AI not wired yet), `processing_jobs` status = `completed`
+3. Confirm rows appear in `media_files`, `media_metadata`, `media_thumbnails`; `media_tags` will be empty until Phase 4 (AI not wired yet)
+
+### Validation results (stage, 2026-04-28)
+
+| Check | Result |
+|---|---|
+| W2 Manual Trigger → scan → W1 per file | ✅ 281 files processed |
+| JPEG pipeline (hash → dedup → metadata → thumbnail → geocode → save) | ✅ |
+| HEIC pipeline (heif-convert → exiftool TagsFromFile → metadata → thumbnail → geocode → save) | ✅ |
+| MOV/video pipeline (ffmpeg frame extract → metadata → thumbnail → geocode → save) | ✅ |
+| Dedup check (re-run W2 on already-processed library — 0 new inserts) | ✅ |
+| Files with GPS: address populated via geoservice | ✅ |
+| Files without GPS: lat/lon/address null | ✅ |
+| W2 Code: Build Summary output | ✅ `{ total: 281, succeeded: 281, failed: 0, failedFiles: [] }` |
 
 ---
 

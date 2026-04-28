@@ -333,14 +333,20 @@ All originals live under a single directory tree. No duplication.
 ```
 [Manual Trigger OR Cron: 0 2 1 * *]
   │
-  ├─[HTTP Request] GET api:8080/api/tools/scan?path=/mnt/usb-hdd/Photo
-  │   → { files: ["/mnt/usb-hdd/Photo/2005/img001.jpg", ...] }
-  │   (returns only files not yet in media_files — by path AND hash check)
+  ├─[HTTP Request] GET api:8080/api/tools/scan?path=/photo
+  │   → { files: ["/photo/2005/img001.jpg", ...] }
+  │   (returns only files not yet in media_files — deduped by hash)
   │
-  ├─[Split In Batches] batch size: 10
+  ├─[Code: Split Files] maps files array → individual items (one item per file)
   │
-  └─[Execute Workflow] → Workflow 1 with { filePath, source: "scan" } for each file
-       (runs up to n8n's parallelism limit concurrently)
+  ├─[HTTP Request] POST n8n:5678/webhook/process-file { filePath, source: "library" }
+  │   continueOnFail: true, timeout: 120 s
+  │   (calls W1 via webhook — each call is a discrete execution in n8n history;
+  │    sequential: one file at a time)
+  │
+  └─[Code: Build Summary] → { total, succeeded, failed, failedFiles: [{filePath, error}] }
+       index-correlates output items back to Code: Split Files input to recover
+       filePath on error items (continueOnFail does not preserve original input data)
 ```
 
 **Why no Immich webhook:** webhooks are fire-and-forget — if n8n is unavailable when Immich fires, the event is lost silently. A scheduled scan is slower to react but guaranteed to pick up every file eventually, with no lost events.
