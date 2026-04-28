@@ -69,10 +69,13 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
     private static string DetectMimeType(string filePath) =>
         Path.GetExtension(filePath).ToLowerInvariant() switch
         {
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".png"            => "image/png",
-            ".gif"            => "image/gif",
-            ".webp"           => "image/webp",
-            _                 => "application/octet-stream"
+            ".jpg" or ".jpeg"  => "image/jpeg",
+            ".png"             => "image/png",
+            ".gif"             => "image/gif",
+            ".webp"            => "image/webp",
+            ".heic" or ".heif" => "image/heic",
+            ".mp4"             => "video/mp4",
+            ".mov" or ".m4v"   => "video/quicktime",
+            _                  => "application/octet-stream"
         };
 }

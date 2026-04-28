@@ -10,7 +10,10 @@ public sealed class ConvertFileHandler : IRequestHandler<ConvertFileRequest, Con
         if (request.FileType == "heic")
         {
             await RunAsync("heif-convert", ["-q", "90", request.SourceFilePath, request.DestFilePath], ct);
-            await RunAsync("exiftool", ["-TagsFromFile", request.SourceFilePath, request.DestFilePath, "-overwrite_original", "-q"], ct);
+            // --Orientation excludes the Orientation tag from the copy: heif-convert already
+            // applied the rotation physically, so copying Orientation back would cause AutoOrient
+            // to rotate again, producing a double-rotation (upside-down thumbnails).
+            await RunAsync("exiftool", ["-TagsFromFile", request.SourceFilePath, "--Orientation", request.DestFilePath, "-overwrite_original", "-q"], ct);
         }
         else if (request.FileType == "video")
         {
