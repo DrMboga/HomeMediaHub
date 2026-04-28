@@ -21,7 +21,9 @@ try
         ?? throw new InvalidOperationException("ConnectionStrings:GeoDb is required.");
 
     builder.Services.AddDbContext<GeoDbContext>(opts => opts
-        .UseNpgsql(connStr)
+        .UseNpgsql(connStr, npgsql => npgsql
+            .EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorCodesToAdd: null)
+            .CommandTimeout(60))
         .UseSnakeCaseNamingConvention());
 
     builder.Services.AddHttpClient<NominatimClient>(client =>

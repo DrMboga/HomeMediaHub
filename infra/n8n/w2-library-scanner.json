@@ -69,7 +69,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all();\nconst total = items.length;\nconst failures = items.filter(i => i.json.error !== undefined);\nconst succeeded = total - failures.length;\n\nconst failedFiles = failures.map(i => ({\n  filePath: i.json.filePath || '(unknown)',\n  error: String(i.json.error).split('\\n')[0],\n}));\n\nreturn [{ json: { total, succeeded, failed: failures.length, failedFiles } }];"
+        "jsCode": "const inputItems = $('Code: Split Files').all();\nconst outputItems = $input.all();\nconst total = inputItems.length;\n\nlet succeeded = 0;\nconst failedFiles = [];\n\nfor (let i = 0; i < outputItems.length; i++) {\n  const filePath = inputItems[i]?.json?.filePath ?? '(unknown)';\n  const err = outputItems[i].json.error;\n  if (err !== undefined) {\n    const msg = err?.message ?? err?.description ?? (typeof err === 'string' ? err : JSON.stringify(err));\n    failedFiles.push({ filePath, error: String(msg).split('\\n')[0] });\n  } else {\n    succeeded++;\n  }\n}\n\nreturn [{ json: { total, succeeded, failed: failedFiles.length, failedFiles } }];"
       },
       "id": "550e8400-e29b-41d4-a716-446655440106",
       "name": "Code: Build Summary",

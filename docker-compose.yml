@@ -111,7 +111,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Keepalive=30;Connection Idle Lifetime=300"
       Seed__MikePassword: ${MIKE_PASSWORD}
       Seed__BadgerPassword: ${BADGER_PASSWORD}
       ASPNETCORE_URLS: http://+:8080
@@ -156,7 +156,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      ConnectionStrings__GeoDb: "Host=geoservice-postgres;Port=5432;Database=geoservice_db;Username=geoservice;Password=${GEOSERVICE_DB_PASSWORD}"
+      ConnectionStrings__GeoDb: "Host=geoservice-postgres;Port=5432;Database=geoservice_db;Username=geoservice;Password=${GEOSERVICE_DB_PASSWORD};Keepalive=30;Connection Idle Lifetime=300"
       ASPNETCORE_URLS: http://+:8001
       ASPNETCORE_ENVIRONMENT: Production
     ports:
