@@ -36,6 +36,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             FileSize:    fileInfo.Length,
             Width:       displayWidth,
             Height:      displayHeight,
+            DurationSec: null,
             TakenAt:     ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal)),
             Lat:         ToDecimalDegrees(TryGet(exif, ExifTag.GPSLatitude),
                                           TryGet(exif, ExifTag.GPSLatitudeRef)),
@@ -53,11 +54,14 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         using var frame = await Image.LoadAsync(framePath, ct);
         var exif = await RunExiftoolJsonAsync(originalPath, ct);
 
+        var durationSec = exif.TryGetProperty("Duration", out var dur) && dur.TryGetDouble(out var d) ? d : (double?)null;
+
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
             FileSize:    originalFileInfo.Length,
             Width:       frame.Width,
             Height:      frame.Height,
+            DurationSec: durationSec,
             TakenAt:     ParseDateTime(exif.TryGetProperty("CreateDate", out var dt) ? dt.GetString() : null),
             Lat:         ParseGpsCoordinate(exif, "GPSLatitude",  "GPSLatitudeRef"),
             Lon:         ParseGpsCoordinate(exif, "GPSLongitude", "GPSLongitudeRef"),

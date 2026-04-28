@@ -9,6 +9,7 @@ public record MetadataResult(
     long      FileSize,
     int       Width,
     int       Height,
+    double?   DurationSec,
     DateTime? TakenAt,
     double?   Lat,
     double?   Lon,
