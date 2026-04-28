@@ -11,19 +11,47 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
         ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
     }
 
-    public DbSet<MediaFileRecord> MediaFiles => Set<MediaFileRecord>();
+    public DbSet<MediaFile>      MediaFiles      => Set<MediaFile>();
+    public DbSet<MediaMetadata>  MediaMetadata   => Set<MediaMetadata>();
+    public DbSet<MediaThumbnail> MediaThumbnails => Set<MediaThumbnail>();
+    public DbSet<MediaTag>       MediaTags       => Set<MediaTag>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
 
-        // All Identity tables land in the 'identity' schema
         builder.HasDefaultSchema("identity");
 
-        // media_files is owned by Phase 1 init SQL — read here, never migrated
-        builder.Entity<MediaFileRecord>(e =>
+        builder.Entity<MediaFile>(e =>
         {
             e.ToTable("media_files", schema: "public", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.Id);
+            e.HasOne(f => f.Metadata)
+             .WithOne()
+             .HasForeignKey<MediaMetadata>(m => m.MediaFileId);
+            e.HasOne(f => f.Thumbnail)
+             .WithOne()
+             .HasForeignKey<MediaThumbnail>(t => t.MediaFileId);
+            e.HasMany(f => f.Tags)
+             .WithOne()
+             .HasForeignKey(t => t.MediaFileId);
+        });
+
+        builder.Entity<MediaMetadata>(e =>
+        {
+            e.ToTable("media_metadata", schema: "public", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.MediaFileId);
+        });
+
+        builder.Entity<MediaThumbnail>(e =>
+        {
+            e.ToTable("media_thumbnails", schema: "public", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.MediaFileId);
+        });
+
+        builder.Entity<MediaTag>(e =>
+        {
+            e.ToTable("media_tags", schema: "public", t => t.ExcludeFromMigrations());
             e.HasKey(x => x.Id);
         });
     }

@@ -23,7 +23,9 @@ try
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
     builder.Services.AddDbContext<AppDbContext>(opts => opts
-        .UseNpgsql(connStr)
+        .UseNpgsql(connStr, npgsql => npgsql
+            .EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorCodesToAdd: null)
+            .CommandTimeout(60))
         .UseSnakeCaseNamingConvention());
 
     builder.Services

@@ -69,7 +69,7 @@ public sealed class ScanDirectoryHandlerTests : IDisposable
         Touch(newPath);
 
         using var db = CreateDb();
-        db.MediaFiles.Add(new MediaFileRecord { Id = Guid.NewGuid(), FilePath = existingPath, IsDeleted = false });
+        db.MediaFiles.Add(new MediaFile { Id = Guid.NewGuid(), FilePath = existingPath });
         await db.SaveChangesAsync();
 
         var result = await new ScanDirectoryHandler(db)
@@ -86,7 +86,7 @@ public sealed class ScanDirectoryHandlerTests : IDisposable
         Touch(path);
 
         using var db = CreateDb();
-        db.MediaFiles.Add(new MediaFileRecord { Id = Guid.NewGuid(), FilePath = path, IsDeleted = true });
+        db.MediaFiles.Add(new MediaFile { Id = Guid.NewGuid(), FilePath = path, IsDeleted = true });
         await db.SaveChangesAsync();
 
         var result = await new ScanDirectoryHandler(db)
