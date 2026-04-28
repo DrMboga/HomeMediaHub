@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 using MediatR;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Metadata.Profiles.Exif;
@@ -7,9 +9,16 @@ namespace Api.Features.Tools.Metadata;
 
 public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequest, MetadataResult>
 {
+    private static readonly HashSet<string> VideoExtensions = [".mp4", ".mov", ".m4v", ".avi"];
+
     public async Task<MetadataResult> Handle(ExtractMetadataRequest request, CancellationToken cancellationToken)
     {
-        var fileInfo = new FileInfo(request.FilePath);
+        var sourcePath = request.OriginalFilePath ?? request.FilePath;
+        var fileInfo = new FileInfo(sourcePath);
+
+        if (VideoExtensions.Contains(Path.GetExtension(sourcePath).ToLowerInvariant()))
+            return await ExtractVideoMetadataAsync(request.FilePath, sourcePath, fileInfo, cancellationToken);
+
         using var image = await Image.LoadAsync(request.FilePath, cancellationToken);
         var exif = image.Metadata.ExifProfile;
 
@@ -23,7 +32,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             : (image.Width, image.Height);
 
         return new MetadataResult(
-            MimeType:    DetectMimeType(request.FilePath),
+            MimeType:    DetectMimeType(sourcePath),
             FileSize:    fileInfo.Length,
             Width:       displayWidth,
             Height:      displayHeight,
@@ -35,6 +44,58 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             CameraMake:  TryGet(exif, ExifTag.Make),
             CameraModel: TryGet(exif, ExifTag.Model)
         );
+    }
+
+    private static async Task<MetadataResult> ExtractVideoMetadataAsync(
+        string framePath, string originalPath, FileInfo originalFileInfo, CancellationToken ct)
+    {
+        // Dimensions come from the extracted frame; all other metadata from the original container.
+        using var frame = await Image.LoadAsync(framePath, ct);
+        var exif = await RunExiftoolJsonAsync(originalPath, ct);
+
+        return new MetadataResult(
+            MimeType:    DetectMimeType(originalPath),
+            FileSize:    originalFileInfo.Length,
+            Width:       frame.Width,
+            Height:      frame.Height,
+            TakenAt:     ParseDateTime(exif.TryGetProperty("CreateDate", out var dt) ? dt.GetString() : null),
+            Lat:         ParseGpsCoordinate(exif, "GPSLatitude",  "GPSLatitudeRef"),
+            Lon:         ParseGpsCoordinate(exif, "GPSLongitude", "GPSLongitudeRef"),
+            CameraMake:  exif.TryGetProperty("Make",  out var make)  ? make.GetString()  : null,
+            CameraModel: exif.TryGetProperty("Model", out var model) ? model.GetString() : null
+        );
+    }
+
+    private static async Task<JsonElement> RunExiftoolJsonAsync(string filePath, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo("exiftool") { RedirectStandardOutput = true, UseShellExecute = false };
+        psi.ArgumentList.Add("-json");
+        psi.ArgumentList.Add("-n"); // numeric GPS — avoids parsing DMS strings
+        psi.ArgumentList.Add(filePath);
+
+        using var proc = Process.Start(psi)!;
+        var readTask = proc.StandardOutput.ReadToEndAsync(ct);
+        await proc.WaitForExitAsync(ct);
+        var output = await readTask;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                return doc.RootElement[0].Clone();
+        }
+        catch { /* return empty element on parse failure */ }
+
+        using var empty = JsonDocument.Parse("{}");
+        return empty.RootElement.Clone();
+    }
+
+    private static double? ParseGpsCoordinate(JsonElement exif, string coordinateTag, string refTag)
+    {
+        if (!exif.TryGetProperty(coordinateTag, out var prop) || !prop.TryGetDouble(out var value))
+            return null;
+        var isNegative = exif.TryGetProperty(refTag, out var refProp) && refProp.GetString() is "S" or "W";
+        return isNegative ? -value : value;
     }
 
     private static ushort GetOrientation(ExifProfile? exif)

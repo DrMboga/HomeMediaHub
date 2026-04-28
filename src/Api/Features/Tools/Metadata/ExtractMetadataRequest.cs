@@ -2,7 +2,7 @@ using MediatR;
 
 namespace Api.Features.Tools.Metadata;
 
-public record ExtractMetadataRequest(string FilePath) : IRequest<MetadataResult>;
+public record ExtractMetadataRequest(string FilePath, string? OriginalFilePath = null) : IRequest<MetadataResult>;
 
 public record MetadataResult(
     string    MimeType,
