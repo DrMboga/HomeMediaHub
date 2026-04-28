@@ -19,8 +19,10 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         if (VideoExtensions.Contains(Path.GetExtension(sourcePath).ToLowerInvariant()))
             return await ExtractVideoMetadataAsync(request.FilePath, sourcePath, fileInfo, cancellationToken);
 
-        using var image = await Image.LoadAsync(request.FilePath, cancellationToken);
-        var exif = image.Metadata.ExifProfile;
+        // IdentifyAsync reads only the image header — no pixel decoding, far less memory than LoadAsync.
+        var info = await Image.IdentifyAsync(request.FilePath, cancellationToken)
+            ?? throw new InvalidOperationException($"Cannot identify image: {request.FilePath}");
+        var exif = info.Metadata.ExifProfile;
 
         var orientation = GetOrientation(exif);
         // EXIF orientations 5-8 involve a 90° or 270° rotation, so raw pixel
@@ -28,8 +30,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         // 5 = 90° CW + horizontal flip, 6 = 90° CW (iPhone portrait),
         // 7 = 90° CCW + horizontal flip, 8 = 90° CCW (iPhone portrait upside-down).
         var (displayWidth, displayHeight) = orientation is 5 or 6 or 7 or 8
-            ? (image.Height, image.Width)
-            : (image.Width, image.Height);
+            ? (info.Height, info.Width)
+            : (info.Width, info.Height);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(sourcePath),
@@ -51,7 +53,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         string framePath, string originalPath, FileInfo originalFileInfo, CancellationToken ct)
     {
         // Dimensions come from the extracted frame; all other metadata from the original container.
-        using var frame = await Image.LoadAsync(framePath, ct);
+        var frameInfo = await Image.IdentifyAsync(framePath, ct)
+            ?? throw new InvalidOperationException($"Cannot identify frame: {framePath}");
         var exif = await RunExiftoolJsonAsync(originalPath, ct);
 
         var durationSec = exif.TryGetProperty("Duration", out var dur) && dur.TryGetDouble(out var d) ? d : (double?)null;
@@ -59,8 +62,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
             FileSize:    originalFileInfo.Length,
-            Width:       frame.Width,
-            Height:      frame.Height,
+            Width:       frameInfo.Width,
+            Height:      frameInfo.Height,
             DurationSec: durationSec,
             TakenAt:     ParseDateTime(exif.TryGetProperty("CreateDate", out var dt) ? dt.GetString() : null),
             Lat:         ParseGpsCoordinate(exif, "GPSLatitude",  "GPSLatitudeRef"),
@@ -78,8 +81,22 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         psi.ArgumentList.Add(filePath);
 
         using var proc = Process.Start(psi)!;
-        var readTask = proc.StandardOutput.ReadToEndAsync(ct);
-        await proc.WaitForExitAsync(ct);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+        var readTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
+        try
+        {
+            await proc.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            proc.Kill(entireProcessTree: true);
+            using var empty = JsonDocument.Parse("{}");
+            return empty.RootElement.Clone();
+        }
+
         var output = await readTask;
 
         try
@@ -90,8 +107,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         }
         catch { /* return empty element on parse failure */ }
 
-        using var empty = JsonDocument.Parse("{}");
-        return empty.RootElement.Clone();
+        using var emptyFallback = JsonDocument.Parse("{}");
+        return emptyFallback.RootElement.Clone();
     }
 
     private static double? ParseGpsCoordinate(JsonElement exif, string coordinateTag, string refTag)
