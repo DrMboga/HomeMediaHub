@@ -4,8 +4,6 @@ using Api.Models;
 using Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
-using Pgvector;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -24,12 +22,9 @@ try
     var connStr = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
-    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connStr);
-    dataSourceBuilder.UseVector();
-    var dataSource = dataSourceBuilder.Build();
-
     builder.Services.AddDbContext<AppDbContext>(opts => opts
-        .UseNpgsql(dataSource, npgsql => npgsql
+        .UseNpgsql(connStr, npgsql => npgsql
+            .UseVector()
             .EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorCodesToAdd: null)
             .CommandTimeout(60))
         .UseSnakeCaseNamingConvention());
