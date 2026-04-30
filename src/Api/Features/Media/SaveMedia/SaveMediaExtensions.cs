@@ -1,5 +1,4 @@
 using Api.Data;
-using Pgvector;
 
 namespace Api.Features.Media.SaveMedia;
 
@@ -42,15 +41,6 @@ internal static class SaveMediaExtensions
 
         file.OriginClass      = req.OriginClass;
         file.OriginConfidence = req.OriginConfidence;
-
-        if (req.Embedding is { Length: 512 })
-        {
-            file.Embedding = new MediaEmbedding
-            {
-                MediaFileId = req.Id,
-                Embedding   = new Vector(req.Embedding),
-            };
-        }
 
         if (req.ThumbnailPath is not null)
         {
