@@ -218,7 +218,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath }) }}",
         "options": {
-          "timeout": 30000
+          "timeout": 120000
         }
       },
       "id": "550e8400-e29b-41d4-a716-446655440019",
