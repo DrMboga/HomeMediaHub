@@ -2,6 +2,7 @@ using Api.Features.Tools.Convert;
 using Api.Features.Tools.Dedup;
 using Api.Features.Tools.Hash;
 using Api.Features.Tools.Metadata;
+using Api.Features.Tools.RecordFailure;
 using Api.Features.Tools.Scan;
 using Api.Features.Tools.Thumbnail;
 using MediatR;
@@ -34,6 +35,8 @@ public static class ToolEndpoints
         g.MapGet("/new-id", () => Results.Ok(new { id = Guid.NewGuid() }));
 
         g.MapPost("/convert", (ConvertFileRequest req, IMediator m, CancellationToken ct) => m.Send(req, ct));
+
+        g.MapPost("/record-failure", (RecordFailureRequest req, IMediator m, CancellationToken ct) => m.Send(req, ct));
 
         g.MapPost("/cleanup", (CleanupRequest req) =>
         {

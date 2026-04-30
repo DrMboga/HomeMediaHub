@@ -16,6 +16,7 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<MediaThumbnail>  MediaThumbnails  => Set<MediaThumbnail>();
     public DbSet<MediaTag>        MediaTags        => Set<MediaTag>();
     public DbSet<MediaEmbedding>  MediaEmbeddings  => Set<MediaEmbedding>();
+    public DbSet<ProcessingJob>   ProcessingJobs   => Set<ProcessingJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -65,6 +66,14 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
             e.HasKey(x => x.MediaFileId);
             e.Property(x => x.Embedding).HasColumnType("vector(512)");
             e.Property(x => x.CreatedAt).HasDefaultValueSql("NOW()");
+        });
+
+        builder.Entity<ProcessingJob>(e =>
+        {
+            e.ToTable("processing_jobs", schema: "public", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.Id);
+            e.Property(x => x.StartedAt).HasDefaultValueSql("NOW()");
+            e.Property(x => x.RetryCount).HasDefaultValue(0);
         });
     }
 }
