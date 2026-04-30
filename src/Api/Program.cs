@@ -24,9 +24,9 @@ try
     var connStr = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
 
-    var dataSource = new NpgsqlDataSourceBuilder(connStr)
-        .UseVector()
-        .Build();
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connStr);
+    dataSourceBuilder.UseVector();
+    var dataSource = dataSourceBuilder.Build();
 
     builder.Services.AddDbContext<AppDbContext>(opts => opts
         .UseNpgsql(dataSource, npgsql => npgsql
