@@ -20,5 +20,6 @@ public sealed class MediaFile
 
     public MediaMetadata? Metadata { get; set; }
     public MediaThumbnail? Thumbnail { get; set; }
+    public MediaEmbedding? Embedding { get; set; }
     public List<MediaTag> Tags { get; set; } = [];
 }

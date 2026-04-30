@@ -212,13 +212,30 @@
     },
     {
       "parameters": {
-        "jsCode": "const init = $('Code: Init').item.json;\nconst hash = $('HTTP: Hash').item.json.hash;\nconst meta = $('HTTP: Metadata').item.json;\nconst thumb = $('HTTP: Thumbnail').item.json;\n\nlet address = null;\ntry { address = $('HTTP: Geocode').item.json.address; } catch (_) {}\n\n// Derive mime type from the original file path so HEIC files are not\n// stored as image/jpeg (the metadata endpoint sees the converted temp JPEG).\nconst mimeFromExt = ext => ({\n  heic: 'image/heic', heif: 'image/heic',\n  jpg: 'image/jpeg', jpeg: 'image/jpeg',\n  png: 'image/png',\n  mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/quicktime'\n})[ext] ?? 'application/octet-stream';\n\nreturn [{\n  json: {\n    id: init.mediaFileId,\n    filePath: init.filePath,\n    fileHash: hash,\n    source: init.source,\n    immichAssetId: null,\n    mimeType: mimeFromExt(init.ext),\n    fileSize: meta.fileSize,\n    width: meta.width,\n    height: meta.height,\n    durationSec: meta.durationSec || null,\n    takenAt: meta.takenAt || null,\n    lat: meta.lat !== undefined ? meta.lat : null,\n    lon: meta.lon !== undefined ? meta.lon : null,\n    address: address,\n    cameraMake: meta.cameraMake || null,\n    cameraModel: meta.cameraModel || null,\n    thumbnailPath: thumb.thumbnailPath,\n    tags: []\n  }\n}];"
+        "method": "POST",
+        "url": "http://ai-sidecar:8000/analyze",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "550e8400-e29b-41d4-a716-446655440019",
+      "name": "HTTP: AI Analyze",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const init  = $('Code: Init').item.json;\nconst hash  = $('HTTP: Hash').item.json.hash;\nconst meta  = $('HTTP: Metadata').item.json;\nconst thumb = $('HTTP: Thumbnail').item.json;\nconst ai    = $('HTTP: AI Analyze').item.json;\n\nlet address = null;\ntry { address = $('HTTP: Geocode').item.json.address; } catch (_) {}\n\n// Derive mime type from the original file path so HEIC files are not\n// stored as image/jpeg (the metadata endpoint sees the converted temp JPEG).\nconst mimeFromExt = ext => ({\n  heic: 'image/heic', heif: 'image/heic',\n  jpg: 'image/jpeg', jpeg: 'image/jpeg',\n  png: 'image/png',\n  mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/quicktime'\n})[ext] ?? 'application/octet-stream';\n\nreturn [{\n  json: {\n    id: init.mediaFileId,\n    filePath: init.filePath,\n    fileHash: hash,\n    source: init.source,\n    immichAssetId: null,\n    mimeType: mimeFromExt(init.ext),\n    fileSize: meta.fileSize,\n    width: meta.width,\n    height: meta.height,\n    durationSec: meta.durationSec || null,\n    takenAt: meta.takenAt || null,\n    lat: meta.lat !== undefined ? meta.lat : null,\n    lon: meta.lon !== undefined ? meta.lon : null,\n    address: address,\n    cameraMake: meta.cameraMake || null,\n    cameraModel: meta.cameraModel || null,\n    thumbnailPath: thumb.thumbnailPath,\n    tags: ai.tags || [],\n    embedding: ai.embedding || null,\n    originClass: ai.originClass || null,\n    originConfidence: ai.originConfidence ?? null\n  }\n}];"
       },
       "id": "550e8400-e29b-41d4-a716-446655440015",
       "name": "Code: Assemble",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2960, 300]
+      "position": [3220, 300]
     },
     {
       "parameters": {
@@ -233,7 +250,7 @@
       "name": "HTTP: Save",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [3220, 300]
+      "position": [3480, 300]
     },
     {
       "parameters": {
@@ -248,7 +265,7 @@
       "name": "HTTP: Cleanup",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [3480, 300]
+      "position": [3740, 300]
     }
   ],
   "connections": {
@@ -317,10 +334,15 @@
     },
     "HTTP: Geocode": {
       "main": [
-        [{ "node": "Code: Assemble", "type": "main", "index": 0 }]
+        [{ "node": "HTTP: AI Analyze", "type": "main", "index": 0 }]
       ]
     },
     "NoOp: No GPS": {
+      "main": [
+        [{ "node": "HTTP: AI Analyze", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP: AI Analyze": {
       "main": [
         [{ "node": "Code: Assemble", "type": "main", "index": 0 }]
       ]

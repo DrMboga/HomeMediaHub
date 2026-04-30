@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 3 validated** (2026-04-28). W1 (Process Single File) and W2 (Library Scanner) deployed and verified on stage. Full pipeline confirmed across JPEG, HEIC, and MOV files. W2 processed 281 files with 0 errors after reliability fixes (Npgsql keepalive, retry policies, `Image.IdentifyAsync`, ExifTool timeout). Phase 4 (AI Sidecar) is next.
+**Phase 4 in progress** (2026-04-30). AI Sidecar implemented: YOLOv8n object detection + CLIP ViT-B/32 embeddings + origin classification. W1 updated to call `http://ai-sidecar:8000/analyze` after geocoding. API extended to persist tags, embedding (via EF Core + `Pgvector` into `media_embeddings`), and `origin_class/confidence`. Awaiting build and stage validation.
 
 ## Server Access
 
@@ -166,6 +166,7 @@ ASP.NET Core Identity. Two users: Mike and Badger. No roles — both users share
 
 ## Design Decisions
 
+- **EF Core over raw SQL.** Use EF Core entity navigation and `SaveChangesAsync` for all persistence. Raw SQL (`ExecuteSqlRawAsync` / `ExecuteSqlAsync` string concatenation) is forbidden — use proper type mappings instead (e.g. `Pgvector.Vector` with `HasColumnType("vector(512)")` for embeddings, standard EF navigation for relationships). Only reach for raw SQL when EF genuinely cannot express the operation (e.g. bulk operations with `ExecuteUpdateAsync`/`ExecuteDeleteAsync` are fine).
 - **n8n is the orchestrator.** The .NET API contains no background workers, no Quartz jobs, no multi-step logic. n8n owns all workflow execution.
 - **Tool endpoints pattern.** n8n calls small atomic .NET endpoints for operations it cannot perform natively: SHA-256 hashing, EXIF extraction, thumbnail generation, directory scanning.
 - **HEIC/video conversion in n8n.** HEIC conversion is a two-step Execute Command node: `heif-convert -q 90` converts pixels, then `exiftool -TagsFromFile` copies all EXIF/GPS/XMP metadata from the original — `heif-convert` alone strips metadata. `ffmpeg` handles video frame extraction. Both run as Execute Command nodes in n8n (installed in the custom n8n Alpine image via `apk add libheif-tools libde265 perl-image-exiftool ffmpeg`). Converted temp files go to `/tmp/homemediahub-work/` (shared with the api container).

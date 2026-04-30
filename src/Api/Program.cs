@@ -24,6 +24,7 @@ try
 
     builder.Services.AddDbContext<AppDbContext>(opts => opts
         .UseNpgsql(connStr, npgsql => npgsql
+            .UseVector()
             .EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5), errorCodesToAdd: null)
             .CommandTimeout(60))
         .UseSnakeCaseNamingConvention());
@@ -62,8 +63,8 @@ try
     {
         var ok = await db.Database.CanConnectAsync(ct);
         return ok
-            ? Results.Ok(new { status = "ok", phase = 3 })
-            : Results.Json(new { status = "unhealthy", phase = 3 }, statusCode: 503);
+            ? Results.Ok(new { status = "ok", phase = 4 })
+            : Results.Json(new { status = "unhealthy", phase = 4 }, statusCode: 503);
     });
     app.MapToolEndpoints();
     app.MapMediaEndpoints();

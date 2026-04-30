@@ -1,4 +1,5 @@
 using Api.Data;
+using Pgvector;
 
 namespace Api.Features.Media.SaveMedia;
 
@@ -36,6 +37,18 @@ internal static class SaveMediaExtensions
                 Address     = req.Address,
                 CameraMake  = req.CameraMake,
                 CameraModel = req.CameraModel,
+            };
+        }
+
+        file.OriginClass      = req.OriginClass;
+        file.OriginConfidence = req.OriginConfidence;
+
+        if (req.Embedding is { Length: 512 })
+        {
+            file.Embedding = new MediaEmbedding
+            {
+                MediaFileId = req.Id,
+                Embedding   = new Vector(req.Embedding),
             };
         }
 

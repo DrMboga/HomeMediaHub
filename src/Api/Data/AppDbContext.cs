@@ -11,10 +11,11 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
         ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
     }
 
-    public DbSet<MediaFile>      MediaFiles      => Set<MediaFile>();
-    public DbSet<MediaMetadata>  MediaMetadata   => Set<MediaMetadata>();
-    public DbSet<MediaThumbnail> MediaThumbnails => Set<MediaThumbnail>();
-    public DbSet<MediaTag>       MediaTags       => Set<MediaTag>();
+    public DbSet<MediaFile>       MediaFiles       => Set<MediaFile>();
+    public DbSet<MediaMetadata>   MediaMetadata    => Set<MediaMetadata>();
+    public DbSet<MediaThumbnail>  MediaThumbnails  => Set<MediaThumbnail>();
+    public DbSet<MediaTag>        MediaTags        => Set<MediaTag>();
+    public DbSet<MediaEmbedding>  MediaEmbeddings  => Set<MediaEmbedding>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -32,6 +33,9 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
             e.HasOne(f => f.Thumbnail)
              .WithOne()
              .HasForeignKey<MediaThumbnail>(t => t.MediaFileId);
+            e.HasOne(f => f.Embedding)
+             .WithOne()
+             .HasForeignKey<MediaEmbedding>(m => m.MediaFileId);
             e.HasMany(f => f.Tags)
              .WithOne()
              .HasForeignKey(t => t.MediaFileId);
@@ -53,6 +57,14 @@ public sealed class AppDbContext : IdentityDbContext<AppUser>
         {
             e.ToTable("media_tags", schema: "public", t => t.ExcludeFromMigrations());
             e.HasKey(x => x.Id);
+        });
+
+        builder.Entity<MediaEmbedding>(e =>
+        {
+            e.ToTable("media_embeddings", schema: "public", t => t.ExcludeFromMigrations());
+            e.HasKey(x => x.MediaFileId);
+            e.Property(x => x.Embedding).HasColumnType("vector(512)");
+            e.Property(x => x.CreatedAt).HasDefaultValueSql("NOW()");
         });
     }
 }

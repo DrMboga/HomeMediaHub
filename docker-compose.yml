@@ -175,10 +175,17 @@ services:
     restart: unless-stopped
     volumes:
       - ${PHOTO_DIR}:/photo:ro
+      - ${WORK_DIR}:/shared-temp:ro
     ports:
       - "127.0.0.1:8000:8000"
     networks:
       - homemediahub
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   # ── React frontend (Phase 1: placeholder; Phase 6: production Vite build) ─
   frontend:

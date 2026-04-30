@@ -20,7 +20,10 @@ public record SaveMediaRequest(
     string?    CameraMake,
     string?    CameraModel,
     string?    ThumbnailPath,
-    List<SaveMediaTag>? Tags
+    List<SaveMediaTag>? Tags,
+    float[]?   Embedding,
+    string?    OriginClass,
+    double?    OriginConfidence
 ) : IRequest<SaveMediaResponse>;
 
 public record SaveMediaTag(string Tag, float Confidence, string Model);
