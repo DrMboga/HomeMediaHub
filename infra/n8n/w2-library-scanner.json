@@ -56,7 +56,13 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ filePath: $json.filePath, source: 'library' }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 500
+            }
+          }
         }
       },
       "id": "550e8400-e29b-41d4-a716-446655440105",
