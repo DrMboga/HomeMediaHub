@@ -4,7 +4,9 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**W4 validated** (2026-04-30). Error Handler workflow active: Global Error Trigger → extracts filePath/source from W1 run data → `POST /api/tools/record-failure` → `processing_jobs` table. Configure per-workflow in W1/W2 settings → Error Workflow → W4. Phase 5 (Semantic Search + Browse API) is next.
+**W4 validated** (2026-04-30). Error Handler workflow active: Global Error Trigger → extracts filePath/source from W1 run data → `POST /api/tools/record-failure` → `processing_jobs` table. Configure per-workflow in W1/W2 settings → Error Workflow → W4. Known issue: `file_path` always `unknown` in error records — W4 Code: Extract can't locate filePath in execution run data structure.
+
+**W2 concurrency fix** (2026-04-30). Root cause of intermittent API "connection closed" errors: n8n HTTP Request node fires all items concurrently by default — 281 simultaneous W1 executions caused .NET thread pool starvation. Fixed by adding `batching: { batchSize: 4, batchInterval: 500 }` to W2's HTTP: Process File node. Validated: 2 × 281-file runs with 0 errors.
 
 **Phase 4 validated** (2026-04-30). AI Sidecar deployed: YOLOv8n object detection + CLIP ViT-B/32 512-dim embeddings + origin classification (photo/screenshot/document). W1 pipeline extended with `HTTP: AI Analyze` step. API persists tags, embeddings (EF Core + `Pgvector`), and `origin_class/confidence`. All 281 stage files processed with 0 errors, all 281 embeddings saved.
 
