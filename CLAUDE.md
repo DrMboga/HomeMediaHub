@@ -4,7 +4,9 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 4 validated** (2026-04-30). AI Sidecar deployed: YOLOv8n object detection + CLIP ViT-B/32 512-dim embeddings + origin classification (photo/screenshot/document). W1 pipeline extended with `HTTP: AI Analyze` step. API persists tags, embeddings (EF Core + `Pgvector`), and `origin_class/confidence`. All 281 stage files processed with 0 errors, all 281 embeddings saved. Phase 5 (Semantic Search + Browse API) is next.
+**W4 validated** (2026-04-30). Error Handler workflow active: Global Error Trigger → extracts filePath/source from W1 run data → `POST /api/tools/record-failure` → `processing_jobs` table. Configure per-workflow in W1/W2 settings → Error Workflow → W4. Phase 5 (Semantic Search + Browse API) is next.
+
+**Phase 4 validated** (2026-04-30). AI Sidecar deployed: YOLOv8n object detection + CLIP ViT-B/32 512-dim embeddings + origin classification (photo/screenshot/document). W1 pipeline extended with `HTTP: AI Analyze` step. API persists tags, embeddings (EF Core + `Pgvector`), and `origin_class/confidence`. All 281 stage files processed with 0 errors, all 281 embeddings saved.
 
 ## Server Access
 
