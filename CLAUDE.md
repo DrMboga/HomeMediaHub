@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 4 in progress** (2026-04-30). AI Sidecar implemented: YOLOv8n object detection + CLIP ViT-B/32 embeddings + origin classification. W1 updated to call `http://ai-sidecar:8000/analyze` after geocoding. API extended to persist tags, embedding (via EF Core + `Pgvector` into `media_embeddings`), and `origin_class/confidence`. Awaiting build and stage validation.
+**Phase 4 validated** (2026-04-30). AI Sidecar deployed: YOLOv8n object detection + CLIP ViT-B/32 512-dim embeddings + origin classification (photo/screenshot/document). W1 pipeline extended with `HTTP: AI Analyze` step. API persists tags, embeddings (EF Core + `Pgvector`), and `origin_class/confidence`. All 281 stage files processed with 0 errors, all 281 embeddings saved. Phase 5 (Semantic Search + Browse API) is next.
 
 ## Server Access
 
