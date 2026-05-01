@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Api.Data.Migrations
 {
-    /// <inheritdoc />
+    [Migration("20260501000000_AddRefreshTokens")]
     public partial class AddRefreshTokens : Migration
     {
         /// <inheritdoc />
