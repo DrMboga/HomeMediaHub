@@ -194,9 +194,22 @@ Re-run Library Scanner or re-process test files and confirm `media_tags` and `me
 
 ---
 
-## Phase 5 — Frontend API + Auth
+## Phase 5 — Frontend API + Auth ✅ IMPLEMENTED (2026-05-01) — pending stage validation
 
 **Goal:** All REST endpoints needed by the React UI are implemented and guarded by JWT auth.
+
+### Notes from implementation
+
+- `Microsoft.AspNetCore.Authentication.JwtBearer` is NOT in the ASP.NET Core shared framework for the .NET 10 SDK (10.0.100) used here — must be added as an explicit NuGet reference (`10.0.0`). It transitively brings `System.IdentityModel.Tokens.Jwt` and `Microsoft.IdentityModel.Tokens`.
+- `CosineDistance` vector extension method requires `using Pgvector.EntityFrameworkCore;` — not `using Pgvector;` alone.
+- Refresh token stored as a SHA-256 hash in `identity."AspNetUsers"` (new columns via migration `20260501000000_AddRefreshTokens`). Only 2 users exist so a full scan to find the matching hash is acceptable.
+- JWT: HS256, 15 min access token, 30-day sliding refresh token window. Secret key in `appsettings.json` (override via env var in production).
+- SignalR hub at `/hubs/library` — NGINX config already had the WebSocket upgrade rule. `media.added` broadcast fires from `SaveMediaHandler` (n8n calls this after each file processed). `media.deleted` fires from soft-delete and bulk-delete endpoints.
+- Tool endpoints (`/api/tools/*`) and `POST /api/media` are intentionally unauthenticated — they are called by n8n from within the Docker network.
+- Video transcode: on-demand HEVC → H.264 via ffmpeg subprocess, cached in `VideoTranscodes` table and `/video-cache/{id}.mp4`. `VideoCacheDir` config key defaults to `/video-cache` (Docker volume mount).
+- Albums, photo_series, series_media, video_transcodes tables already exist via Phase 1 init SQL — all configured with `ExcludeFromMigrations()`.
+- Snapshot updated: corrected `Api.Data.MediaFileRecord` → `Api.Data.MediaFile` (pre-existing stale name), added `RefreshTokenHash` and `RefreshTokenExpiry` properties to AppUser section.
+- `DELETE /api/media/bulk` accepts a JSON body (unconventional but valid HTTP). Client must set `Content-Type: application/json`.
 
 ### Deliverables
 
@@ -225,10 +238,11 @@ Re-run Library Scanner or re-process test files and confirm `media_tags` and `me
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost/api/auth/login \
-        -d '{"username":"mike","password":"..."}' | jq -r .token)
+        -H 'Content-Type: application/json' \
+        -d '{"username":"mike","password":"DevPassword1!"}' | jq -r .accessToken)
 curl -s "http://localhost/api/media?pageSize=5" \
-     -H "Authorization: Bearer $TOKEN" | jq '.[].id'
-# Returns 5 media IDs
+     -H "Authorization: Bearer $TOKEN" | jq '.items[].id'
+# Returns 5 media IDs from paged result
 curl -s "http://localhost/api/search?q=birthday+cake" \
      -H "Authorization: Bearer $TOKEN" | jq '.[0].id'
 # Returns semantic matches

@@ -1,9 +1,13 @@
+using System.Text;
 using Api.Data;
 using Api.Endpoints;
+using Api.Features.Auth;
 using Api.Models;
 using Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -39,6 +43,53 @@ try
         })
         .AddEntityFrameworkStores<AppDbContext>();
 
+    // JWT authentication
+    var jwtKey = builder.Configuration["Jwt:SecretKey"]
+        ?? throw new InvalidOperationException("Jwt:SecretKey is required.");
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(opts =>
+        {
+            opts.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer           = true,
+                ValidateAudience         = true,
+                ValidateLifetime         = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer              = builder.Configuration["Jwt:Issuer"],
+                ValidAudience            = builder.Configuration["Jwt:Audience"],
+                IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                ClockSkew                = TimeSpan.Zero,
+            };
+
+            // Allow JWT from SignalR query string (WebSocket connections)
+            opts.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = ctx =>
+                {
+                    var token = ctx.Request.Query["access_token"];
+                    if (!string.IsNullOrEmpty(token) &&
+                        ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                        ctx.Token = token;
+                    return Task.CompletedTask;
+                }
+            };
+        });
+
+    builder.Services.AddAuthorization();
+    builder.Services.AddHttpClient();
+
+    // Named HttpClient for AI sidecar
+    var aiSidecarUrl = builder.Configuration["AiSidecarUrl"] ?? "http://ai-sidecar:8000";
+    builder.Services.AddHttpClient("AiSidecar", client =>
+    {
+        client.BaseAddress = new Uri(aiSidecarUrl);
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
+
+    builder.Services.AddSingleton<JwtTokenService>();
+
     builder.Services.AddMediatR(cfg =>
         cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 
@@ -52,6 +103,9 @@ try
         await ctx.Response.WriteAsJsonAsync(new { error = feature?.Error.Message ?? "Unexpected error" });
     }));
 
+    app.UseAuthentication();
+    app.UseAuthorization();
+
     await using (var scope = app.Services.CreateAsyncScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -63,11 +117,17 @@ try
     {
         var ok = await db.Database.CanConnectAsync(ct);
         return ok
-            ? Results.Ok(new { status = "ok", phase = 4 })
-            : Results.Json(new { status = "unhealthy", phase = 4 }, statusCode: 503);
+            ? Results.Ok(new { status = "ok", phase = 5 })
+            : Results.Json(new { status = "unhealthy", phase = 5 }, statusCode: 503);
     });
+
+    app.MapAuthEndpoints();
     app.MapToolEndpoints();
     app.MapMediaEndpoints();
+    app.MapSearchEndpoints();
+    app.MapAlbumsEndpoints();
+    app.MapSeriesEndpoints();
+    app.MapAdminEndpoints();
 
     app.Run();
 }

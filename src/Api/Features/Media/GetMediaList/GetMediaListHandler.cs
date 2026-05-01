@@ -1,0 +1,49 @@
+using Api.Data;
+using Api.Features.Media;
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+
+namespace Api.Features.Media.GetMediaList;
+
+public record GetMediaListRequest(
+    int Page,
+    int PageSize,
+    DateTime? From,
+    DateTime? To,
+    string? Tag,
+    bool? Favorite
+) : IRequest<PagedResult<MediaListItemDto>>;
+
+public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, PagedResult<MediaListItemDto>>
+{
+    private readonly AppDbContext _db;
+
+    public GetMediaListHandler(AppDbContext db) => _db = db;
+
+    public async Task<PagedResult<MediaListItemDto>> Handle(GetMediaListRequest req, CancellationToken ct)
+    {
+        var q = _db.MediaFiles
+            .Include(f => f.Thumbnail)
+            .Include(f => f.Metadata)
+            .Where(f => !f.IsDeleted)
+            .AsQueryable();
+
+        if (req.From.HasValue)     q = q.Where(f => f.TakenAt >= req.From.Value);
+        if (req.To.HasValue)       q = q.Where(f => f.TakenAt <= req.To.Value);
+        if (req.Favorite.HasValue) q = q.Where(f => f.IsFavorite == req.Favorite.Value);
+        if (!string.IsNullOrEmpty(req.Tag))
+            q = q.Where(f => f.Tags.Any(t => t.Tag == req.Tag));
+
+        var total = await q.CountAsync(ct);
+        var items = await q
+            .OrderByDescending(f => f.TakenAt)
+            .ThenByDescending(f => f.Id)
+            .Skip((req.Page - 1) * req.PageSize)
+            .Take(req.PageSize)
+            .ToListAsync(ct);
+
+        return new PagedResult<MediaListItemDto>(
+            items.Select(f => f.ToListItemDto()).ToList(),
+            total, req.Page, req.PageSize);
+    }
+}

@@ -1,6 +1,5 @@
 using Api.Data;
 using MediatR;
-using Microsoft.Extensions.Logging;
 using Pgvector;
 
 namespace Api.Features.Media.SaveMedia;
@@ -12,7 +11,7 @@ public sealed class SaveMediaHandler : IRequestHandler<SaveMediaRequest, SaveMed
 
     public SaveMediaHandler(AppDbContext db, ILogger<SaveMediaHandler> logger)
     {
-        _db = db;
+        _db     = db;
         _logger = logger;
     }
 
