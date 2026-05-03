@@ -24,7 +24,10 @@
       "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); const c = f.nodes.find\\(n=>n.name==='Code: Assemble'\\).parameters.jsCode; console.log\\(c\\);\")",
       "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); console.log\\('Nodes:', f.nodes.length\\); console.log\\('Connections:', Object.keys\\(f.connections\\).length\\); Object.entries\\(f.connections\\).forEach\\(\\([k,v]\\) => { const targets = v.main.flat\\(\\).map\\(c => c.node\\); console.log\\(' ', k, '->', targets.join\\(', '\\)\\); }\\);\")",
       "Bash(node -e \"const f = require\\('./infra/n8n/w1-process-single-file.json'\\); console.log\\('Nodes:', f.nodes.map\\(n=>n.name\\).join\\(', '\\)\\); console.log\\(''\\); Object.entries\\(f.connections\\).forEach\\(\\([k,v]\\) => { const targets = v.main.flat\\(\\).map\\(c => c.node\\); console.log\\(k, '->', targets.join\\(', '\\)\\); }\\);\")",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(git -C /c/Users/Mike/Projects/HomeMediaHub status)",
+      "Bash(git -C /c/Users/Mike/Projects/HomeMediaHub diff --stat)",
+      "Bash(git *)"
     ]
   }
 }

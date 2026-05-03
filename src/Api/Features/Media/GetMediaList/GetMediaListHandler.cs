@@ -28,8 +28,8 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
             .Where(f => !f.IsDeleted)
             .AsQueryable();
 
-        if (req.From.HasValue)     q = q.Where(f => f.TakenAt >= req.From.Value);
-        if (req.To.HasValue)       q = q.Where(f => f.TakenAt <= req.To.Value);
+        if (req.From.HasValue)     q = q.Where(f => f.TakenAt >= DateTime.SpecifyKind(req.From.Value, DateTimeKind.Utc));
+        if (req.To.HasValue)       q = q.Where(f => f.TakenAt <= DateTime.SpecifyKind(req.To.Value, DateTimeKind.Utc));
         if (req.Favorite.HasValue) q = q.Where(f => f.IsFavorite == req.Favorite.Value);
         if (!string.IsNullOrEmpty(req.Tag))
             q = q.Where(f => f.Tags.Any(t => t.Tag == req.Tag));
