@@ -4,7 +4,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
-**Phase 5 implemented** (2026-05-01). Frontend API + Auth: JWT login/refresh/logout, all media/search/albums/series/admin endpoints, SignalR hub `/hubs/library`. Pending stage validation.
+**Phase 5 validated** (2026-05-03). Frontend API + Auth: JWT login/refresh/logout, token refresh (sliding window), logout, all media/search/albums/series/admin endpoints. Fixes applied during validation: `AddRefreshTokens` migration applied manually (class not compiled into image — root cause unresolved); `page`/`pageSize` query params given defaults to fix 400s; date filter forced UTC kind to fix Npgsql `timestamptz` rejection; semantic search path renamed to `/api/search/semantic`; tag search param renamed from `tag` to `q`. All 64 unit tests pass.
 
 **W4 validated** (2026-04-30). Error Handler workflow active: Global Error Trigger → extracts filePath/source from W1 run data → `POST /api/tools/record-failure` → `processing_jobs` table. Configure per-workflow in W1/W2 settings → Error Workflow → W4. Known issue: `file_path` always `unknown` in error records — W4 Code: Extract can't locate filePath in execution run data structure.
 

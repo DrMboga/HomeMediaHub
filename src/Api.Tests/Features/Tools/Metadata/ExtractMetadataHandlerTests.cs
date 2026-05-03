@@ -130,7 +130,7 @@ public sealed class ExtractMetadataHandlerTests : IDisposable
     [InlineData(".png",  "image/png")]
     [InlineData(".gif",  "image/gif")]
     [InlineData(".webp", "image/webp")]
-    [InlineData(".heic", "application/octet-stream")]
+    [InlineData(".heic", "image/heic")]
     public async Task Handle_FileExtension_DeterminesMimeType(string extension, string expectedMime)
     {
         // ImageSharp loads by content magic bytes, not extension — mime type is extension-only logic

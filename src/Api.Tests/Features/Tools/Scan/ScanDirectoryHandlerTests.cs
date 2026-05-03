@@ -11,10 +11,7 @@ public sealed class ScanDirectoryHandlerTests : IDisposable
     public ScanDirectoryHandlerTests() => Directory.CreateDirectory(_tempDir);
     public void Dispose() => Directory.Delete(_tempDir, recursive: true);
 
-    private AppDbContext CreateDb() =>
-        new(new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .Options);
+    private static AppDbContext CreateDb() => TestDbContextFactory.Create();
 
     private static void Touch(string path)
     {
