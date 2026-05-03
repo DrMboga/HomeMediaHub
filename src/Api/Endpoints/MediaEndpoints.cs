@@ -48,13 +48,14 @@ public static class MediaEndpoints
         });
 
         g.MapGet("", async (
-            [FromQuery] int page,
-            [FromQuery] int pageSize,
-            [FromQuery] DateTime? from,
-            [FromQuery] DateTime? to,
-            [FromQuery] string? tag,
-            [FromQuery] bool? favorite,
-            IMediator m, CancellationToken ct) =>
+            IMediator m,
+            CancellationToken ct,
+            [FromQuery] int page = 0,
+            [FromQuery] int pageSize = 0,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] string? tag = null,
+            [FromQuery] bool? favorite = null) =>
         {
             var result = await m.Send(new GetMediaListRequest(
                 page > 0 ? page : 1,
