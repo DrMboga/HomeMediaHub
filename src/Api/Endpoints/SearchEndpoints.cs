@@ -11,10 +11,11 @@ public static class SearchEndpoints
     {
         var g = app.MapGroup("/api/search").RequireAuthorization();
 
-        g.MapGet("", async (
-            [FromQuery] string q,
-            [FromQuery] int limit,
-            IMediator m, CancellationToken ct) =>
+        g.MapGet("/semantic", async (
+            IMediator m,
+            CancellationToken ct,
+            [FromQuery] string q = "",
+            [FromQuery] int limit = 0) =>
         {
             if (string.IsNullOrWhiteSpace(q))
                 return Results.BadRequest(new { error = "q is required" });
@@ -24,14 +25,15 @@ public static class SearchEndpoints
         });
 
         g.MapGet("/tags", async (
-            [FromQuery] string tag,
-            [FromQuery] int limit,
-            IMediator m, CancellationToken ct) =>
+            IMediator m,
+            CancellationToken ct,
+            [FromQuery] string q = "",
+            [FromQuery] int limit = 0) =>
         {
-            if (string.IsNullOrWhiteSpace(tag))
-                return Results.BadRequest(new { error = "tag is required" });
+            if (string.IsNullOrWhiteSpace(q))
+                return Results.BadRequest(new { error = "q is required" });
 
-            var items = await m.Send(new TagSearchRequest(tag, limit > 0 ? limit : 100), ct);
+            var items = await m.Send(new TagSearchRequest(q, limit > 0 ? limit : 100), ct);
             return Results.Ok(items);
         });
     }
