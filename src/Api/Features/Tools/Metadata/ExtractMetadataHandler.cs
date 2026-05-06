@@ -35,8 +35,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal))
                    ?? ParseDateTime(TryGet(exif, ExifTag.DateTimeDigitized))
-                   ?? EarliestFilesystemDate(fileInfo)
-                   ?? ParseYearFromPath(sourcePath);
+                   ?? EarliestFilesystemDate(fileInfo);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(sourcePath),
@@ -66,8 +65,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseExiftoolDate(exif, "DateTimeOriginal")
                    ?? ParseExiftoolDate(exif, "CreateDate")
-                   ?? EarliestFilesystemDate(originalFileInfo)
-                   ?? ParseYearFromPath(originalPath);
+                   ?? EarliestFilesystemDate(originalFileInfo);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
@@ -171,16 +169,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return (min.Year >= 1980 && min < cutoff) ? min : null;
     }
 
-    private static DateTime? ParseYearFromPath(string filePath)
-    {
-        var now = DateTime.UtcNow.Year;
-        foreach (var segment in filePath.Replace('\\', '/').Split('/'))
-            if (int.TryParse(segment, out var y) && y >= 1970 && y <= now)
-                return new DateTime(y, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        return null;
-    }
-
-    private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
+private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
     {
         if (coord is null || coord.Length < 3) return null;
         var degrees = (double)coord[0].Numerator / coord[0].Denominator;
