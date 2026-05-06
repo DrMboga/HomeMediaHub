@@ -194,7 +194,7 @@ Re-run Library Scanner or re-process test files and confirm `media_tags` and `me
 
 ---
 
-## Phase 5 — Frontend API + Auth ✅ IMPLEMENTED (2026-05-01) — pending stage validation
+## Phase 5 — Frontend API + Auth ✅ VALIDATED (2026-05-03)
 
 **Goal:** All REST endpoints needed by the React UI are implemented and guarded by JWT auth.
 
@@ -253,6 +253,15 @@ curl -s "http://localhost/api/search?q=birthday+cake" \
 ## Phase 6 — React Frontend
 
 **Goal:** Both users can browse, search, and manage the library from a browser.
+
+### Notes from implementation
+
+- UI prototype built in `prototype/` (`index.html` + `server.js`) — served at `http://localhost:3333`, used for live design review against real TestPhoto thumbnails before React implementation begins.
+- Pages implemented in prototype: Dashboard (POTD, OTD strip, library stats widget), On This Day (grouped by year), Gallery (square grid, year dropdown, month breadcrumb, 50 items/page with Prev/Next), Geo (Leaflet dark map with cluster pins), Search (semantic + tag + date range + country chips), Albums, Videos.
+- Lightbox: always bottom-bar layout (photo fills upper area, metadata + tags + zoom controls below); loads full-size originals from TestPhoto; supports video playback (`.mp4`/`.MOV`), zoom (wheel + buttons), map tab (Leaflet), keyboard shortcuts.
+- Gallery pagination: 50 photos per page. Year dropdown (1997–2026). Month breadcrumb with left/right arrows.
+- Country filter chips: country names only, no ISO codes.
+- Real thumbnails from TestPhoto served via `/thumbs/<guid>.webp`; originals via `/originals/<path>`.
 
 ### Deliverables
 

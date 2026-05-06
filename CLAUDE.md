@@ -4,6 +4,8 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 ## Current Status
 
+**Phase 6 prototype complete** (2026-05-06). Frontend UI prototype in `prototype/` (`index.html` + `server.js`, served at `http://localhost:3333`). Covers all pages: Dashboard (POTD, OTD strip, library stats), Gallery (square grid, year dropdown, month breadcrumb, 50/page paged), On This Day, Geo (Leaflet dark map), Search (semantic + tag + date + country), Albums, Videos. Lightbox: always bottom-bar layout, full-size originals from TestPhoto, video playback, zoom, map tab. Prototype is the React implementation spec.
+
 **Phase 5 validated** (2026-05-03). Frontend API + Auth: JWT login/refresh/logout, token refresh (sliding window), logout, all media/search/albums/series/admin endpoints. Fixes applied during validation: `AddRefreshTokens` migration applied manually (class not compiled into image — root cause unresolved); `page`/`pageSize` query params given defaults to fix 400s; date filter forced UTC kind to fix Npgsql `timestamptz` rejection; semantic search path renamed to `/api/search/semantic`; tag search param renamed from `tag` to `q`. All 64 unit tests pass.
 
 **W4 validated** (2026-04-30). Error Handler workflow active: Global Error Trigger → extracts filePath/source from W1 run data → `POST /api/tools/record-failure` → `processing_jobs` table. Configure per-workflow in W1/W2 settings → Error Workflow → W4. Known issue: `file_path` always `unknown` in error records — W4 Code: Extract can't locate filePath in execution run data structure.

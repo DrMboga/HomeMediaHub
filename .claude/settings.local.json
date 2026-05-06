@@ -27,7 +27,34 @@
       "Bash(xargs grep *)",
       "Bash(git -C /c/Users/Mike/Projects/HomeMediaHub status)",
       "Bash(git -C /c/Users/Mike/Projects/HomeMediaHub diff --stat)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(claude mcp *)",
+      "PowerShell(npm *)",
+      "PowerShell(npx --yes @playwright/mcp@latest --help 2>&1 | Select-Object -First 30)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers', d.get\\('projects', {}\\)\\), indent=2\\)\\)\")",
+      "Read(//c/Users/Mike/**)",
+      "Bash(where playwright-mcp *)",
+      "Bash(where chrome-devtools-mcp *)",
+      "Bash(npm list *)",
+      "Bash(findstr -i \"playwright\\\\|chrome\\\\|mcp\")",
+      "Bash(C:\\\\Users\\\\Mike\\\\AppData\\\\Roaming\\\\npm\\\\node_modules\\\\@playwright\\\\mcp\\\\node_modules\\\\.bin\\\\playwright.cmd install *)",
+      "PowerShell(& \"C:\\\\Users\\\\Mike\\\\AppData\\\\Roaming\\\\npm\\\\node_modules\\\\@playwright\\\\mcp\\\\node_modules\\\\.bin\\\\playwright.cmd\" install chromium 2>&1)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Mike\\\\AppData\\\\Roaming\\\\npm\" | Where-Object { $_.Name -match \"playwright-mcp|chrome-devtools-mcp\" })",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object Count)",
+      "Bash(node server.js)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_snapshot",
+      "PowerShell(Stop-Process *)"
     ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
   }
 }

@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HomeMediaHub</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root {
+  --bg:  #121212;
+  --s1:  #1e1e1e;
+  --s2:  #252525;
+  --s3:  #2f2f2f;
+  --s4:  #3a3a3a;
+  --label:  rgba(255,255,255,.87);
+  --label2: rgba(255,255,255,.60);
+  --label3: rgba(255,255,255,.38);
+  --primary: #90caf9;
+  --sep: rgba(255,255,255,.12);
+  --shd: 0 2px 4px rgba(0,0,0,.6), 0 4px 20px rgba(0,0,0,.4);
+  --r: 12px; --rsm: 8px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{background:var(--bg);color:var(--label);font-family:'Roboto','Helvetica Neue',sans-serif;font-size:14px;line-height:1.5;}
+.mi{font-family:'Material Icons Round';font-style:normal;font-size:20px;display:inline-flex;align-items:center;user-select:none;text-transform:none;letter-spacing:normal;word-spacing:normal;white-space:nowrap;direction:ltr;-webkit-font-feature-settings:'liga';font-feature-settings:'liga';}
+
+/* ── Nav ─────────────────────────────── */
+.nav{position:sticky;top:0;z-index:200;height:56px;background:var(--s1);
+  box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;align-items:center;padding:0 24px;}
+.nav-brand{font-size:18px;font-weight:500;color:var(--primary);margin-right:32px;
+  white-space:nowrap;cursor:pointer;letter-spacing:.3px;}
+.nav-links{display:flex;flex:1;}
+.nav-link{display:flex;align-items:center;gap:5px;padding:0 14px;height:56px;
+  font-size:13px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;
+  color:var(--label2);cursor:pointer;border-bottom:2px solid transparent;
+  transition:color .15s,border-color .15s;}
+.nav-link .mi{font-size:18px;flex-shrink:0;}
+.nav-link:hover{color:var(--label);}
+.nav-link.active{color:var(--primary);border-bottom-color:var(--primary);}
+.nav-user{display:flex;align-items:center;gap:8px;color:var(--label2);font-size:14px;}
+.nav-avatar{width:32px;height:32px;border-radius:50%;background:var(--primary);color:#000;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;}
+
+/* ── Page ────────────────────────────── */
+.page{max-width:1200px;margin:0 auto;padding:28px 24px 60px;
+  display:flex;flex-direction:column;gap:24px;}
+.page-hidden{display:none!important;}
+
+/* ── Search ──────────────────────────── */
+.search-wrap{display:flex;flex-direction:column;gap:10px;}
+.search-row{display:flex;align-items:center;gap:10px;background:var(--s2);
+  border-radius:28px;padding:0 20px;height:52px;box-shadow:var(--shd);
+  transition:box-shadow .2s;}
+.search-row:focus-within{box-shadow:0 4px 16px rgba(144,202,249,.18),0 2px 4px rgba(0,0,0,.6);}
+.search-icon{color:var(--label3);display:flex;}
+.search-input{flex:1;background:none;border:none;outline:none;color:var(--label);
+  font-size:16px;font-family:inherit;}
+.search-input::placeholder{color:var(--label3);}
+.search-filters{display:flex;gap:8px;}
+.chip{display:flex;align-items:center;gap:4px;padding:5px 12px;border-radius:16px;
+  background:var(--s3);color:var(--label2);font-size:13px;font-weight:500;
+  cursor:pointer;user-select:none;border:1px solid transparent;
+  transition:background .15s,color .15s;}
+.chip .mi{font-size:16px;}
+.chip:hover{background:var(--s4);color:var(--label);}
+.chip.active{background:rgba(144,202,249,.12);color:var(--primary);border-color:rgba(144,202,249,.3);}
+.date-filter-row{display:flex;align-items:center;gap:10px;padding-left:8px;}
+.date-input{background:var(--s2);border:1px solid var(--sep);color:var(--label);
+  border-radius:4px;padding:6px 10px;font-size:13px;font-family:inherit;outline:none;}
+.date-input:focus{border-color:var(--primary);}
+.to-lbl{font-size:13px;color:var(--label3);}
+
+/* ── Card ────────────────────────────── */
+.card{background:var(--s1);border-radius:var(--r);box-shadow:var(--shd);overflow:hidden;}
+.card-head{padding:16px 18px 10px;display:flex;align-items:center;justify-content:space-between;}
+.card-title{font-size:15px;font-weight:500;}
+.card-action{font-size:12px;color:var(--primary);cursor:pointer;font-weight:500;letter-spacing:.5px;text-transform:uppercase;}
+
+/* ── Widgets ─────────────────────────── */
+.widgets{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start;}
+
+/* POTD */
+.potd-img{position:relative;overflow:hidden;cursor:pointer;aspect-ratio:16/10;}
+.potd-img img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease;}
+.potd-img:hover img{transform:scale(1.04);}
+.potd-footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.potd-date-main{font-size:14px;font-weight:500;}
+.potd-date-sub{font-size:12px;color:var(--label2);margin-top:1px;}
+.geo-pill{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 8px;
+  background:var(--s2);border-radius:24px;cursor:pointer;
+  border:1px solid var(--sep);transition:background .15s;flex-shrink:0;}
+.geo-pill:hover{background:var(--s3);}
+.geo-thumb{width:32px;height:32px;min-width:32px;max-width:32px;min-height:32px;max-height:32px;
+  border-radius:50%;object-fit:cover;flex-shrink:0;display:block;}
+.geo-text{display:flex;flex-direction:column;overflow:hidden;}
+.geo-place{font-size:12px;font-weight:500;color:var(--label);white-space:nowrap;}
+.geo-ago{font-size:11px;color:var(--label3);}
+
+/* Library stats */
+.stats-banner{position:relative;height:110px;overflow:hidden;}
+.stats-banner img{width:100%;height:100%;object-fit:cover;display:block;}
+.stats-banner-fade{position:absolute;inset:0;
+  background:linear-gradient(to bottom,transparent 30%,var(--s1));}
+.stats-body{padding:6px 18px 18px;}
+.stats-row{display:flex;gap:0;margin-top:14px;}
+.stat-item{flex:1;display:flex;flex-direction:column;gap:2px;}
+.stat-num{font-size:26px;font-weight:300;letter-spacing:-.5px;}
+.stat-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--label3);}
+.stats-divider{width:1px;background:var(--sep);margin:4px 16px;}
+
+/* ── Section ──────────────────────────── */
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;}
+.sec-title{font-size:20px;font-weight:400;}
+.sec-link{font-size:12px;color:var(--primary);cursor:pointer;font-weight:500;letter-spacing:.5px;text-transform:uppercase;}
+
+/* ── Photo card ───────────────────────── */
+.photo-card{position:relative;border-radius:var(--rsm);overflow:hidden;cursor:pointer;background:var(--s2);flex-shrink:0;}
+.photo-card img{display:block;width:100%;height:100%;object-fit:cover;transition:transform .3s ease;}
+.photo-card:hover img{transform:scale(1.07);}
+.photo-card-grad{position:absolute;inset:0;
+  background:linear-gradient(to top,rgba(0,0,0,.6) 0%,transparent 45%);pointer-events:none;}
+.photo-card-date{position:absolute;bottom:6px;left:8px;font-size:11px;
+  color:rgba(255,255,255,.85);pointer-events:none;}
+.video-badge{position:absolute;top:6px;left:6px;display:flex;align-items:center;gap:3px;
+  background:rgba(0,0,0,.65);backdrop-filter:blur(4px);border-radius:4px;
+  padding:2px 6px;font-size:11px;color:#fff;font-weight:500;pointer-events:none;}
+.video-badge .mi{font-size:13px;}
+
+/* ── OTD strip ────────────────────────── */
+.otd-scroll{display:flex;gap:16px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none;}
+.otd-scroll::-webkit-scrollbar{display:none;}
+.otd-group{display:flex;flex-direction:column;gap:8px;flex-shrink:0;}
+.otd-year-lbl{font-size:10px;font-weight:500;color:var(--label3);
+  text-transform:uppercase;letter-spacing:.8px;padding:0 2px;}
+.otd-photos{display:flex;gap:4px;}
+.otd-photo{width:140px;height:140px;}
+
+/* ── Gallery ──────────────────────────── */
+.gallery-nav{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.gallery-title{font-size:22px;font-weight:400;}
+.breadcrumb{display:flex;align-items:center;gap:2px;background:var(--s2);
+  border-radius:20px;padding:3px 8px;box-shadow:var(--shd);}
+.bc-arrow{background:none;border:none;color:var(--label2);cursor:pointer;
+  padding:4px;border-radius:50%;transition:color .15s,background .15s;
+  display:flex;align-items:center;}
+.bc-arrow:hover{color:var(--label);background:var(--s3);}
+.bc-arrow .mi{font-size:22px;}
+.bc-month{font-size:14px;font-weight:500;min-width:110px;text-align:center;}
+.year-select{background:var(--s2);border:1px solid var(--sep);color:var(--label);
+  border-radius:16px;padding:5px 28px 5px 14px;font-size:13px;font-family:inherit;
+  outline:none;cursor:pointer;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M0 0l6 8 6-8z' fill='rgba(255,255,255,.4)'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;}
+.year-select:focus{border-color:var(--primary);}
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px;}
+.gallery-card{aspect-ratio:1;}
+.gallery-pager{display:flex;align-items:center;justify-content:center;gap:16px;padding:8px 0;}
+.pager-btn{background:var(--s2);border:1px solid var(--sep);color:var(--label2);
+  border-radius:20px;padding:6px 20px;font-size:13px;font-weight:500;font-family:inherit;
+  cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:4px;}
+.pager-btn:hover:not(:disabled){background:var(--s3);color:var(--label);}
+.pager-btn:disabled{opacity:.3;cursor:default;}
+.pager-info{font-size:13px;color:var(--label2);}
+
+/* ── OTD full ─────────────────────────── */
+.otd-section{display:flex;flex-direction:column;gap:10px;}
+.otd-section-title{font-size:18px;font-weight:400;}
+.otd-count{font-size:13px;color:var(--label3);margin-left:8px;}
+.otd-section-row{display:flex;flex-wrap:wrap;gap:4px;}
+.otd-full-photo{width:160px;height:160px;}
+
+/* ── Geo page ─────────────────────────── */
+#geo-map{height:480px;border-radius:var(--r);overflow:hidden;box-shadow:var(--shd);}
+
+/* ── Videos ───────────────────────────── */
+.videos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px;}
+.video-card{aspect-ratio:16/9;}
+
+/* ── Search page ──────────────────────── */
+.search-hint{color:var(--label3);text-align:center;padding:48px 0;font-size:14px;}
+
+/* ── Lightbox ─────────────────────────── */
+.lb{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.96);
+  display:none;align-items:center;justify-content:center;padding:12px;}
+.lb.open{display:flex;}
+body.lb-open{overflow:hidden;}
+
+.lb-panel{background:var(--s1);border-radius:12px;overflow:hidden;display:flex;}
+
+/* Always bottom bar layout */
+.lb-panel{flex-direction:column;width:min(1200px,96vw);height:90vh;}
+.lb-photo{flex:1;min-height:0;}
+.lb-info{flex-direction:row;align-items:center;flex-shrink:0;
+  padding:10px 16px;gap:10px;border-top:1px solid var(--sep);flex-wrap:wrap;
+  min-height:76px;}
+.lb-meta{flex-direction:row;align-items:center;gap:6px;font-size:12px;flex-shrink:0;flex-wrap:wrap;}
+.lb-sep{display:inline;}
+.lb-tags{display:flex;gap:4px;flex-wrap:wrap;}
+.lb-right{display:flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0;}
+
+/* Shared photo area */
+.lb-photo{background:#000;display:flex;align-items:center;
+  justify-content:center;position:relative;overflow:hidden;min-width:0;min-height:0;}
+.lb-img{width:100%;height:100%;object-fit:contain;
+  transform-origin:center;transition:transform .15s;user-select:none;display:block;}
+.lb-video{width:100%;height:100%;display:none;outline:none;background:#000;}
+#lb-map-area{position:absolute;inset:0;display:none;}
+.lb-close{position:absolute;top:10px;right:10px;z-index:10;width:32px;height:32px;
+  border-radius:50%;background:rgba(255,255,255,.12);border:none;color:#fff;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  transition:background .15s;}
+.lb-close:hover{background:rgba(255,255,255,.25);}
+.lb-close .mi{font-size:18px;}
+
+/* Shared info area */
+.lb-info{background:var(--s1);display:flex;}
+.lb-meta-date{color:var(--label);font-weight:500;font-size:13px;}
+.lb-meta-item{color:var(--label2);display:flex;align-items:center;gap:2px;}
+.lb-meta-item .mi{font-size:14px;color:var(--primary);}
+.lb-sep{color:var(--label3);}
+.lb-tag{display:inline-block;background:rgba(144,202,249,.12);color:var(--primary);
+  border-radius:4px;padding:1px 7px;font-size:11px;font-weight:500;}
+.ib{background:none;border:none;color:var(--label2);cursor:pointer;padding:4px;
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  transition:color .15s,background .15s;}
+.ib:hover{color:var(--label);background:rgba(255,255,255,.08);}
+.ib .mi{font-size:18px;}
+.lb-zoom-pct{font-size:12px;color:var(--label2);min-width:34px;text-align:center;}
+.lb-tab-btn{background:none;border:1px solid var(--sep);color:var(--label2);
+  font-size:11px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;
+  padding:4px 10px;border-radius:10px;cursor:pointer;
+  transition:all .15s;font-family:inherit;}
+.lb-tab-btn.active{color:var(--primary);border-color:rgba(144,202,249,.5);}
+.map-tab-hint{font-size:11px;color:var(--label3);text-align:center;padding-top:8px;}
+
+/* Landscape safe margin for lb-info */
+@media (max-height: 520px) {
+  .lb-panel{height:98vh;}
+  .lb-info{padding-top:6px;padding-bottom:6px;min-height:60px;}
+}
+
+/* Leaflet dark override */
+.leaflet-container{background:#1a1a2e;}
+.leaflet-control-attribution{background:rgba(20,20,20,.7)!important;color:var(--label3)!important;}
+.leaflet-control-attribution a{color:var(--label3)!important;}
+</style>
+</head>
+<body>
+
+<!-- ── Navbar ───────────────────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="nav-brand" onclick="go('dashboard')">HomeMediaHub</div>
+  <div class="nav-links">
+    <div class="nav-link active" onclick="go('dashboard')"><span class="mi">home</span>Home</div>
+    <div class="nav-link" onclick="go('thisday')"><span class="mi">today</span>On This Day</div>
+    <div class="nav-link" onclick="go('gallery')"><span class="mi">photo_library</span>Gallery</div>
+    <div class="nav-link" onclick="go('geo')"><span class="mi">map</span>Geo</div>
+    <div class="nav-link" onclick="go('search')"><span class="mi">search</span>Search</div>
+    <div class="nav-link" onclick="go('albums')"><span class="mi">collections</span>Albums</div>
+    <div class="nav-link" onclick="go('videos')"><span class="mi">videocam</span>Videos</div>
+  </div>
+  <div class="nav-user"><div class="nav-avatar">M</div>Mike</div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     DASHBOARD
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-dashboard" class="page">
+
+  <div class="search-wrap">
+    <div class="search-row">
+      <span class="search-icon"><span class="mi">search</span></span>
+      <input class="search-input" type="text" placeholder="Search your photos — people, places, events…"
+        oninput="onDashSearch(this.value)">
+      <div class="search-filters">
+        <div class="chip" id="chip-date" onclick="toggleDashDate()">
+          <span class="mi">calendar_today</span>Date range
+        </div>
+        <div class="chip" id="chip-country" onclick="toggleDashCountry()">
+          <span class="mi">public</span><span id="chip-country-lbl">Country</span>
+          <span class="mi" style="font-size:14px;">expand_more</span>
+        </div>
+      </div>
+    </div>
+    <div id="dash-date-row" class="date-filter-row" style="display:none;">
+      <input class="date-input" type="date" value="2020-01-01">
+      <span class="to-lbl">to</span>
+      <input class="date-input" type="date" value="2026-05-06">
+    </div>
+    <div id="dash-country-row" style="display:none;display:flex;gap:8px;flex-wrap:wrap;padding-left:8px;display:none;"></div>
+  </div>
+
+  <div class="widgets">
+    <!-- Photo of the Day -->
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Photo of the Day</span>
+        <span class="card-action" style="cursor:default;color:var(--label3);">May 6, 2026</span>
+      </div>
+      <div class="potd-img" onclick="openLb('00257462-ddc9-4de9-aed0-02e8b8b951c9', MOCK_ITALY)">
+        <img src="/thumbs/00257462-ddc9-4de9-aed0-02e8b8b951c9.webp" alt="">
+      </div>
+      <div class="potd-footer">
+        <div>
+          <div class="potd-date-main">Sun, Sep 14, 2022</div>
+          <div class="potd-date-sub">iPhone 13 · Mike</div>
+        </div>
+        <div class="geo-pill" onclick="openLb('1303665f-e2a8-4a2a-a967-e5912e549131',MOCK_ITALY)">
+          <img class="geo-thumb" src="/thumbs/16bacdcb-8418-4a99-baec-8920393a7a30.webp" alt="">
+          <div class="geo-text">
+            <span class="geo-place"><span class="mi" style="font-size:12px;vertical-align:middle;color:var(--primary);">location_on</span> Rome, Italy</span>
+            <span class="geo-ago">3 years ago · vacation</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Library stats -->
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Library</span>
+        <span class="card-action" onclick="go('gallery')">All photos</span>
+      </div>
+      <div class="stats-banner">
+        <img src="/thumbs/0106737f-7906-4941-8100-958a85dd2199.webp" alt="">
+        <div class="stats-banner-fade"></div>
+      </div>
+      <div class="stats-body">
+        <div class="stats-row">
+          <div class="stat-item">
+            <span class="stat-num">281</span>
+            <span class="stat-lbl">Photos</span>
+          </div>
+          <div class="stats-divider"></div>
+          <div class="stat-item">
+            <span class="stat-num">12</span>
+            <span class="stat-lbl">Videos</span>
+          </div>
+        </div>
+        <div class="stats-row" style="margin-top:12px;">
+          <div class="stat-item">
+            <span class="stat-num" style="font-size:18px;">Feb 2026</span>
+            <span class="stat-lbl">Latest</span>
+          </div>
+          <div class="stats-divider"></div>
+          <div class="stat-item">
+            <span class="stat-num">8</span>
+            <span class="stat-lbl">Countries</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- On This Day -->
+  <div>
+    <div class="sec-head">
+      <span class="sec-title">On This Day</span>
+      <span class="sec-link" onclick="go('thisday')">See all</span>
+    </div>
+    <div class="otd-scroll" id="otd-strip"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     ON THIS DAY
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-thisday" class="page page-hidden">
+  <div class="sec-head" style="margin-bottom:0;">
+    <span class="sec-title">On This Day · May 6</span>
+  </div>
+  <div id="otd-full" style="display:flex;flex-direction:column;gap:32px;"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     GALLERY
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-gallery" class="page page-hidden">
+  <div class="gallery-nav">
+    <span class="gallery-title">Gallery</span>
+    <div class="breadcrumb">
+      <button class="bc-arrow" onclick="shiftMonth(-1)"><span class="mi">chevron_left</span></button>
+      <span class="bc-month" id="bc-text">May 2026</span>
+      <button class="bc-arrow" onclick="shiftMonth(1)"><span class="mi">chevron_right</span></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+      <span style="font-size:11px;color:var(--label3);">Year:</span>
+      <select class="year-select" id="year-select" onchange="jumpYear(parseInt(this.value))"></select>
+    </div>
+  </div>
+  <div class="gallery-grid" id="gallery-grid"></div>
+  <div class="gallery-pager" id="gallery-pager">
+    <button class="pager-btn" id="pager-prev" onclick="galleryPage(-1)">
+      <span class="mi" style="font-size:16px;">chevron_left</span>Previous
+    </button>
+    <span class="pager-info" id="pager-info">Page 1</span>
+    <button class="pager-btn" id="pager-next" onclick="galleryPage(1)">
+      Next<span class="mi" style="font-size:16px;">chevron_right</span>
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     GEO
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-geo" class="page page-hidden">
+  <div class="sec-head" style="margin-bottom:0;">
+    <span class="sec-title">Geo</span>
+    <span style="font-size:13px;color:var(--label3);">8 countries · 24 cities · 281 geotagged photos</span>
+  </div>
+  <div id="geo-map"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SEARCH
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-search" class="page page-hidden">
+  <div class="search-wrap">
+    <div class="search-row">
+      <span class="search-icon"><span class="mi">search</span></span>
+      <input class="search-input" type="text" id="search-input"
+        placeholder="People, places, events…" oninput="onSearchInput(this.value)" autofocus>
+      <div class="search-filters">
+        <div class="chip" onclick="toggleSearchDate()">
+          <span class="mi">calendar_today</span>Date range
+        </div>
+        <div class="chip" onclick="toggleSearchCountry()">
+          <span class="mi">public</span>Country<span class="mi" style="font-size:14px;">expand_more</span>
+        </div>
+      </div>
+    </div>
+    <div id="search-date-row" class="date-filter-row" style="display:none;">
+      <input class="date-input" type="date" value="2007-01-01">
+      <span class="to-lbl">to</span>
+      <input class="date-input" type="date" value="2026-05-06">
+    </div>
+    <div id="search-country-row" style="display:none;gap:8px;flex-wrap:wrap;padding-left:8px;"></div>
+  </div>
+  <div id="search-hint" class="search-hint">Type something to search…</div>
+  <div class="gallery-grid" id="search-grid" style="display:none;"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     ALBUMS
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-albums" class="page page-hidden">
+  <div class="sec-head" style="margin-bottom:0;"><span class="sec-title">Albums</span></div>
+  <div class="search-hint">No albums yet.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     VIDEOS
+══════════════════════════════════════════════════════════════════ -->
+<div id="pg-videos" class="page page-hidden">
+  <div class="sec-head" style="margin-bottom:0;"><span class="sec-title">Videos</span></div>
+  <div class="videos-grid" id="videos-grid"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     LIGHTBOX
+══════════════════════════════════════════════════════════════════ -->
+<div class="lb ls" id="lb" onclick="lbBgClose(event)">
+  <div class="lb-panel">
+
+    <!-- Photo / Map area -->
+    <div class="lb-photo">
+      <img class="lb-img" id="lb-img" src="" alt="">
+      <video class="lb-video" id="lb-video" controls playsinline></video>
+      <div id="lb-map-area"></div>
+      <button class="lb-close" onclick="closeLb()"><span class="mi">close</span></button>
+    </div>
+
+    <!-- Info bar / panel (layout controlled by .ls / .pt on .lb) -->
+    <div class="lb-info" id="lb-info">
+
+      <!-- Meta text -->
+      <div class="lb-meta" id="lb-meta">
+        <span class="lb-meta-date" id="lb-date">—</span>
+        <span class="lb-sep">·</span>
+        <span class="lb-meta-item" id="lb-camera">
+          <span class="mi">photo_camera</span><span id="lb-camera-val">—</span>
+        </span>
+        <span class="lb-sep">·</span>
+        <span class="lb-meta-item" id="lb-loc">
+          <span class="mi">location_on</span><span id="lb-loc-val">—</span>
+        </span>
+      </div>
+
+      <!-- Tags -->
+      <div class="lb-tags" id="lb-tags"></div>
+
+      <!-- Right-side controls (zoom + tabs) -->
+      <div class="lb-right">
+        <button class="ib" onclick="lbZoom(-.15)"><span class="mi">remove</span></button>
+        <span class="lb-zoom-pct" id="lb-zoom-pct">100%</span>
+        <button class="ib" onclick="lbZoom(.15)"><span class="mi">add</span></button>
+        <button class="ib" onclick="lbZoomReset()" title="Reset zoom"><span class="mi">center_focus_weak</span></button>
+        <div style="width:8px;"></div>
+        <div class="lb-tab-grp" style="display:flex;gap:4px;">
+          <button class="lb-tab-btn active" id="lb-tab-info" onclick="lbTabSwitch('info')">Info</button>
+          <button class="lb-tab-btn" id="lb-tab-map" onclick="lbTabSwitch('map')">Map</button>
+        </div>
+      </div>
+
+    </div><!-- /lb-info -->
+  </div><!-- /lb-panel -->
+</div><!-- /lb -->
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SCRIPT
+══════════════════════════════════════════════════════════════════ -->
+<script>
+// ── Thumbnails ────────────────────────────────────────────────────────────
+const T = [
+  '00257462-ddc9-4de9-aed0-02e8b8b951c9','00a2ef1f-f359-449a-ad2a-c1de3722e61c',
+  '0106737f-7906-4941-8100-958a85dd2199','01f911e1-4850-468d-b98e-0e286a4acad9',
+  '02149c04-3055-4463-9103-c7e24f7ba1eb','02b0bd38-fb79-4b65-8033-ebc9d52c58cd',
+  '02f683d4-0513-4451-8f17-d278c5a286da','032947f1-0265-4d20-b3dd-57e9a146d8d2',
+  '03e76280-515e-4697-80e2-766cbcc7590d','04cbf4a4-662f-4928-bbd0-05aac57b6608',
+  '051324c3-f202-4cb4-b0fb-06ba6f27f30d','056f5c46-043a-42ae-97bf-89976285a6fd',
+  '06047d0c-6034-4eac-9fa9-58eb5dd35972','071b5f37-5c1e-4178-a347-fd791e84c628',
+  '07508872-67f3-4e49-9ab0-2ae913827549','07961d9b-4ca7-4ff1-b3fe-9a87ba9c512a',
+  '07f23ae8-d802-46d2-91ab-efef74075ad5','0890fbe7-1a55-46a6-bcb6-51b82aeed319',
+  '0ff0bda4-4cc4-4f81-b426-650813a440f1','1107a59d-7a55-4960-b816-4183b9c6814e',
+  '1303665f-e2a8-4a2a-a967-e5912e549131','1344fd74-ac7e-441f-b1e0-87e609fd928c',
+  '16bacdcb-8418-4a99-baec-8920393a7a30','16df564c-3e1a-433e-ac57-801f5e52ceb2',
+  '174ccb4e-5431-4d66-82a8-f9d5102a81f5','18c1296e-cc13-45a0-b2d7-055a9d38fd23',
+  '1beb11cb-7f3d-49f1-8099-26f94ad332f4','1cabecb0-936e-4cf5-b73d-6f3d2a8b89ac',
+  '1dc3054b-63b0-456b-9ef7-78e27ebdf292','1eebc906-9cb6-4691-b4c1-8b12717e1d26',
+  '1ffdf7b0-b9c0-43c7-b92a-0a8144a0fd05','21790a3d-3a5e-4817-923b-15eb70c12c3c',
+  '218ffbd1-08f2-4cc1-99c0-e7e03c045a2a','22ec0768-fca0-481b-b401-8a39924c96df',
+  '23d2791b-a2a1-4007-9f84-36355fa0da82','2458ac0e-8a4c-4932-acbd-3c094c51dc30',
+  '246ecf3d-71cc-4add-bf5a-3dc79beafaf7','270f2678-98cd-4fd0-84f7-0aa2fe0389a9',
+  '27db1e76-d7d7-4f31-9638-9ec8b7427f37','2836b051-5c0a-4afd-827f-53ca55e75de8',
+  '28aab283-e8ff-4e42-89f9-9d6f08d63609','29e1d84b-5e81-4665-9784-1c08456c65f3',
+  '29ff05e9-138d-47a0-824f-2b5423846971','2cdb8279-d366-4c34-bdec-d4ebe0cef341',
+  '2d15c0bf-9882-4836-82fa-3ced1d3ed90e','2d74f2f3-a4d2-4042-9907-7b8da29c19df',
+  '2dfddba8-140e-463e-9ae2-afc5ce64e2ee','300f79d1-d4b4-4fab-9d95-227a01085405',
+  '30770dac-97f3-470c-bfd2-690cb9cd5501','30cc5f3d-34c2-4922-8baa-9a9c7342106f',
+  '346428dd-5828-4997-9728-bd75de449b4a','34c954dc-9497-4aee-9e7d-4c800467077a',
+  '34f28d6c-369e-433c-9035-394c7a741bda','35eb1037-5e25-48e9-9a61-5c03c6eb9dfd',
+  '36e654ff-a4e5-4df1-8eed-46f2589c9fd3','372f0039-0a70-4b15-9fb6-9fd6711b8f4e',
+  '3742be81-008e-4a62-b80b-119a448d8fef','374ccd86-55e9-4dc3-ac78-10db52780f78',
+];
+const VIDEO_T = ['1ffdf7b0-b9c0-43c7-b92a-0a8144a0fd05','21790a3d-3a5e-4817-923b-15eb70c12c3c',
+  '218ffbd1-08f2-4cc1-99c0-e7e03c045a2a','22ec0768-fca0-481b-b401-8a39924c96df'];
+
+// Real original photos served from TestPhoto (full size, shown in lightbox)
+const ORIGINALS = [
+  '2007/07Crymea/IMG_3127.JPG','2007/07Crymea/IMG_3164.jpg','2007/07Crymea/IMG_3181.jpg',
+  '2007/07Crymea/IMG_3183.jpg','2007/07Crymea/IMG_3189.jpg','2007/07Crymea/IMG_3262.jpg',
+  '2007/IMAGE_009.jpg','2007/IMAGE_022.jpg','2007/IMG_1408.jpg','2007/IMG_1483.jpg',
+  '2007/IMG_1497.jpg','2007/IMG_1552.jpg','2008/IMAGE_112.jpg','2008/IMAGE_155.jpg',
+  '2008/IMG_4672.jpg','2008/IMG_4855.jpg','2008/IMG_4909.jpg','2008/IMG_5123.jpg',
+  '2010/09Emmaus/IMG_6480.JPG','2010/IMAG0084.jpg','2010/P1020039.JPG','2010/P1020116.JPG',
+  '2011/09Crete/IMG_0783.JPG','2011/IMG_1132.JPG','2011/IMG_2312.JPG','2011/IMG_2455.JPG',
+  '2011/IMG_2490.JPG','2011/IMG_2492.JPG','2011/IMG_2512.JPG','2011/IMG_2529.JPG',
+];
+// Real video for demo
+const DEMO_VIDEO = '/originals/2019/389bd907-74a5-4928-bfa7-61528ed5b38a.mp4';
+// Indices in T[] that act as "video" cards in the gallery (every ~7th thumbnail)
+const VIDEO_IDX = new Set([6,13,20,27,34,41,48,55]);
+
+// Gallery pagination
+const PAGE_SIZE = 50;
+let galPage = 0;
+const MONTHS = ['January','February','March','April','May','June',
+  'July','August','September','October','November','December'];
+const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+// ── Mock data ─────────────────────────────────────────────────────────────
+const MOCK_ITALY  = { date:'Sun, Sep 14, 2022 · 14:32', camera:'Apple iPhone 13',
+  location:'Colosseum, Rome, Italy', tags:['outdoor','landmark','travel'], lat:41.89, lng:12.49 };
+const MOCK_MINSK  = { date:'Sat, Jul 12, 2019 · 09:44', camera:'Apple iPhone XS',
+  location:'Minsk, Belarus', tags:['people','indoor'], lat:53.90, lng:27.56 };
+const MOCK_VIDEO  = { date:'Mon, Mar 3, 2025 · 16:20', camera:'Apple iPhone 15 Pro',
+  location:'Moscow, Russia', tags:['outdoor','people'], lat:55.76, lng:37.62, isVideo:true };
+const MOCK_LONDON = { date:'Fri, Aug 8, 2014 · 11:05', camera:'Nikon D80',
+  location:'Tower Bridge, London, UK', tags:['landmark','outdoor'], lat:51.51, lng:-.08 };
+
+const OTD_YEARS = [
+  { year:2023, wd:'Sat', count:3, mock:MOCK_MINSK },
+  { year:2020, wd:'Wed', count:2, mock:MOCK_ITALY },
+  { year:2019, wd:'Mon', count:4, mock:MOCK_MINSK },
+  { year:2014, wd:'Tue', count:2, mock:MOCK_LONDON },
+  { year:2012, wd:'Sun', count:2, mock:MOCK_MINSK },
+  { year:2008, wd:'Tue', count:3, mock:MOCK_MINSK },
+];
+
+const GEO_PINS = [
+  { lat:41.89, lng:12.49, name:'Rome, Italy', count:18 },
+  { lat:55.76, lng:37.62, name:'Moscow, Russia', count:42 },
+  { lat:51.51, lng:-.13,  name:'London, UK', count:11 },
+  { lat:53.90, lng:27.56, name:'Minsk, Belarus', count:85 },
+  { lat:48.86, lng:2.35,  name:'Paris, France', count:7 },
+  { lat:52.52, lng:13.40, name:'Berlin, Germany', count:5 },
+  { lat:35.68, lng:139.69,name:'Tokyo, Japan', count:9 },
+  { lat:40.71, lng:-74.01,name:'New York, USA', count:4 },
+];
+
+// ── Page navigation ───────────────────────────────────────────────────────
+const PAGES = ['dashboard','thisday','gallery','geo','search','albums','videos'];
+
+function go(name) {
+  PAGES.forEach(p => document.getElementById('pg-'+p).classList.toggle('page-hidden', p !== name));
+  document.querySelectorAll('.nav-link').forEach(el => {
+    const t = el.textContent.trim().toLowerCase();
+    el.classList.toggle('active',
+      (name==='dashboard' && t.startsWith('home')) ||
+      (name==='thisday'   && t.startsWith('on')) ||
+      (name!=='dashboard' && name!=='thisday' && t.startsWith(name))
+    );
+  });
+  if (name==='gallery') buildGallery();
+  if (name==='thisday') buildOTDFull();
+  if (name==='videos')  buildVideos();
+  if (name==='geo')     buildGeoMap();
+  if (name==='search')  setTimeout(()=>document.getElementById('search-input').focus(), 100);
+}
+
+// ── OTD strip (dashboard) ─────────────────────────────────────────────────
+function buildOTDStrip() {
+  const strip = document.getElementById('otd-strip');
+  let ti = 5;
+  OTD_YEARS.forEach(({ year, wd, count, mock }) => {
+    const g = document.createElement('div'); g.className = 'otd-group';
+    g.innerHTML = `<div class="otd-year-lbl">${year}</div>`;
+    const row = document.createElement('div'); row.className = 'otd-photos';
+    for (let i=0; i<count; i++) {
+      const isV = (i===1 && count>2); // second card in a group (if 3+ photos) is a video
+      const dur = isV ? VID_DUR[ti%VID_DUR.length] : null;
+      row.appendChild(makeCard(T[(ti++)%T.length], `${wd}, May 6, ${year}`, 'otd-photo', dur, isV?MOCK_VIDEO:mock, isV));
+    }
+    g.appendChild(row); strip.appendChild(g);
+  });
+}
+
+// ── OTD full page ─────────────────────────────────────────────────────────
+function buildOTDFull() {
+  const el = document.getElementById('otd-full');
+  if (el.children.length) return;
+  let ti = 15;
+  OTD_YEARS.forEach(({ year, wd, count, mock }) => {
+    const sec = document.createElement('div'); sec.className = 'otd-section';
+    sec.innerHTML = `<div class="otd-section-title">${wd}, May 6, ${year}<span class="otd-count">${count} photo${count>1?'s':''}</span></div>`;
+    const row = document.createElement('div'); row.className = 'otd-section-row';
+    for (let i=0; i<count; i++) {
+      const isV = (i===1 && count>2);
+      const dur  = isV ? VID_DUR[ti%VID_DUR.length] : null;
+      row.appendChild(makeCard(T[(ti++)%T.length], `May 6, ${year}`, 'otd-full-photo', dur, isV?MOCK_VIDEO:mock, isV));
+    }
+    sec.appendChild(row); el.appendChild(sec);
+  });
+}
+
+// ── Gallery ───────────────────────────────────────────────────────────────
+let galYear=2026, galMonth=4;
+
+function shiftMonth(d) {
+  galMonth+=d;
+  if (galMonth>11){galMonth=0;galYear++;}
+  if (galMonth<0) {galMonth=11;galYear--;}
+  document.getElementById('bc-text').textContent = MONTHS[galMonth]+' '+galYear;
+  document.getElementById('year-select').value = galYear;
+  galPage=0; buildGallery();
+}
+function jumpYear(y) {
+  galYear=y; galMonth=0; galPage=0;
+  document.getElementById('bc-text').textContent = MONTHS[0]+' '+y;
+  buildGallery();
+}
+function galleryPage(d) {
+  const totalPhotos = 120 + Math.floor(Math.random()*80); // mock: 120-200 photos in month
+  const totalPages  = Math.ceil(totalPhotos / PAGE_SIZE);
+  galPage = Math.max(0, Math.min(totalPages-1, galPage+d));
+  buildGallery();
+}
+function buildGallery() {
+  const grid = document.getElementById('gallery-grid'); grid.innerHTML='';
+  // Mock: simulate 120-200 photos per month, show PAGE_SIZE per page
+  const totalPhotos = 145;
+  const totalPages  = Math.ceil(totalPhotos / PAGE_SIZE);
+  const count = galPage < totalPages-1 ? PAGE_SIZE : totalPhotos - galPage*PAGE_SIZE;
+  const pool  = [...T, ...T, ...T].slice(0, count); // repeat pool to fill page
+  pool.forEach((t, i) => {
+    const d   = Math.min(28, Math.floor(i * 28/count)+1);
+    const wd  = DAYS[(d+galMonth)%7];
+    const isV = VIDEO_IDX.has(i % (PAGE_SIZE));
+    const dur = isV ? VID_DUR[i%VID_DUR.length] : null;
+    const mock= isV ? MOCK_VIDEO : MOCK_MINSK;
+    grid.appendChild(makeCard(t, `${wd}, ${d} ${MONTHS[galMonth].slice(0,3)} ${galYear}`, 'gallery-card', dur, mock, isV));
+  });
+  document.getElementById('pager-info').textContent = `Page ${galPage+1} of ${totalPages} · ${totalPhotos} photos`;
+  document.getElementById('pager-prev').disabled = galPage===0;
+  document.getElementById('pager-next').disabled = galPage===totalPages-1;
+}
+function initYearSelect() {
+  const sel = document.getElementById('year-select');
+  for (let y=2026; y>=1997; y--) {
+    const opt = document.createElement('option');
+    opt.value = y; opt.textContent = y;
+    if (y===galYear) opt.selected=true;
+    sel.appendChild(opt);
+  }
+}
+
+// ── Videos ────────────────────────────────────────────────────────────────
+const VID_DUR = ['0:34','1:12','2:05','0:58'];
+function buildVideos() {
+  const grid = document.getElementById('videos-grid');
+  if (grid.children.length) return;
+  VIDEO_T.forEach((t,i) => grid.appendChild(makeCard(t,'Mar 2025','video-card',VID_DUR[i],MOCK_VIDEO)));
+}
+
+// ── Geo map ───────────────────────────────────────────────────────────────
+let geoMap=null;
+function buildGeoMap() {
+  if (geoMap) return;
+  geoMap = L.map('geo-map').setView([48,15],3);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    attribution:'© OpenStreetMap © CARTO', maxZoom:19
+  }).addTo(geoMap);
+  GEO_PINS.forEach(({lat,lng,name,count}) => {
+    const m = L.circleMarker([lat,lng],{
+      radius:8+Math.sqrt(count),fillColor:'#90caf9',color:'rgba(144,202,249,.3)',
+      weight:6,fillOpacity:.9
+    }).addTo(geoMap);
+    m.bindTooltip(`<b>${name}</b><br>${count} photos`,{
+      className:'leaflet-tooltip-dark'
+    });
+    m.on('click', ()=> openLb(T[Math.floor(Math.random()*T.length)], MOCK_MINSK));
+  });
+}
+
+// ── Photo card factory ────────────────────────────────────────────────────
+function makeCard(t, dateLabel, extraClass, videoDur, mock, isVideo) {
+  const div=document.createElement('div');
+  div.className='photo-card'+(extraClass?' '+extraClass:'');
+  div.innerHTML=`
+    <img src="/thumbs/${t}.webp" alt="" loading="lazy">
+    <div class="photo-card-grad"></div>
+    ${videoDur?`<div class="video-badge"><span class="mi">play_arrow</span>${videoDur}</div>`:''}
+    <div class="photo-card-date">${dateLabel}</div>`;
+  div.onclick=()=>openLb(t, mock||MOCK_MINSK, !!isVideo);
+  return div;
+}
+
+// ── Search ────────────────────────────────────────────────────────────────
+const COUNTRIES=['Russia','Italy','UK','USA','Germany','France','Japan','Belarus'];
+const SEARCH_MAP={'people':14,'italy':18,'dog':3,'birthday':6,'snow':11,'beach':9,'car':5,'food':22};
+let dashCountryOpen=false;
+
+function toggleDashDate(){
+  const r=document.getElementById('dash-date-row');
+  const c=document.getElementById('chip-date');
+  const open=r.style.display!=='none';
+  r.style.display=open?'none':'flex'; c.classList.toggle('active',!open);
+}
+function toggleDashCountry(){
+  const r=document.getElementById('dash-country-row');
+  dashCountryOpen=!dashCountryOpen;
+  document.getElementById('chip-country').classList.toggle('active',dashCountryOpen);
+  if(dashCountryOpen){
+    r.style.display='flex'; r.innerHTML='';
+    COUNTRIES.forEach(c=>{
+      const el=document.createElement('div'); el.className='chip'; el.textContent=c;
+      el.onclick=()=>{
+        el.classList.toggle('active');
+        const sel=COUNTRIES.filter((_,i)=>r.children[i]?.classList.contains('active'));
+        document.getElementById('chip-country-lbl').textContent=sel.length?sel[0]:'Country';
+      };
+      r.appendChild(el);
+    });
+  } else { r.style.display='none'; }
+}
+function toggleSearchDate(){
+  const r=document.getElementById('search-date-row');
+  r.style.display=r.style.display!=='none'?'none':'flex';
+}
+function toggleSearchCountry(){
+  const r=document.getElementById('search-country-row');
+  if(r.style.display!=='none'){r.style.display='none';return;}
+  r.innerHTML=''; r.style.display='flex';
+  COUNTRIES.forEach(c=>{
+    const el=document.createElement('div'); el.className='chip'; el.textContent=c;
+    el.onclick=()=>el.classList.toggle('active'); r.appendChild(el);
+  });
+}
+function onDashSearch(v){ if(v.length>2){ go('search'); document.getElementById('search-input').value=v; onSearchInput(v); }}
+function onSearchInput(v){
+  const hint=document.getElementById('search-hint');
+  const grid=document.getElementById('search-grid');
+  if(v.length<2){ grid.style.display='none'; hint.style.display='block'; hint.textContent='Type something to search…'; return; }
+  const key=Object.keys(SEARCH_MAP).find(k=>v.toLowerCase().includes(k));
+  if(key){
+    const cnt=SEARCH_MAP[key];
+    hint.textContent=`Found ${cnt} results for "${v}"`;
+    grid.style.display='grid'; grid.innerHTML='';
+    [...T].sort(()=>Math.random()-.5).slice(0,cnt).forEach(t=>grid.appendChild(makeCard(t,'Search result','gallery-card')));
+  } else {
+    hint.textContent=`No results for "${v}"`; hint.style.display='block'; grid.style.display='none';
+  }
+}
+
+// ── Lightbox ──────────────────────────────────────────────────────────────
+let lbZoom=1, lbMap=null, lbMarker=null, currentMock=null;
+let origIdx=0; // cycles through ORIGINALS pool
+
+function openLb(thumbId, mock, isVideo) {
+  currentMock=mock||MOCK_MINSK;
+  const img  =document.getElementById('lb-img');
+  const video=document.getElementById('lb-video');
+
+  if (isVideo) {
+    // Show real video
+    img.style.display='none';
+    video.style.display='block';
+    video.src=DEMO_VIDEO;
+    video.load();
+  } else {
+    // Show real full-size photo from originals pool
+    video.style.display='none'; video.pause(); video.src='';
+    img.style.display='block';
+    const orig = ORIGINALS[origIdx % ORIGINALS.length];
+    origIdx++;
+    img.src=`/originals/${orig}`;
+    img.style.transform='scale(1)';
+    lbZoom=1;
+    document.getElementById('lb-zoom-pct').textContent='100%';
+  }
+
+  // Populate meta
+  document.getElementById('lb-date').textContent=currentMock.date||'—';
+  document.getElementById('lb-camera-val').textContent=currentMock.camera||'—';
+  document.getElementById('lb-loc-val').textContent=currentMock.location||'No GPS data';
+  const tagsEl=document.getElementById('lb-tags');
+  tagsEl.innerHTML=(currentMock.tags||[]).map(tg=>`<span class="lb-tag">${tg}</span>`).join('');
+
+  lbTabSwitch('info');
+  document.getElementById('lb').classList.add('open');
+  document.body.classList.add('lb-open');
+}
+
+function lbBgClose(e){ if(e.target.id==='lb') closeLb(); }
+
+// Zoom
+function lbZoomFn(d){
+  lbZoom=Math.max(.5,Math.min(4,lbZoom+d));
+  document.getElementById('lb-img').style.transform=`scale(${lbZoom})`;
+  document.getElementById('lb-zoom-pct').textContent=Math.round(lbZoom*100)+'%';
+}
+function lbZoomReset(){ lbZoom=1; document.getElementById('lb-img').style.transform='scale(1)'; document.getElementById('lb-zoom-pct').textContent='100%'; }
+window.lbZoom=lbZoomFn; // alias for onclick
+
+// Wheel zoom — prevent page scroll when lightbox is open
+document.getElementById('lb').addEventListener('wheel', e=>{
+  e.preventDefault();
+  lbZoomFn(e.deltaY<0 ? .1 : -.1);
+},{passive:false});
+
+// Keyboard
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('lb').classList.contains('open')) return;
+  if(e.key==='Escape') closeLb();
+  if(e.key==='+') lbZoomFn(.25);
+  if(e.key==='-') lbZoomFn(-.25);
+});
+
+// Tabs
+function lbTabSwitch(tab){
+  const img    =document.getElementById('lb-img');
+  const video  =document.getElementById('lb-video');
+  const mapArea=document.getElementById('lb-map-area');
+  document.getElementById('lb-tab-info').classList.toggle('active', tab==='info');
+  document.getElementById('lb-tab-map').classList.toggle('active', tab==='map');
+  if(tab==='map'){
+    img.style.visibility='hidden';
+    video.style.visibility='hidden';
+    mapArea.style.display='block';
+    initLbMap(currentMock?.lat||53.9, currentMock?.lng||27.56);
+  } else {
+    img.style.visibility='visible';
+    video.style.visibility='visible';
+    mapArea.style.display='none';
+  }
+}
+
+function initLbMap(lat,lng){
+  if(!lbMap){
+    lbMap=L.map('lb-map-area').setView([lat,lng],13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+      attribution:'© OpenStreetMap © CARTO', maxZoom:19
+    }).addTo(lbMap);
+    lbMarker=L.circleMarker([lat,lng],{radius:10,fillColor:'#90caf9',color:'rgba(144,202,249,.3)',weight:8,fillOpacity:1}).addTo(lbMap);
+  } else {
+    lbMap.setView([lat,lng],13);
+    lbMarker.setLatLng([lat,lng]);
+  }
+  setTimeout(()=>lbMap.invalidateSize(),80);
+}
+
+// close lightbox also stops video
+function closeLb(){
+  document.getElementById('lb').classList.remove('open');
+  document.body.classList.remove('lb-open');
+  const v=document.getElementById('lb-video'); v.pause(); v.src='';
+  document.getElementById('lb-video').style.display='none';
+  document.getElementById('lb-img').style.display='block';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+buildOTDStrip();
+initYearSelect();
+</script>
+</body>
+</html>
