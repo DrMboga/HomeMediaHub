@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList, getStats, getOnThisDay, thumbnailUrl } from '../api/media'
@@ -44,7 +45,16 @@ export function DashboardPage() {
     staleTime: 60_000,
   })
 
-  const potd = potdResult?.items?.[0] ?? recentResult?.items?.[0]
+  // Prefer a photo from "on this day" in a past year — more meaningful than most-recent.
+  // Use a stable day-based index so the pick doesn't flicker on re-render.
+  const potd = useMemo(() => {
+    const otdItems = otdGroups?.flatMap(g => g.items) ?? []
+    if (otdItems.length > 0) {
+      const idx = (today.getDate() + today.getMonth() * 31) % otdItems.length
+      return otdItems[idx]
+    }
+    return potdResult?.items?.[0] ?? recentResult?.items?.[0]
+  }, [otdGroups, potdResult, recentResult])
 
   const handleDashSearch = (value: string) => {
     if (value.length > 2) navigate(`/search?q=${encodeURIComponent(value)}`)

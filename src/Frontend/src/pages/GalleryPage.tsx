@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList } from '../api/media'
@@ -8,16 +9,28 @@ const MONTHS = [
   'July','August','September','October','November','December',
 ]
 
-function currentYear() { return new Date().getFullYear() }
+const SS_YEAR  = 'gallery-year'
+const SS_MONTH = 'gallery-month'
+
+function currentYear()  { return new Date().getFullYear() }
 function currentMonth() { return new Date().getMonth() + 1 }
 
 export function GalleryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const pageSize = 50
 
-  const year  = parseInt(searchParams.get('year')  ?? String(currentYear()))
-  const month = parseInt(searchParams.get('month') ?? String(currentMonth()))
+  // URL params take priority; fall back to sessionStorage, then to current date.
+  // sessionStorage means clicking the Gallery nav link (which goes to /gallery with
+  // no params) restores wherever the user was rather than resetting to today.
+  const year  = parseInt(searchParams.get('year')  ?? sessionStorage.getItem(SS_YEAR)  ?? String(currentYear()))
+  const month = parseInt(searchParams.get('month') ?? sessionStorage.getItem(SS_MONTH) ?? String(currentMonth()))
   const page  = parseInt(searchParams.get('page')  ?? '1')
+
+  // Persist year/month (not page) so coming back lands on the same browse position.
+  useEffect(() => {
+    sessionStorage.setItem(SS_YEAR, String(year))
+    sessionStorage.setItem(SS_MONTH, String(month))
+  }, [year, month])
 
   const setParams = (updates: { year?: number; month?: number; page?: number }) =>
     setSearchParams({
