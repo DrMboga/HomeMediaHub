@@ -11,6 +11,7 @@ const MONTHS = [
 
 const SS_YEAR  = 'gallery-year'
 const SS_MONTH = 'gallery-month'
+const UNDATED  = 0  // sentinel year value for photos with null taken_at
 
 function currentYear()  { return new Date().getFullYear() }
 function currentMonth() { return new Date().getMonth() + 1 }
@@ -19,14 +20,12 @@ export function GalleryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const pageSize = 50
 
-  // URL params take priority; fall back to sessionStorage, then to current date.
-  // sessionStorage means clicking the Gallery nav link (which goes to /gallery with
-  // no params) restores wherever the user was rather than resetting to today.
   const year  = parseInt(searchParams.get('year')  ?? sessionStorage.getItem(SS_YEAR)  ?? String(currentYear()))
   const month = parseInt(searchParams.get('month') ?? sessionStorage.getItem(SS_MONTH) ?? String(currentMonth()))
   const page  = parseInt(searchParams.get('page')  ?? '1')
 
-  // Persist year/month (not page) so coming back lands on the same browse position.
+  const isUndated = year === UNDATED
+
   useEffect(() => {
     sessionStorage.setItem(SS_YEAR, String(year))
     sessionStorage.setItem(SS_MONTH, String(month))
@@ -43,8 +42,10 @@ export function GalleryPage() {
   const to   = new Date(Date.UTC(year, month, 0, 23, 59, 59)).toISOString()
 
   const { data, isFetching } = useQuery({
-    queryKey: ['gallery', year, month, page],
-    queryFn: () => getMediaList({ page, pageSize, from, to }),
+    queryKey: isUndated ? ['gallery', 'undated', page] : ['gallery', year, month, page],
+    queryFn: () => isUndated
+      ? getMediaList({ page, pageSize, noDate: true })
+      : getMediaList({ page, pageSize, from, to }),
     staleTime: 30_000,
   })
 
@@ -58,7 +59,7 @@ export function GalleryPage() {
     setParams({ year: y, month: m, page: 1 })
   }
 
-  const jumpYear = (y: number) => setParams({ year: y, month: 1, page: 1 })
+  const jumpYear = (y: number) => setParams({ year: y, month: y === UNDATED ? month : 1, page: 1 })
 
   const years: number[] = []
   for (let y = currentYear(); y >= 1997; y--) years.push(y)
@@ -67,15 +68,19 @@ export function GalleryPage() {
     <div className="page">
       <div className="gallery-nav">
         <span className="gallery-title">Gallery</span>
-        <div className="breadcrumb">
-          <button className="bc-arrow" onClick={() => shiftMonth(-1)}>
-            <span className="mi">chevron_left</span>
-          </button>
-          <span className="bc-month">{MONTHS[month - 1]} {year}</span>
-          <button className="bc-arrow" onClick={() => shiftMonth(1)}>
-            <span className="mi">chevron_right</span>
-          </button>
-        </div>
+
+        {!isUndated && (
+          <div className="breadcrumb">
+            <button className="bc-arrow" onClick={() => shiftMonth(-1)}>
+              <span className="mi">chevron_left</span>
+            </button>
+            <span className="bc-month">{MONTHS[month - 1]} {year}</span>
+            <button className="bc-arrow" onClick={() => shiftMonth(1)}>
+              <span className="mi">chevron_right</span>
+            </button>
+          </div>
+        )}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
           <span style={{ fontSize: 11, color: 'var(--label3)' }}>Year:</span>
           <select
@@ -84,6 +89,7 @@ export function GalleryPage() {
             onChange={e => jumpYear(parseInt(e.target.value))}
           >
             {years.map(y => <option key={y} value={y}>{y}</option>)}
+            <option value={UNDATED}>Undated</option>
           </select>
         </div>
       </div>
@@ -93,7 +99,7 @@ export function GalleryPage() {
       {!isFetching && data && data.items.length === 0 && (
         <div className="empty-state">
           <span className="mi">photo_library</span>
-          <span>No photos in {MONTHS[month - 1]} {year}</span>
+          <span>{isUndated ? 'No undated photos' : `No photos in ${MONTHS[month - 1]} ${year}`}</span>
         </div>
       )}
 

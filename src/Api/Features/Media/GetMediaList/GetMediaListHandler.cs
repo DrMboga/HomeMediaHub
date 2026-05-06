@@ -12,7 +12,8 @@ public record GetMediaListRequest(
     DateTime? To,
     string? Tag,
     bool? Favorite,
-    bool? IsVideo = null
+    bool? IsVideo = null,
+    bool? NoDate = null
 ) : IRequest<PagedResult<MediaListItemDto>>;
 
 public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, PagedResult<MediaListItemDto>>
@@ -29,8 +30,12 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
             .Where(f => !f.IsDeleted)
             .AsQueryable();
 
-        if (req.From.HasValue)     q = q.Where(f => f.TakenAt >= DateTime.SpecifyKind(req.From.Value, DateTimeKind.Utc));
-        if (req.To.HasValue)       q = q.Where(f => f.TakenAt <= DateTime.SpecifyKind(req.To.Value, DateTimeKind.Utc));
+        if (req.NoDate == true)    q = q.Where(f => f.TakenAt == null);
+        else
+        {
+            if (req.From.HasValue) q = q.Where(f => f.TakenAt >= DateTime.SpecifyKind(req.From.Value, DateTimeKind.Utc));
+            if (req.To.HasValue)   q = q.Where(f => f.TakenAt <= DateTime.SpecifyKind(req.To.Value, DateTimeKind.Utc));
+        }
         if (req.Favorite.HasValue) q = q.Where(f => f.IsFavorite == req.Favorite.Value);
         if (req.IsVideo.HasValue)  q = req.IsVideo.Value
             ? q.Where(f => f.DurationSec.HasValue)
