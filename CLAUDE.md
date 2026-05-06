@@ -8,41 +8,20 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 **Phase 6 prototype complete** (2026-05-06). Frontend UI prototype in `prototype/` (`index.html` + `server.js`, served at `http://localhost:3333`). Covers all pages: Dashboard (POTD, OTD strip, library stats), Gallery (square grid, year dropdown, month breadcrumb, 50/page paged), On This Day, Geo (Leaflet dark map), Search (semantic + tag + date + country), Albums, Videos. Lightbox: always bottom-bar layout, full-size originals from TestPhoto, video playback, zoom, map tab. Prototype is the React implementation spec.
 
-## Phase 7 Backlog
+**Phase 7 complete** (2026-05-06). All Phase 6 validation bugs fixed:
+- **Semantic search 500**: AI sidecar (`src/AiSidecar/main.py`) was missing the `POST /embed/text` endpoint. Added it; promoted `_tokenizer` to module level.
+- **Lightbox — file path tooltip**: Date `<span>` wrapped in `<abbr title={detail.filePath}>` so hovering shows the full path.
+- **Lightbox — map tab covers close button**: `.lb-close` z-index raised to `700` (above Leaflet's internal ~400–600).
+- **Gallery state resets on nav**: `GalleryPage` rewritten to use `useSearchParams` (URL-backed state, bookmarkable). `sessionStorage` fallback ensures clicking the nav link (which goes to `/gallery` with no params) still restores the last-visited year/month. "Undated" sentinel year (`0`) added to show `WHERE taken_at IS NULL` photos.
+- **Videos pagination broken**: Server-side `isVideo` filter added to `GetMediaListRequest` / `GetMediaListHandler` (`.Where(f => f.DurationSec.HasValue)`). `VideosPage` passes `isVideo: true`; uses `useSearchParams` for page state. Total/page count now correct.
+- **Old AVI/Canon MIME type**: `DetectMimeType` in `ExtractMetadataHandler` now maps `.avi` → `video/x-msvideo`, `.mkv` → `video/x-matroska`. Both extensions added to `VideoExtensions`.
+- **`taken_at` fallback (images)**: `DateTimeOriginal` → `DateTimeDigitized` → `LastWriteTimeUtc` (mtime). No path-parsing heuristics.
+- **`taken_at` fallback (videos)**: ExifTool `DateTimeOriginal` → `CreateDate` → `LastWriteTimeUtc` (mtime).
+- **POTD widget**: Now uses On This Day data with a stable day-based index (`(day + month*31) % count`) so it shows a historically meaningful photo. Falls back to most-recent only when no OTD data exists. Both queries include `from=2000-01-01` to exclude null-date items.
 
-Issues discovered during Phase 6 validation. Fix in the next session.
+**Operational note — file copy to server**: The `taken_at` mtime fallback only works if files are copied with mtime preservation. Use `rsync -av --times` or `scp -p` when copying photos to the server. Plain `scp` (without `-p`) sets mtime to the copy time, giving wrong dates for files without EXIF.
 
-### UI bugs
-
-**Lightbox — file path tooltip**
-Show the real file path (and filename) somewhere in the lightbox info bar without cluttering the main layout. Suggested UX: hovering over the date label shows a tooltip with the full `filePath` from `MediaDetailDto`. Implementation: wrap the date `<span>` in a `<abbr title={detail.filePath}>` or a CSS tooltip.
-
-**Lightbox — map tab overlaps the close (X) button**
-When the Map tab is active, the Leaflet `MapContainer` fills `lb-photo` absolutely and covers the close button in the top-right corner. Fix: raise the close button's `z-index` above the Leaflet map layer (Leaflet uses z-index ~400–600 internally; set close button to `z-index: 700` or move it into `lb-info`).
-
-**Gallery — state not remembered across navigation**
-`GalleryPage` initialises year/month/page from `new Date()` on every mount, so navigating away and back resets to the current month. Fix: persist state in the URL as query params (`?year=2020&month=3&page=2`) using React Router `useSearchParams`. This also makes the view bookmarkable and shareable.
-
-### Videos page bugs
-
-**Broken pagination and sort**
-Root cause: `VideosPage` calls `GET /api/media` (all media, paginated server-side) then filters client-side with `.filter(i => i.isVideo)`. This means page 1 might return 3 videos, page 2 might return 11, etc., and the total/page count is wrong.
-Fix options (pick one):
-1. Add `isVideo` (or `mediaType=video`) query param to `GET /api/media` and filter server-side in `GetMediaListHandler`.
-2. Fetch all videos in one request with a large `pageSize` and paginate client-side.
-Option 1 is cleaner. Add `bool? isVideo` param to `GetMediaListRequest`; filter with `.Where(f => f.DurationSec.HasValue)` or `.Where(f => !f.DurationSec.HasValue)` as appropriate. Also add `OrderByDescending(f => f.TakenAt)` (already present in handler) but ensure nulls go last.
-
-### Pipeline bugs
-
-**Old AVI/Canon videos — missing metadata (`taken_at`, MIME type)**
-Example: `2011/Video/MVI_6586.AVI` — `taken_at` is NULL, `mime_type` is `application/octet-stream`, no camera metadata.
-Root cause: ExifTool cannot extract `DateTimeOriginal` from older AVI container files, and the W1 metadata step does not fall back to filesystem dates. The MIME type is set during the hash/dedup step before the file extension is inspected.
-Fixes needed:
-1. **MIME type**: In W1 hash step or the `.NET` `ExtractMetadataHandler`, derive MIME type from file extension if the detected type is `application/octet-stream` and extension is a known video format (`.avi`, `.mov`, `.mp4`, `.mkv`).
-2. **`taken_at` fallback**: In `ExtractMetadataHandler`, if `DateTimeOriginal` is absent, fall back in order: `CreateDate` → `FileModifyDate` → `FileCreateDate` → directory name year hint (e.g. parse `2011` from the path). Store the best available date. This ensures no media has a NULL `taken_at`.
-
-**POTD widget shows media with NULL `taken_at`**
-`DashboardPage` queries `GET /api/media?favorite=true&pageSize=1` then falls back to `GET /api/media?pageSize=1`. The list handler returns all non-deleted media ordered by `TakenAt DESC NULLS LAST`, so NULL-date items can surface. Fix: in `DashboardPage`, add `from` filter set to a reasonable lower bound (e.g. year 2000) so only media with a known date appears as POTD. Long-term, fixing the pipeline `taken_at` fallback (above) eliminates the root cause.
+**Operational note — Docker bind mounts**: If a new directory is created on the host while a container is running (e.g. a new `NotIndexed/` subfolder in the photo library), the container may not see it due to a stale mount. Run `docker compose --env-file .env.stage up -d --force-recreate <service>` to reload the mount.
 
 **Phase 5 validated** (2026-05-03). Frontend API + Auth: JWT login/refresh/logout, token refresh (sliding window), logout, all media/search/albums/series/admin endpoints. Fixes applied during validation: `AddRefreshTokens` migration applied manually (class not compiled into image — root cause unresolved); `page`/`pageSize` query params given defaults to fix 400s; date filter forced UTC kind to fix Npgsql `timestamptz` rejection; semantic search path renamed to `/api/search/semantic`; tag search param renamed from `tag` to `q`. All 64 unit tests pass.
 
