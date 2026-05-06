@@ -34,9 +34,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             : (info.Width, info.Height);
 
         var takenAt = ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal))
-                   ?? ParseDateTime(TryGet(exif, ExifTag.DateTime))
                    ?? ParseDateTime(TryGet(exif, ExifTag.DateTimeDigitized))
-                   ?? (fileInfo.LastWriteTimeUtc.Year >= 1980 ? fileInfo.LastWriteTimeUtc : (DateTime?)null)
                    ?? ParseYearFromPath(sourcePath);
 
         return new MetadataResult(
@@ -67,8 +65,6 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseExiftoolDate(exif, "DateTimeOriginal")
                    ?? ParseExiftoolDate(exif, "CreateDate")
-                   ?? ParseExiftoolDate(exif, "FileModifyDate")
-                   ?? ParseExiftoolDate(exif, "FileCreateDate")
                    ?? ParseYearFromPath(originalPath);
 
         return new MetadataResult(
