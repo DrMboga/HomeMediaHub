@@ -35,7 +35,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal))
                    ?? ParseDateTime(TryGet(exif, ExifTag.DateTimeDigitized))
-                   ?? ParseYearFromPath(sourcePath);
+                   ?? EarliestFilesystemDate(fileInfo);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(sourcePath),
@@ -65,7 +65,7 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseExiftoolDate(exif, "DateTimeOriginal")
                    ?? ParseExiftoolDate(exif, "CreateDate")
-                   ?? ParseYearFromPath(originalPath);
+                   ?? EarliestFilesystemDate(originalFileInfo);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
@@ -159,13 +159,13 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return null;
     }
 
-    private static DateTime? ParseYearFromPath(string filePath)
+    // Use the earlier of LastWriteTime and CreationTime.
+    // LastWriteTime is typically preserved from the original when copied via Samba/rsync.
+    // CreationTime reflects when the copy was made, so it is usually the later (wrong) one.
+    private static DateTime? EarliestFilesystemDate(FileInfo fi)
     {
-        var now = DateTime.UtcNow.Year;
-        foreach (var segment in filePath.Replace('\\', '/').Split('/'))
-            if (int.TryParse(segment, out var y) && y >= 1970 && y <= now)
-                return new DateTime(y, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        return null;
+        var min = fi.LastWriteTimeUtc < fi.CreationTimeUtc ? fi.LastWriteTimeUtc : fi.CreationTimeUtc;
+        return min.Year >= 1980 ? min : null;
     }
 
     private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
