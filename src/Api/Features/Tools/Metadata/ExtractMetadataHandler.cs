@@ -159,16 +159,14 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return null;
     }
 
-    // rsync --times / scp -p preserve mtime (LastWriteTime) from the source machine.
-    // The server's birth time (CreationTime) always stays as the copy date.
-    // So if mtime is more than 1 day older than CreationTime, mtime was preserved
-    // and reflects the original file date. If they are close together, the copy
-    // did not preserve timestamps and we return null rather than a wrong date.
+    // Use LastWriteTime (mtime) as the filesystem date fallback.
+    // rsync --times / scp -p preserve mtime from the source, so it reflects the
+    // original file date. On Linux, CreationTime is unreliable (.NET returns
+    // min(atime,mtime,ctime) rather than birth time), so we don't compare against it.
     private static DateTime? EarliestFilesystemDate(FileInfo fi)
     {
         var mtime = fi.LastWriteTimeUtc;
-        var btime = fi.CreationTimeUtc;
-        return (mtime.Year >= 1980 && mtime < btime.AddDays(-1)) ? mtime : null;
+        return mtime.Year >= 1980 ? mtime : null;
     }
 
 private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
