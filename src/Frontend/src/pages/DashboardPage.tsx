@@ -27,13 +27,13 @@ export function DashboardPage() {
 
   const { data: potdResult } = useQuery({
     queryKey: ['potd'],
-    queryFn: () => getMediaList({ page: 1, pageSize: 1, favorite: true }),
+    queryFn: () => getMediaList({ page: 1, pageSize: 1, favorite: true, from: '2000-01-01T00:00:00.000Z' }),
     staleTime: 60_000,
   })
 
   const { data: recentResult } = useQuery({
     queryKey: ['recent'],
-    queryFn: () => getMediaList({ page: 1, pageSize: 1 }),
+    queryFn: () => getMediaList({ page: 1, pageSize: 1, from: '2000-01-01T00:00:00.000Z' }),
     staleTime: 60_000,
     enabled: !potdResult?.items?.length,
   })

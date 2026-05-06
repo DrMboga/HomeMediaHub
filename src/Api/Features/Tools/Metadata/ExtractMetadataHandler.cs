@@ -9,7 +9,7 @@ namespace Api.Features.Tools.Metadata;
 
 public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequest, MetadataResult>
 {
-    private static readonly HashSet<string> VideoExtensions = [".mp4", ".mov", ".m4v", ".avi"];
+    private static readonly HashSet<string> VideoExtensions = [".mp4", ".mov", ".m4v", ".avi", ".mkv"];
 
     public async Task<MetadataResult> Handle(ExtractMetadataRequest request, CancellationToken cancellationToken)
     {
@@ -33,13 +33,19 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             ? (info.Height, info.Width)
             : (info.Width, info.Height);
 
+        var takenAt = ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal))
+                   ?? ParseDateTime(TryGet(exif, ExifTag.DateTime))
+                   ?? ParseDateTime(TryGet(exif, ExifTag.DateTimeDigitized))
+                   ?? (fileInfo.LastWriteTimeUtc.Year >= 1980 ? fileInfo.LastWriteTimeUtc : (DateTime?)null)
+                   ?? ParseYearFromPath(sourcePath);
+
         return new MetadataResult(
             MimeType:    DetectMimeType(sourcePath),
             FileSize:    fileInfo.Length,
             Width:       displayWidth,
             Height:      displayHeight,
             DurationSec: null,
-            TakenAt:     ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal)),
+            TakenAt:     takenAt,
             Lat:         ToDecimalDegrees(TryGet(exif, ExifTag.GPSLatitude),
                                           TryGet(exif, ExifTag.GPSLatitudeRef)),
             Lon:         ToDecimalDegrees(TryGet(exif, ExifTag.GPSLongitude),
@@ -59,13 +65,19 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var durationSec = exif.TryGetProperty("Duration", out var dur) && dur.TryGetDouble(out var d) ? d : (double?)null;
 
+        var takenAt = ParseExiftoolDate(exif, "DateTimeOriginal")
+                   ?? ParseExiftoolDate(exif, "CreateDate")
+                   ?? ParseExiftoolDate(exif, "FileModifyDate")
+                   ?? ParseExiftoolDate(exif, "FileCreateDate")
+                   ?? ParseYearFromPath(originalPath);
+
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
             FileSize:    originalFileInfo.Length,
             Width:       frameInfo.Width,
             Height:      frameInfo.Height,
             DurationSec: durationSec,
-            TakenAt:     ParseDateTime(exif.TryGetProperty("CreateDate", out var dt) ? dt.GetString() : null),
+            TakenAt:     takenAt,
             Lat:         ParseGpsCoordinate(exif, "GPSLatitude",  "GPSLatitudeRef"),
             Lon:         ParseGpsCoordinate(exif, "GPSLongitude", "GPSLongitudeRef"),
             CameraMake:  exif.TryGetProperty("Make",  out var make)  ? make.GetString()  : null,
@@ -138,6 +150,28 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
             ? dt : null;
 
+    // ExifTool dates: "yyyy:MM:dd HH:mm:ss" or "yyyy:MM:dd HH:mm:ss+HH:mm" (FileModifyDate, FileCreateDate)
+    private static DateTime? ParseExiftoolDate(JsonElement exif, string tag)
+    {
+        if (!exif.TryGetProperty(tag, out var prop)) return null;
+        var s = prop.GetString();
+        if (string.IsNullOrEmpty(s)) return null;
+        if (DateTimeOffset.TryParseExact(s,
+                ["yyyy:MM:dd HH:mm:sszzz", "yyyy:MM:dd HH:mm:ss"],
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
+            return dto.UtcDateTime;
+        return null;
+    }
+
+    private static DateTime? ParseYearFromPath(string filePath)
+    {
+        var now = DateTime.UtcNow.Year;
+        foreach (var segment in filePath.Replace('\\', '/').Split('/'))
+            if (int.TryParse(segment, out var y) && y >= 1970 && y <= now)
+                return new DateTime(y, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        return null;
+    }
+
     private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
     {
         if (coord is null || coord.Length < 3) return null;
@@ -158,6 +192,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
             ".heic" or ".heif" => "image/heic",
             ".mp4"             => "video/mp4",
             ".mov" or ".m4v"   => "video/quicktime",
+            ".avi"             => "video/x-msvideo",
+            ".mkv"             => "video/x-matroska",
             _                  => "application/octet-stream"
         };
 }

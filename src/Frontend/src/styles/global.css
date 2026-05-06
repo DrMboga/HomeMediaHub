@@ -356,7 +356,7 @@ body.lb-open { overflow: hidden; }
 .lb-map-area { position: absolute; inset: 0; }
 
 .lb-close {
-  position: absolute; top: 10px; right: 10px; z-index: 10;
+  position: absolute; top: 10px; right: 10px; z-index: 700;
   width: 32px; height: 32px; border-radius: 50%;
   background: rgba(255,255,255,.12); border: none; color: #fff;
   display: flex; align-items: center; justify-content: center;

@@ -1,24 +1,21 @@
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
 
 export function VideosPage() {
-  const [page, setPage] = useState(1)
+  const [searchParams, setSearchParams] = useSearchParams()
   const pageSize = 50
+
+  const page = parseInt(searchParams.get('page') ?? '1')
+  const setPage = (p: number) => setSearchParams({ page: String(p) })
 
   const { data, isFetching } = useQuery({
     queryKey: ['videos', page],
-    queryFn: () => getMediaList({ page, pageSize }),
+    queryFn: () => getMediaList({ page, pageSize, isVideo: true }),
     staleTime: 30_000,
-    select: result => ({
-      ...result,
-      items: result.items.filter(i => i.isVideo),
-    }),
   })
 
-  // Re-fetch all without filter for a real videos endpoint (API doesn't filter by isVideo yet)
-  // We filter client-side for now since there's no isVideo query param
   const totalPages = data ? Math.ceil(data.total / pageSize) : 1
 
   return (
@@ -48,15 +45,15 @@ export function VideosPage() {
             <button
               className="pager-btn"
               disabled={page === 1}
-              onClick={() => setPage(p => p - 1)}
+              onClick={() => setPage(page - 1)}
             >
               <span className="mi" style={{ fontSize: 16 }}>chevron_left</span>Previous
             </button>
-            <span className="pager-info">Page {page} of {totalPages}</span>
+            <span className="pager-info">Page {page} of {totalPages} · {data.total} videos</span>
             <button
               className="pager-btn"
               disabled={page >= totalPages}
-              onClick={() => setPage(p => p + 1)}
+              onClick={() => setPage(page + 1)}
             >
               Next<span className="mi" style={{ fontSize: 16 }}>chevron_right</span>
             </button>

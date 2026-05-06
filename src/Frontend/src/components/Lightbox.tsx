@@ -129,7 +129,9 @@ export function Lightbox() {
         {/* Info bar */}
         <div className="lb-info">
           <div className="lb-meta">
-            <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
+            <abbr title={detail?.filePath ?? undefined} style={{ textDecoration: 'none', cursor: 'default' }}>
+              <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
+            </abbr>
             {camera && (
               <>
                 <span className="lb-sep">·</span>

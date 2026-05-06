@@ -28,19 +28,20 @@ _YOLO_CONFIDENCE_THRESHOLD = 0.30
 # concurrent load; FastAPI runs sync endpoints in a thread pool so without
 # this lock multiple threads would call the models simultaneously.
 _inference_lock = threading.Semaphore(1)
+_tokenizer = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _yolo, _clip_model, _clip_preprocess, _text_features
+    global _yolo, _clip_model, _clip_preprocess, _text_features, _tokenizer
     _yolo = YOLO("yolov8n.pt")
     _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
         "ViT-B-32", pretrained="openai"
     )
     _clip_model.eval()
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    _tokenizer = open_clip.get_tokenizer("ViT-B-32")
     # Pre-compute text features once — reused for every /analyze call
-    text_tokens = tokenizer(_ORIGIN_LABELS)
+    text_tokens = _tokenizer(_ORIGIN_LABELS)
     with torch.no_grad():
         tf = _clip_model.encode_text(text_tokens)
         _text_features = tf / tf.norm(dim=-1, keepdim=True)
@@ -69,11 +70,29 @@ class AnalyzeResponse(BaseModel):
     originConfidence: float
 
 
+class EmbedTextRequest(BaseModel):
+    text: str
+
+
+class EmbedTextResponse(BaseModel):
+    embedding: list[float]
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
     return {"status": "ok", "phase": 4}
+
+
+@app.post("/embed/text", response_model=EmbedTextResponse)
+def embed_text(req: EmbedTextRequest):
+    tokens = _tokenizer([req.text])
+    with _inference_lock:
+        with torch.no_grad():
+            features = _clip_model.encode_text(tokens)
+            features = features / features.norm(dim=-1, keepdim=True)
+    return EmbedTextResponse(embedding=features.squeeze(0).tolist())
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)

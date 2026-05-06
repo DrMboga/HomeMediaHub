@@ -29,6 +29,7 @@ export async function getMediaList(params: {
   to?: string
   tag?: string
   favorite?: boolean
+  isVideo?: boolean
 }): Promise<PagedResult<MediaListItem>> {
   const { data } = await client.get<PagedResult<MediaListItem>>('/media', { params })
   return data

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
@@ -12,10 +12,19 @@ function currentYear() { return new Date().getFullYear() }
 function currentMonth() { return new Date().getMonth() + 1 }
 
 export function GalleryPage() {
-  const [year, setYear] = useState(currentYear)
-  const [month, setMonth] = useState(currentMonth)
-  const [page, setPage] = useState(1)
+  const [searchParams, setSearchParams] = useSearchParams()
   const pageSize = 50
+
+  const year  = parseInt(searchParams.get('year')  ?? String(currentYear()))
+  const month = parseInt(searchParams.get('month') ?? String(currentMonth()))
+  const page  = parseInt(searchParams.get('page')  ?? '1')
+
+  const setParams = (updates: { year?: number; month?: number; page?: number }) =>
+    setSearchParams({
+      year:  String(updates.year  ?? year),
+      month: String(updates.month ?? month),
+      page:  String(updates.page  ?? page),
+    })
 
   const from = new Date(Date.UTC(year, month - 1, 1)).toISOString()
   const to   = new Date(Date.UTC(year, month, 0, 23, 59, 59)).toISOString()
@@ -33,10 +42,10 @@ export function GalleryPage() {
     let y = year
     if (m > 12) { m = 1; y++ }
     if (m < 1)  { m = 12; y-- }
-    setMonth(m); setYear(y); setPage(1)
+    setParams({ year: y, month: m, page: 1 })
   }
 
-  const jumpYear = (y: number) => { setYear(y); setMonth(1); setPage(1) }
+  const jumpYear = (y: number) => setParams({ year: y, month: 1, page: 1 })
 
   const years: number[] = []
   for (let y = currentYear(); y >= 1997; y--) years.push(y)
@@ -87,7 +96,7 @@ export function GalleryPage() {
             <button
               className="pager-btn"
               disabled={page === 1}
-              onClick={() => setPage(p => p - 1)}
+              onClick={() => setParams({ page: page - 1 })}
             >
               <span className="mi" style={{ fontSize: 16 }}>chevron_left</span>Previous
             </button>
@@ -97,7 +106,7 @@ export function GalleryPage() {
             <button
               className="pager-btn"
               disabled={page >= totalPages}
-              onClick={() => setPage(p => p + 1)}
+              onClick={() => setParams({ page: page + 1 })}
             >
               Next<span className="mi" style={{ fontSize: 16 }}>chevron_right</span>
             </button>
