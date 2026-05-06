@@ -29,6 +29,21 @@ public static class MediaEndpoints
             return Results.Created($"/api/media/{result.Id}", result);
         });
 
+        // Thumbnail — no auth required: GUID is unguessable and app is LAN-only.
+        // <img> tags cannot send Authorization headers, so this must be public.
+        app.MapGet("/api/media/{id:guid}/thumbnail", async (Guid id, AppDbContext db, HttpResponse response, CancellationToken ct) =>
+        {
+            var thumb = await db.MediaThumbnails
+                .Where(t => t.MediaFileId == id)
+                .Select(t => t.ThumbnailPath)
+                .FirstOrDefaultAsync(ct);
+
+            if (thumb is null) return Results.NotFound();
+
+            response.Headers.Append("X-Accel-Redirect", $"/thumbs/{Path.GetFileName(thumb)}");
+            return Results.Ok();
+        });
+
         // ── Frontend endpoints (auth required) ───────────────────────────
         var g = app.MapGroup("/api/media").RequireAuthorization();
 
@@ -93,19 +108,6 @@ public static class MediaEndpoints
         {
             var detail = await m.Send(new GetMediaDetailRequest(id), ct);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
-        });
-
-        g.MapGet("/{id:guid}/thumbnail", async (Guid id, AppDbContext db, HttpResponse response, CancellationToken ct) =>
-        {
-            var thumb = await db.MediaThumbnails
-                .Where(t => t.MediaFileId == id)
-                .Select(t => t.ThumbnailPath)
-                .FirstOrDefaultAsync(ct);
-
-            if (thumb is null) return Results.NotFound();
-
-            response.Headers.Append("X-Accel-Redirect", $"/thumbs/{Path.GetFileName(thumb)}");
-            return Results.Ok();
         });
 
         g.MapGet("/{id:guid}/original", async (Guid id, AppDbContext db, CancellationToken ct) =>
