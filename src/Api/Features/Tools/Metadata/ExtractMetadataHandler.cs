@@ -35,7 +35,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseDateTime(TryGet(exif, ExifTag.DateTimeOriginal))
                    ?? ParseDateTime(TryGet(exif, ExifTag.DateTimeDigitized))
-                   ?? EarliestFilesystemDate(fileInfo);
+                   ?? EarliestFilesystemDate(fileInfo)
+                   ?? ParseYearFromPath(sourcePath);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(sourcePath),
@@ -65,7 +66,8 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
 
         var takenAt = ParseExiftoolDate(exif, "DateTimeOriginal")
                    ?? ParseExiftoolDate(exif, "CreateDate")
-                   ?? EarliestFilesystemDate(originalFileInfo);
+                   ?? EarliestFilesystemDate(originalFileInfo)
+                   ?? ParseYearFromPath(originalPath);
 
         return new MetadataResult(
             MimeType:    DetectMimeType(originalPath),
@@ -159,13 +161,23 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return null;
     }
 
-    // Use the earlier of LastWriteTime and CreationTime.
-    // LastWriteTime is typically preserved from the original when copied via Samba/rsync.
-    // CreationTime reflects when the copy was made, so it is usually the later (wrong) one.
+    // Use the earlier of LastWriteTime and CreationTime, but only if it looks like an
+    // original date (not a recent copy). If the copy did not preserve mtime, both dates
+    // will be recent and this returns null, letting ParseYearFromPath have the last word.
     private static DateTime? EarliestFilesystemDate(FileInfo fi)
     {
         var min = fi.LastWriteTimeUtc < fi.CreationTimeUtc ? fi.LastWriteTimeUtc : fi.CreationTimeUtc;
-        return min.Year >= 1980 ? min : null;
+        var cutoff = DateTime.UtcNow.AddYears(-1);
+        return (min.Year >= 1980 && min < cutoff) ? min : null;
+    }
+
+    private static DateTime? ParseYearFromPath(string filePath)
+    {
+        var now = DateTime.UtcNow.Year;
+        foreach (var segment in filePath.Replace('\\', '/').Split('/'))
+            if (int.TryParse(segment, out var y) && y >= 1970 && y <= now)
+                return new DateTime(y, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        return null;
     }
 
     private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
