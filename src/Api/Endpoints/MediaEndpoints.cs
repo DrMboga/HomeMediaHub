@@ -29,8 +29,9 @@ public static class MediaEndpoints
             return Results.Created($"/api/media/{result.Id}", result);
         });
 
-        // Thumbnail — no auth required: GUID is unguessable and app is LAN-only.
-        // <img> tags cannot send Authorization headers, so this must be public.
+        // Thumbnail / original / stream — no auth required.
+        // <img> and <video> tags cannot send Authorization headers.
+        // GUIDs are unguessable and the app is LAN-only, so auth here adds nothing.
         app.MapGet("/api/media/{id:guid}/thumbnail", async (Guid id, AppDbContext db, HttpResponse response, CancellationToken ct) =>
         {
             var thumb = await db.MediaThumbnails
@@ -42,6 +43,33 @@ public static class MediaEndpoints
 
             response.Headers.Append("X-Accel-Redirect", $"/thumbs/{Path.GetFileName(thumb)}");
             return Results.Ok();
+        });
+
+        app.MapGet("/api/media/{id:guid}/original", async (Guid id, AppDbContext db, CancellationToken ct) =>
+        {
+            var f = await db.MediaFiles
+                .Where(x => x.Id == id && !x.IsDeleted)
+                .Select(x => new { x.FilePath, x.MimeType })
+                .FirstOrDefaultAsync(ct);
+
+            if (f is null || !File.Exists(f.FilePath))
+                return Results.NotFound();
+
+            return Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);
+        });
+
+        app.MapGet("/api/media/{id:guid}/stream", async (
+            Guid id,
+            IMediator m,
+            IConfiguration config,
+            CancellationToken ct) =>
+        {
+            var videoCacheDir = config["VideoCacheDir"] ?? "/video-cache";
+            var result = await m.Send(new StreamMediaRequest(id, videoCacheDir), ct);
+
+            if (result is null) return Results.NotFound();
+
+            return Results.File(result.FilePath, result.ContentType, enableRangeProcessing: true);
         });
 
         // ── Frontend endpoints (auth required) ───────────────────────────
@@ -108,33 +136,6 @@ public static class MediaEndpoints
         {
             var detail = await m.Send(new GetMediaDetailRequest(id), ct);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
-        });
-
-        g.MapGet("/{id:guid}/original", async (Guid id, AppDbContext db, CancellationToken ct) =>
-        {
-            var f = await db.MediaFiles
-                .Where(x => x.Id == id && !x.IsDeleted)
-                .Select(x => new { x.FilePath, x.MimeType })
-                .FirstOrDefaultAsync(ct);
-
-            if (f is null || !File.Exists(f.FilePath))
-                return Results.NotFound();
-
-            return Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);
-        });
-
-        g.MapGet("/{id:guid}/stream", async (
-            Guid id,
-            IMediator m,
-            IConfiguration config,
-            CancellationToken ct) =>
-        {
-            var videoCacheDir = config["VideoCacheDir"] ?? "/video-cache";
-            var result = await m.Send(new StreamMediaRequest(id, videoCacheDir), ct);
-
-            if (result is null) return Results.NotFound();
-
-            return Results.File(result.FilePath, result.ContentType, enableRangeProcessing: true);
         });
 
         g.MapPatch("/{id:guid}", async (Guid id, [FromBody] PatchMediaRequest req, IMediator m, CancellationToken ct) =>
