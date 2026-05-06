@@ -7,9 +7,15 @@ import { useLightbox } from '../context/LightboxContext'
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-US', {
+  const d = new Date(iso)
+  const datePart = d.toLocaleDateString('en-US', {
     weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-  }) + ' · ' + new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  })
+  // Midnight UTC exactly means the time came from a path-year fallback, not real EXIF.
+  // Don't show a misleading time in that case.
+  const isMidnightUtc = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
+  if (isMidnightUtc) return datePart
+  return datePart + ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
 }
 
 function Resizer() {
