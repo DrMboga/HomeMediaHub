@@ -51,7 +51,13 @@
       "mcp__playwright__browser_take_screenshot",
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_snapshot",
-      "PowerShell(Stop-Process *)"
+      "PowerShell(Stop-Process *)",
+      "Bash(npm install *)",
+      "PowerShell(npm install *)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; [System.Environment]::SetEnvironmentVariable\\(\"Path\", $env:PATH, \"Process\"\\); Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npm install\" 2>&1 | Select-Object -Last 8)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npx tsc --noEmit -p tsconfig.app.json 2>&1\")",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npm run build 2>&1\")",
+      "PowerShell(git *)"
     ]
   },
   "enabledPlugins": {

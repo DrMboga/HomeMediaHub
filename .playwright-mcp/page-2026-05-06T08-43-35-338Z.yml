@@ -1,0 +1,46 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3] [cursor=pointer]: HomeMediaHub
+    - generic [ref=e4]:
+      - generic [ref=e5] [cursor=pointer]:
+        - generic [ref=e6]: home
+        - text: Home
+      - generic [ref=e7] [cursor=pointer]:
+        - generic [ref=e8]: today
+        - text: On This Day
+      - generic [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: photo_library
+        - text: Gallery
+      - generic [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: map
+        - text: Geo
+      - generic [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: search
+        - text: Search
+      - generic [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: collections
+        - text: Albums
+      - generic [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]: videocam
+        - text: Videos
+    - generic [ref=e19]:
+      - generic [ref=e20]: M
+      - text: Mike
+  - generic [ref=e150]:
+    - generic [ref=e151]:
+      - generic [ref=e152]: Geo
+      - generic [ref=e153]: 8 countries · 24 cities · 281 geotagged photos
+    - generic [ref=e154]:
+      - generic:
+        - generic:
+          - img
+      - generic:
+        - generic [ref=e162]:
+          - button "Zoom in" [ref=e163] [cursor=pointer]: +
+          - button "Zoom out" [ref=e164] [cursor=pointer]: −
+        - generic [ref=e165]:
+          - link "Leaflet" [ref=e166] [cursor=pointer]:
+            - /url: https://leafletjs.com
+            - img [ref=e167]
+            - text: Leaflet
+          - text: "| © OpenStreetMap © CARTO"
