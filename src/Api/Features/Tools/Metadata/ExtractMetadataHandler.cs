@@ -159,14 +159,16 @@ public sealed class ExtractMetadataHandler : IRequestHandler<ExtractMetadataRequ
         return null;
     }
 
-    // Use the earlier of LastWriteTime and CreationTime, but only if it looks like an
-    // original date (not a recent copy). If the copy did not preserve mtime, both dates
-    // will be recent and this returns null, letting ParseYearFromPath have the last word.
+    // rsync --times / scp -p preserve mtime (LastWriteTime) from the source machine.
+    // The server's birth time (CreationTime) always stays as the copy date.
+    // So if mtime is more than 1 day older than CreationTime, mtime was preserved
+    // and reflects the original file date. If they are close together, the copy
+    // did not preserve timestamps and we return null rather than a wrong date.
     private static DateTime? EarliestFilesystemDate(FileInfo fi)
     {
-        var min = fi.LastWriteTimeUtc < fi.CreationTimeUtc ? fi.LastWriteTimeUtc : fi.CreationTimeUtc;
-        var cutoff = DateTime.UtcNow.AddYears(-1);
-        return (min.Year >= 1980 && min < cutoff) ? min : null;
+        var mtime = fi.LastWriteTimeUtc;
+        var btime = fi.CreationTimeUtc;
+        return (mtime.Year >= 1980 && mtime < btime.AddDays(-1)) ? mtime : null;
     }
 
 private static double? ToDecimalDegrees(Rational[]? coord, string? reference)
