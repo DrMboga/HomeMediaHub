@@ -1,0 +1,123 @@
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { semanticSearch } from '../api/search'
+import { PhotoCard } from '../components/PhotoCard'
+
+const COUNTRIES = ['Russia','Italy','UK','USA','Germany','France','Japan','Belarus']
+
+export function SearchPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [query, setQuery] = useState(searchParams.get('q') ?? '')
+  const [dateOpen, setDateOpen] = useState(false)
+  const [countryOpen, setCountryOpen] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [selectedCountries, setSelectedCountries] = useState<Set<string>>(new Set())
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  // Update query param when input changes
+  useEffect(() => {
+    const q = query.trim()
+    if (q) setSearchParams({ q }, { replace: true })
+    else setSearchParams({}, { replace: true })
+  }, [query, setSearchParams])
+
+  const debouncedQuery = query.trim()
+
+  const { data: results, isFetching } = useQuery({
+    queryKey: ['search', debouncedQuery],
+    queryFn: () => semanticSearch(debouncedQuery),
+    enabled: debouncedQuery.length >= 2,
+    staleTime: 30_000,
+  })
+
+  const toggleCountry = (c: string) => {
+    setSelectedCountries(prev => {
+      const next = new Set(prev)
+      if (next.has(c)) next.delete(c); else next.add(c)
+      return next
+    })
+  }
+
+  const showHint  = debouncedQuery.length < 2
+  const showEmpty = !showHint && !isFetching && results?.length === 0
+
+  return (
+    <div className="page">
+      <div className="search-wrap">
+        <div className="search-row">
+          <span className="search-icon"><span className="mi">search</span></span>
+          <input
+            ref={inputRef}
+            className="search-input"
+            type="text"
+            placeholder="People, places, events…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          <div className="search-filters">
+            <div
+              className={`chip${dateOpen ? ' active' : ''}`}
+              onClick={() => setDateOpen(o => !o)}
+            >
+              <span className="mi">calendar_today</span>Date range
+            </div>
+            <div
+              className={`chip${countryOpen ? ' active' : ''}`}
+              onClick={() => setCountryOpen(o => !o)}
+            >
+              <span className="mi">public</span>Country
+              <span className="mi" style={{ fontSize: 14 }}>expand_more</span>
+            </div>
+          </div>
+        </div>
+
+        {dateOpen && (
+          <div className="date-filter-row">
+            <input className="date-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span className="to-lbl">to</span>
+            <input className="date-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </div>
+        )}
+
+        {countryOpen && (
+          <div className="country-row">
+            {COUNTRIES.map(c => (
+              <div
+                key={c}
+                className={`chip${selectedCountries.has(c) ? ' active' : ''}`}
+                onClick={() => toggleCountry(c)}
+              >{c}</div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showHint && (
+        <div className="search-hint">Type something to search your photos…</div>
+      )}
+
+      {isFetching && <div className="loading">Searching…</div>}
+
+      {showEmpty && (
+        <div className="search-hint">No results for "{debouncedQuery}"</div>
+      )}
+
+      {results && results.length > 0 && (
+        <>
+          <div className="search-hint" style={{ padding: '4px 0', textAlign: 'left' }}>
+            Found {results.length} result{results.length !== 1 ? 's' : ''} for "{debouncedQuery}"
+          </div>
+          <div className="gallery-grid">
+            {results.map(item => (
+              <PhotoCard key={item.id} item={item} className="gallery-card" />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

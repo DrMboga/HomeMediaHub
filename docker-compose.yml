@@ -187,12 +187,12 @@ services:
       retries: 3
       start_period: 120s
 
-  # ── React frontend (Phase 1: placeholder; Phase 6: production Vite build) ─
+  # ── React frontend (Phase 6: production Vite build) ─────────────────────
   frontend:
-    image: nginx:alpine
+    build:
+      context: src/Frontend
+      dockerfile: Dockerfile
     restart: unless-stopped
-    volumes:
-      - ./infra/nginx/frontend-placeholder.html:/usr/share/nginx/html/index.html:ro
     networks:
       - homemediahub
 

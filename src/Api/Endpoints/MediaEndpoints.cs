@@ -2,9 +2,12 @@ using Api.Data;
 using Api.Features.Media;
 using Api.Features.Media.BulkDeleteMedia;
 using Api.Features.Media.DeleteMedia;
+using Api.Features.Media.GeoMedia;
 using Api.Features.Media.GetMediaDetail;
 using Api.Features.Media.GetMediaList;
 using Api.Features.Media.GetReviewQueue;
+using Api.Features.Media.GetStats;
+using Api.Features.Media.OnThisDay;
 using Api.Features.Media.SaveMedia;
 using Api.Features.Media.StreamMedia;
 using Api.Features.Media.UpdateMedia;
@@ -28,6 +31,28 @@ public static class MediaEndpoints
 
         // ── Frontend endpoints (auth required) ───────────────────────────
         var g = app.MapGroup("/api/media").RequireAuthorization();
+
+        // Stats — must come before /{id}
+        g.MapGet("/stats", async (IMediator m, CancellationToken ct) =>
+            Results.Ok(await m.Send(new GetStatsRequest(), ct)));
+
+        // On This Day — must come before /{id}
+        g.MapGet("/on-this-day", async (
+            IMediator m,
+            CancellationToken ct,
+            [FromQuery] int month = 0,
+            [FromQuery] int day = 0) =>
+        {
+            var now = DateTime.UtcNow;
+            var groups = await m.Send(new OnThisDayRequest(
+                month > 0 ? month : now.Month,
+                day   > 0 ? day   : now.Day), ct);
+            return Results.Ok(groups);
+        });
+
+        // Geo pins — must come before /{id}
+        g.MapGet("/geo", async (IMediator m, CancellationToken ct) =>
+            Results.Ok(await m.Send(new GeoMediaRequest(), ct)));
 
         // Review queue — must come before /{id} to avoid route conflict
         g.MapGet("/review", async (
