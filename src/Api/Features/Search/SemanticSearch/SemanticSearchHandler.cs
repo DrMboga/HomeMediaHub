@@ -58,11 +58,10 @@ public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchReques
             .Where(f => ids.Contains(f.Id))
             .ToListAsync(ct);
 
-        // Preserve distance order
-        return ids
-            .Select(id => files.FirstOrDefault(f => f.Id == id))
-            .Where(f => f is not null)
-            .Select(f => f!.ToListItemDto())
+        return files
+            .OrderByDescending(f => f.TakenAt)
+            .ThenByDescending(f => f.Id)
+            .Select(f => f.ToListItemDto())
             .ToList();
     }
 
