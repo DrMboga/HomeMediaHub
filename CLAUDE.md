@@ -110,6 +110,7 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 │   └── iPhone/          ← Immich uploads in stage
 ├── thumbnails/           ← generated, recreatable
 ├── video-cache/          ← H.264 transcodes, recreatable
+├── display-cache/        ← JPEG conversions of HEIC originals, recreatable
 └── data/
     ├── postgres/           ← stage Postgres data volume
     ├── immich-postgres/    ← stage Immich Postgres data volume
@@ -126,7 +127,8 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 │   ├── 2005/ ... 2025/  ← existing archive (not reorganised)
 │   └── iPhone/          ← new uploads from Immich (storage template: {y}/{y-MM-dd}/)
 ├── thumbnails/          ← 400 px WebP, recreatable from originals
-└── video-cache/         ← H.264 MP4 transcodes of iPhone HEVC videos, recreatable
+├── video-cache/         ← H.264 MP4 transcodes of iPhone HEVC videos, recreatable
+└── display-cache/       ← JPEG conversions of HEIC originals, recreatable
 
 /opt/homemediahub/data/
 ├── postgres/              ← prod Postgres data volume

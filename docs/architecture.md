@@ -113,8 +113,9 @@
      - `POST /api/tools/metadata` — EXIF extraction via SixLabors.ImageSharp; **always receives a JPEG** (n8n converts HEIC first; video metadata comes from ffprobe, not this endpoint)
      - `POST /api/tools/thumbnail` — generate 400 px WebP thumbnail via ImageSharp; **always receives a JPEG**
      - `GET  /api/tools/scan` — list files under a path not yet in the DB
-  3. **On-demand video transcoding** — `GET /api/media/{id}/stream` transcodes HEVC/H.265 (iPhone `.mov`) to H.264 MP4 via `ffmpeg` subprocess on first request. Cached to `/mnt/usb-hdd/video-cache/`. Subsequent requests stream the cached file. Original is never modified.
-- **What it does NOT do:** no background workers, no Quartz jobs, no AI calls, no Telegram, no geocoding, no HEIC conversion (those happen in n8n before calling these endpoints).
+  3. **On-demand video transcoding** — `GET /api/media/{id}/stream` transcodes HEVC/H.265 (iPhone `.mov`) to H.264 MP4 via `ffmpeg` subprocess on first request. Cached to `/video-cache/{id}.mp4`. Subsequent requests stream the cached file. Original is never modified.
+  4. **On-demand HEIC display** — `GET /api/media/{id}/display` serves browser-renderable images. For JPEG/PNG/etc it serves the original directly. For HEIC/HEIF it converts to JPEG via `heif-convert -q 90` on first request and caches at `/display-cache/{id}.jpg`. Subsequent requests serve the cached JPEG. Original is never modified.
+- **What it does NOT do:** no background workers, no Quartz jobs, no AI calls, no Telegram, no geocoding.
 
 ### ai-sidecar
 - **Image:** custom `Python 3.11` build
@@ -187,6 +188,7 @@ Two isolated environments share the same `docker-compose.yml`. Path-sensitive va
 | `PHOTO_DIR` | `/opt/homemediahub/stage/TestPhoto` | `/mnt/usb-hdd/Photo` |
 | `THUMBNAILS_DIR` | `/opt/homemediahub/stage/thumbnails` | `/mnt/usb-hdd/thumbnails` |
 | `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/usb-hdd/video-cache` |
+| `DISPLAY_CACHE_DIR` | `/opt/homemediahub/stage/display-cache` | `/mnt/usb-hdd/display-cache` |
 | `WORK_DIR` | `/tmp/homemediahub-stage` | `/tmp/homemediahub-prod` |
 | `DATA_DIR` | `/opt/homemediahub/stage/data` | `/opt/homemediahub/data` |
 | `GEOSERVICE_DB_PASSWORD` | (set in .env.stage) | (set in .env.prod) |
@@ -214,8 +216,10 @@ All originals live under a single directory tree. No duplication.
 │   └── ...
 ├── thumbnails/                     ← generated WebP thumbnails (recreatable)
 │   └── <media-file-id>.webp
-└── video-cache/                    ← H.264 transcodes of iPhone videos (recreatable)
-    └── <media-file-id>.mp4
+├── video-cache/                    ← H.264 transcodes of iPhone videos (recreatable)
+│   └── <media-file-id>.mp4
+└── display-cache/                  ← JPEG conversions of HEIC originals (recreatable)
+    └── <media-file-id>.jpg
 ```
 
 ---
@@ -556,6 +560,7 @@ CREATE INDEX ON processing_jobs (started_at DESC);
 | GET | `/api/media/{id}` | Single item with metadata and tags |
 | GET | `/api/media/{id}/thumbnail` | Serve thumbnail (WebP, via nginx X-Accel-Redirect) |
 | GET | `/api/media/{id}/original` | Stream original file (JPEG/HEIC/MOV as-is) |
+| GET | `/api/media/{id}/display` | Browser-renderable image. Serves original for JPEG/PNG/etc; converts HEIC/HEIF → JPEG via `heif-convert` on first request, caches at `/display-cache/{id}.jpg`, subsequent requests serve the cache. Used by the lightbox. |
 | GET | `/api/media/{id}/stream` | Browser-compatible video stream. Checks `video_transcodes` cache; if absent, transcodes original → H.264 MP4 via ffmpeg on first request, caches result, then streams. Returns 404 for non-video media. |
 | PATCH | `/api/media/{id}` | `{ isFavorite?, seriesId? }` |
 | DELETE | `/api/media/{id}` | Soft delete |
@@ -681,6 +686,7 @@ Origin classification (runs after /process in Workflow 1):
 | api | `/thumbnails` | `/mnt/usb-hdd/thumbnails` | rw |
 | api | `/shared-temp` | `/tmp/homemediahub-work` | rw |
 | api | `/video-cache` | `/mnt/usb-hdd/video-cache` | rw |
+| api | `/display-cache` | `/mnt/usb-hdd/display-cache` | rw |
 | ai-sidecar | `/photo` | `/mnt/usb-hdd/Photo` | ro |
 | n8n | `/photo` | `/mnt/usb-hdd/Photo` | ro |
 | n8n | `/shared-temp` | `/tmp/homemediahub-work` | rw |

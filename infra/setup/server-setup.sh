@@ -45,8 +45,10 @@ echo "==> [4/6] Create host directories"
 sudo mkdir -p /opt/homemediahub/stage/TestPhoto/iPhone
 sudo mkdir -p /opt/homemediahub/stage/thumbnails
 sudo mkdir -p /opt/homemediahub/stage/video-cache
+sudo mkdir -p /opt/homemediahub/stage/display-cache
 sudo mkdir -p /opt/homemediahub/stage/data/postgres
 sudo mkdir -p /opt/homemediahub/stage/data/immich-postgres
+sudo mkdir -p /opt/homemediahub/stage/data/geoservice-postgres
 sudo mkdir -p /opt/homemediahub/stage/data/n8n
 sudo mkdir -p /tmp/homemediahub-stage
 
@@ -55,11 +57,13 @@ sudo mkdir -p /tmp/homemediahub-stage
 # mounted later. They are harmless if the drive is not yet attached.
 sudo mkdir -p /opt/homemediahub/data/postgres
 sudo mkdir -p /opt/homemediahub/data/immich-postgres
+sudo mkdir -p /opt/homemediahub/data/geoservice-postgres
 sudo mkdir -p /opt/homemediahub/data/n8n
 # TODO: 1 Make this when HDD mounted
 # sudo mkdir -p /mnt/usb-hdd/Photo/iPhone
 # sudo mkdir -p /mnt/usb-hdd/thumbnails
 # sudo mkdir -p /mnt/usb-hdd/video-cache
+# sudo mkdir -p /mnt/usb-hdd/display-cache
 sudo mkdir -p /tmp/homemediahub-prod
 
 # Fix ownership so docker containers (running as non-root) can write
