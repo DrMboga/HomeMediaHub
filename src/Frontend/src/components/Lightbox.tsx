@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
 import { useQuery } from '@tanstack/react-query'
-import { getMediaDetail, originalUrl, streamUrl } from '../api/media'
+import { getMediaDetail, originalUrl, streamUrl, thumbnailUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 
 function formatDate(iso: string | null): string {
@@ -28,6 +28,7 @@ export function Lightbox() {
   const { mediaId, close } = useLightbox()
   const [zoom, setZoom] = useState(1)
   const [tab, setTab] = useState<'info' | 'map'>('info')
+  const [imgFailed, setImgFailed] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const photoAreaRef = useRef<HTMLDivElement>(null)
 
@@ -38,12 +39,13 @@ export function Lightbox() {
     staleTime: Infinity,
   })
 
-  // Body scroll lock
+  // Body scroll lock + reset per-photo state
   useEffect(() => {
     if (mediaId) {
       document.body.classList.add('lb-open')
       setZoom(1)
       setTab('info')
+      setImgFailed(false)
     } else {
       document.body.classList.remove('lb-open')
     }
@@ -90,6 +92,8 @@ export function Lightbox() {
   }
 
   const isVideo = detail?.durationSec != null
+  const isUnrenderable = detail?.mimeType?.startsWith('image/heic') || detail?.mimeType?.startsWith('image/heif')
+  const imgSrc = (isUnrenderable || imgFailed) ? thumbnailUrl(mediaId) : originalUrl(mediaId)
   const camera = [detail?.cameraMake, detail?.cameraModel].filter(Boolean).join(' ')
   const hasGps = !!(detail?.latitude && detail?.longitude)
 
@@ -130,9 +134,10 @@ export function Lightbox() {
           ) : (
             <img
               className="lb-img"
-              src={originalUrl(mediaId)}
+              src={imgSrc}
               alt=""
               style={{ transform: `scale(${zoom})` }}
+              onError={() => setImgFailed(true)}
             />
           )}
 
