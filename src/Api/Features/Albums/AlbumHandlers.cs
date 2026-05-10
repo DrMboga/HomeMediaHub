@@ -38,9 +38,9 @@ public sealed class GetAlbumsHandler : IRequestHandler<GetAlbumsRequest, IReadOn
     public async Task<IReadOnlyList<AlbumDto>> Handle(GetAlbumsRequest req, CancellationToken ct)
     {
         return await _db.Albums
+            .OrderByDescending(a => a.CreatedAt)
             .Select(a => new AlbumDto(a.Id, a.Name, a.Description,
                 a.AlbumMediaItems.Count, a.CreatedAt))
-            .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(ct);
     }
 }
