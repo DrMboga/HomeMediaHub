@@ -15,12 +15,14 @@ public static class SearchEndpoints
             IMediator m,
             CancellationToken ct,
             [FromQuery] string q = "",
-            [FromQuery] int limit = 0) =>
+            [FromQuery] int limit = 0,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null) =>
         {
             if (string.IsNullOrWhiteSpace(q))
                 return Results.BadRequest(new { error = "q is required" });
 
-            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 50), ct);
+            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 50, from, to), ct);
             return Results.Ok(items);
         });
 

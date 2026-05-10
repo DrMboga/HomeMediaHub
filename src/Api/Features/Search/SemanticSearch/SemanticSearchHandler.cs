@@ -8,7 +8,7 @@ using Pgvector.EntityFrameworkCore;
 
 namespace Api.Features.Search.SemanticSearch;
 
-public record SemanticSearchRequest(string Query, int Limit = 50) : IRequest<IReadOnlyList<MediaListItemDto>>;
+public record SemanticSearchRequest(string Query, int Limit = 50, DateTime? From = null, DateTime? To = null) : IRequest<IReadOnlyList<MediaListItemDto>>;
 
 public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchRequest, IReadOnlyList<MediaListItemDto>>
 {
@@ -35,9 +35,16 @@ public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchReques
         var queryVector = new Vector(result.Embedding);
 
         // Find top-N media by cosine distance
-        var ids = await _db.MediaEmbeddings
+        var q = _db.MediaEmbeddings
             .Join(_db.MediaFiles, e => e.MediaFileId, f => f.Id, (e, f) => new { e, f })
-            .Where(x => !x.f.IsDeleted)
+            .Where(x => !x.f.IsDeleted);
+
+        if (req.From.HasValue)
+            q = q.Where(x => x.f.TakenAt >= DateTime.SpecifyKind(req.From.Value, DateTimeKind.Utc));
+        if (req.To.HasValue)
+            q = q.Where(x => x.f.TakenAt < DateTime.SpecifyKind(req.To.Value.AddDays(1), DateTimeKind.Utc));
+
+        var ids = await q
             .OrderBy(x => x.e.Embedding!.CosineDistance(queryVector))
             .Take(req.Limit)
             .Select(x => x.f.Id)

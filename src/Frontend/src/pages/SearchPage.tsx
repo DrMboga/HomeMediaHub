@@ -8,24 +8,26 @@ export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const [dateOpen, setDateOpen] = useState(false)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateFrom, setDateFrom] = useState(searchParams.get('from') ?? '')
+  const [dateTo, setDateTo] = useState(searchParams.get('to') ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
-  // Update query param when input changes
+  // Keep URL in sync with filter state
   useEffect(() => {
-    const q = query.trim()
-    if (q) setSearchParams({ q }, { replace: true })
-    else setSearchParams({}, { replace: true })
-  }, [query, setSearchParams])
+    const params: Record<string, string> = {}
+    if (query.trim()) params.q = query.trim()
+    if (dateFrom) params.from = dateFrom
+    if (dateTo) params.to = dateTo
+    setSearchParams(params, { replace: true })
+  }, [query, dateFrom, dateTo, setSearchParams])
 
   const debouncedQuery = query.trim()
 
   const { data: results, isFetching } = useQuery({
-    queryKey: ['search', debouncedQuery],
-    queryFn: () => semanticSearch(debouncedQuery),
+    queryKey: ['search', debouncedQuery, dateFrom, dateTo],
+    queryFn: () => semanticSearch(debouncedQuery, dateFrom || undefined, dateTo || undefined),
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,
   })

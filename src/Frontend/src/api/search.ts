@@ -3,10 +3,12 @@ import client from './client'
 
 export async function semanticSearch(
   q: string,
+  from?: string,
+  to?: string,
   limit = 50
 ): Promise<MediaListItem[]> {
   const { data } = await client.get<MediaListItem[]>('/search/semantic', {
-    params: { q, limit },
+    params: { q, limit, ...(from && { from }), ...(to && { to }) },
   })
   return data
 }

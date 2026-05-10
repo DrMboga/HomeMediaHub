@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList, getStats, getOnThisDay, thumbnailUrl } from '../api/media'
@@ -19,6 +19,9 @@ export function DashboardPage() {
   const { open } = useLightbox()
   const navigate = useNavigate()
   const today = new Date()
+  const [dateOpen, setDateOpen] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -57,7 +60,11 @@ export function DashboardPage() {
   }, [otdGroups, potdResult, recentResult])
 
   const handleDashSearch = (value: string) => {
-    if (value.length > 2) navigate(`/search?q=${encodeURIComponent(value)}`)
+    if (value.length < 2) return
+    const params = new URLSearchParams({ q: value })
+    if (dateFrom) params.set('from', dateFrom)
+    if (dateTo) params.set('to', dateTo)
+    navigate(`/search?${params.toString()}`)
   }
 
   return (
@@ -75,7 +82,23 @@ export function DashboardPage() {
             }}
             onChange={e => handleDashSearch(e.target.value)}
           />
+          <div className="search-filters">
+            <div
+              className={`chip${dateOpen ? ' active' : ''}`}
+              onClick={() => setDateOpen(o => !o)}
+            >
+              <span className="mi">calendar_today</span>Date range
+            </div>
+          </div>
         </div>
+
+        {dateOpen && (
+          <div className="date-filter-row">
+            <input className="date-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span className="to-lbl">to</span>
+            <input className="date-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {/* Widgets */}
