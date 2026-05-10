@@ -4,16 +4,12 @@ import { useQuery } from '@tanstack/react-query'
 import { semanticSearch } from '../api/search'
 import { PhotoCard } from '../components/PhotoCard'
 
-const COUNTRIES = ['Russia','Italy','UK','USA','Germany','France','Japan','Belarus']
-
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const [dateOpen, setDateOpen] = useState(false)
-  const [countryOpen, setCountryOpen] = useState(false)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [selectedCountries, setSelectedCountries] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -33,14 +29,6 @@ export function SearchPage() {
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,
   })
-
-  const toggleCountry = (c: string) => {
-    setSelectedCountries(prev => {
-      const next = new Set(prev)
-      if (next.has(c)) next.delete(c); else next.add(c)
-      return next
-    })
-  }
 
   const showHint  = debouncedQuery.length < 2
   const showEmpty = !showHint && !isFetching && results?.length === 0
@@ -65,13 +53,6 @@ export function SearchPage() {
             >
               <span className="mi">calendar_today</span>Date range
             </div>
-            <div
-              className={`chip${countryOpen ? ' active' : ''}`}
-              onClick={() => setCountryOpen(o => !o)}
-            >
-              <span className="mi">public</span>Country
-              <span className="mi" style={{ fontSize: 14 }}>expand_more</span>
-            </div>
           </div>
         </div>
 
@@ -83,17 +64,6 @@ export function SearchPage() {
           </div>
         )}
 
-        {countryOpen && (
-          <div className="country-row">
-            {COUNTRIES.map(c => (
-              <div
-                key={c}
-                className={`chip${selectedCountries.has(c) ? ' active' : ''}`}
-                onClick={() => toggleCountry(c)}
-              >{c}</div>
-            ))}
-          </div>
-        )}
       </div>
 
       {showHint && (

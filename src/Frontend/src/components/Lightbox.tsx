@@ -29,6 +29,7 @@ export function Lightbox() {
   const [zoom, setZoom] = useState(1)
   const [tab, setTab] = useState<'info' | 'map'>('info')
   const videoRef = useRef<HTMLVideoElement>(null)
+  const photoAreaRef = useRef<HTMLDivElement>(null)
 
   const { data: detail } = useQuery({
     queryKey: ['media', mediaId],
@@ -69,15 +70,23 @@ export function Lightbox() {
     }
   }, [mediaId])
 
+  // Non-passive wheel listener for zoom (passive:false required to call preventDefault)
+  useEffect(() => {
+    const el = photoAreaRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!mediaId) return
+      e.preventDefault()
+      setZoom(z => Math.max(0.5, Math.min(4, z + (e.deltaY < 0 ? 0.1 : -0.1))))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [mediaId])
+
   if (!mediaId) return null
 
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) close()
-  }
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    setZoom(z => Math.max(0.5, Math.min(4, z + (e.deltaY < 0 ? 0.1 : -0.1))))
   }
 
   const isVideo = detail?.durationSec != null
@@ -89,7 +98,7 @@ export function Lightbox() {
       <div className="lb-panel">
 
         {/* Photo / Video / Map area */}
-        <div className="lb-photo" onWheel={handleWheel}>
+        <div className="lb-photo" ref={photoAreaRef}>
           {tab === 'map' && hasGps ? (
             <div className="lb-map-area">
               <MapContainer
