@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
 import { useQuery } from '@tanstack/react-query'
-import { getMediaDetail, originalUrl, streamUrl, thumbnailUrl } from '../api/media'
+import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 
 function formatDate(iso: string | null): string {
@@ -92,8 +92,7 @@ export function Lightbox() {
   }
 
   const isVideo = detail?.durationSec != null
-  const isUnrenderable = detail?.mimeType?.startsWith('image/heic') || detail?.mimeType?.startsWith('image/heif')
-  const imgSrc = (isUnrenderable || imgFailed) ? thumbnailUrl(mediaId) : originalUrl(mediaId)
+  const imgSrc = imgFailed ? thumbnailUrl(mediaId) : displayUrl(mediaId)
   const camera = [detail?.cameraMake, detail?.cameraModel].filter(Boolean).join(' ')
   const hasGps = !!(detail?.latitude && detail?.longitude)
 

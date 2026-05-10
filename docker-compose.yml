@@ -120,6 +120,7 @@ services:
       - ${PHOTO_DIR}:/photo:ro
       - ${THUMBNAILS_DIR}:/thumbnails
       - ${VIDEO_CACHE_DIR}:/video-cache
+      - ${DISPLAY_CACHE_DIR}:/display-cache
       - ${WORK_DIR}:/shared-temp
     ports:
       - "127.0.0.1:8080:8080"

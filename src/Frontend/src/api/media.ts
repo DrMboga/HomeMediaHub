@@ -18,6 +18,10 @@ export function originalUrl(id: string) {
   return `/api/media/${id}/original`
 }
 
+export function displayUrl(id: string) {
+  return `/api/media/${id}/display`
+}
+
 export function streamUrl(id: string) {
   return `/api/media/${id}/stream`
 }

@@ -2,6 +2,7 @@ using Api.Data;
 using Api.Features.Media;
 using Api.Features.Media.BulkDeleteMedia;
 using Api.Features.Media.DeleteMedia;
+using Api.Features.Media.DisplayMedia;
 using Api.Features.Media.GeoMedia;
 using Api.Features.Media.GetMediaDetail;
 using Api.Features.Media.GetMediaList;
@@ -56,6 +57,20 @@ public static class MediaEndpoints
                 return Results.NotFound();
 
             return Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);
+        });
+
+        app.MapGet("/api/media/{id:guid}/display", async (
+            Guid id,
+            IMediator m,
+            IConfiguration config,
+            CancellationToken ct) =>
+        {
+            var displayCacheDir = config["DisplayCacheDir"] ?? "/display-cache";
+            var result = await m.Send(new DisplayMediaRequest(id, displayCacheDir), ct);
+
+            if (result is null) return Results.NotFound();
+
+            return Results.File(result.FilePath, result.ContentType, enableRangeProcessing: true);
         });
 
         app.MapGet("/api/media/{id:guid}/stream", async (
