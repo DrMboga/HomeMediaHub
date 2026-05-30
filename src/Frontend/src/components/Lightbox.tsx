@@ -147,35 +147,41 @@ export function Lightbox() {
 
         {/* Info bar */}
         <div className="lb-info">
-          <div className="lb-meta">
-            <abbr title={detail?.filePath ?? undefined} style={{ textDecoration: 'none', cursor: 'default' }}>
-              <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
-            </abbr>
-            {camera && (
-              <>
-                <span className="lb-sep">·</span>
-                <span className="lb-meta-item">
-                  <span className="mi">photo_camera</span>{camera}
-                </span>
-              </>
+          <div className="lb-meta-col">
+            {detail?.filePath && (
+              <span className="lb-filepath" title={detail.filePath}>
+                <span className="mi">folder_open</span>
+                {detail.filePath}
+              </span>
             )}
-            {detail?.address && (
-              <>
-                <span className="lb-sep">·</span>
-                <span className="lb-meta-item">
-                  <span className="mi">location_on</span>{detail.address}
-                </span>
-              </>
+            <div className="lb-meta">
+              <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
+              {camera && (
+                <>
+                  <span className="lb-sep">·</span>
+                  <span className="lb-meta-item">
+                    <span className="mi">photo_camera</span>{camera}
+                  </span>
+                </>
+              )}
+              {detail?.address && (
+                <>
+                  <span className="lb-sep">·</span>
+                  <span className="lb-meta-item">
+                    <span className="mi">location_on</span>{detail.address}
+                  </span>
+                </>
+              )}
+            </div>
+
+            {detail?.tags && detail.tags.length > 0 && (
+              <div className="lb-tags">
+                {detail.tags.map(t => (
+                  <span key={t.tag} className="lb-tag">{t.tag}</span>
+                ))}
+              </div>
             )}
           </div>
-
-          {detail?.tags && detail.tags.length > 0 && (
-            <div className="lb-tags">
-              {detail.tags.map(t => (
-                <span key={t.tag} className="lb-tag">{t.tag}</span>
-              ))}
-            </div>
-          )}
 
           <div className="lb-right">
             {!isVideo && (

@@ -369,8 +369,19 @@ body.lb-open { overflow: hidden; }
   background: var(--s1);
   display: flex; flex-direction: row; align-items: center; flex-shrink: 0;
   padding: 10px 16px; gap: 10px;
-  border-top: 1px solid var(--sep); flex-wrap: wrap; min-height: 76px;
+  border-top: 1px solid var(--sep); min-height: 76px;
 }
+.lb-meta-col {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0; flex: 1;
+}
+.lb-filepath {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--label3); font-family: monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: default;
+}
+.lb-filepath .mi { font-size: 13px; flex-shrink: 0; color: var(--label3); }
 .lb-meta {
   display: flex; flex-direction: row; align-items: center;
   gap: 6px; font-size: 12px; flex-shrink: 0; flex-wrap: wrap;
