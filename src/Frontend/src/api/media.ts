@@ -77,8 +77,8 @@ export async function patchMedia(id: string, body: { isFavorite?: boolean }): Pr
   await client.patch(`/media/${id}`, body)
 }
 
-export async function getReviewQueue(limit = 200): Promise<MediaListItem[]> {
-  const { data } = await client.get<MediaListItem[]>('/media/review', { params: { limit } })
+export async function getReviewQueue(page = 1, pageSize = 50): Promise<{ items: MediaListItem[]; total: number }> {
+  const { data } = await client.get<{ items: MediaListItem[]; total: number }>('/media/review', { params: { page, pageSize } })
   return data
 }
 

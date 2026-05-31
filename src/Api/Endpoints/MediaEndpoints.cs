@@ -115,11 +115,13 @@ public static class MediaEndpoints
 
         // Review queue — must come before /{id} to avoid route conflict
         g.MapGet("/review", async (
-            [FromQuery] int limit,
-            IMediator m, CancellationToken ct) =>
+            IMediator m,
+            CancellationToken ct,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 50) =>
         {
-            var items = await m.Send(new GetReviewQueueRequest(limit > 0 ? limit : 100), ct);
-            return Results.Ok(items);
+            var result = await m.Send(new GetReviewQueueRequest(page > 0 ? page : 1, pageSize > 0 ? pageSize : 50), ct);
+            return Results.Ok(result);
         });
 
         g.MapPatch("/{id:guid}/review", async (Guid id, [FromBody] ReviewActionRequest req, IMediator m, CancellationToken ct) =>

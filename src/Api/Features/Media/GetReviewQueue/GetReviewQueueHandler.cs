@@ -5,27 +5,33 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Features.Media.GetReviewQueue;
 
-public record GetReviewQueueRequest(int Limit = 100) : IRequest<IReadOnlyList<MediaListItemDto>>;
+public record GetReviewQueueRequest(int Page = 1, int PageSize = 50) : IRequest<PagedReviewQueueResult>;
+public record PagedReviewQueueResult(IReadOnlyList<MediaListItemDto> Items, int Total);
 
-public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueRequest, IReadOnlyList<MediaListItemDto>>
+public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueRequest, PagedReviewQueueResult>
 {
     private readonly AppDbContext _db;
 
     public GetReviewQueueHandler(AppDbContext db) => _db = db;
 
-    public async Task<IReadOnlyList<MediaListItemDto>> Handle(GetReviewQueueRequest req, CancellationToken ct)
+    public async Task<PagedReviewQueueResult> Handle(GetReviewQueueRequest req, CancellationToken ct)
     {
-        var items = await _db.MediaFiles
-            .Include(f => f.Thumbnail)
-            .Include(f => f.Metadata)
+        var q = _db.MediaFiles
             .Where(f => !f.IsDeleted &&
                         !f.OriginReviewed &&
                         (f.OriginClass == "screenshot" || f.OriginClass == "document" ||
-                         f.OriginClass == "artwork"    || f.OriginClass == "reference"))
+                         f.OriginClass == "artwork"    || f.OriginClass == "reference"));
+
+        var total = await q.CountAsync(ct);
+
+        var items = await q
+            .Include(f => f.Thumbnail)
+            .Include(f => f.Metadata)
             .OrderByDescending(f => f.OriginConfidence)
-            .Take(req.Limit)
+            .Skip((req.Page - 1) * req.PageSize)
+            .Take(req.PageSize)
             .ToListAsync(ct);
 
-        return items.Select(f => f.ToListItemDto()).ToList();
+        return new PagedReviewQueueResult(items.Select(f => f.ToListItemDto()).ToList(), total);
     }
 }

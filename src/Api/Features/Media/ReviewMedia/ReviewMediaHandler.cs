@@ -14,18 +14,15 @@ public sealed class ReviewMediaHandler : IRequestHandler<ReviewMediaRequest, boo
 
     public async Task<bool> Handle(ReviewMediaRequest req, CancellationToken ct)
     {
-        var file = await _db.MediaFiles
-            .Where(f => f.Id == req.Id && !f.IsDeleted)
-            .FirstOrDefaultAsync(ct);
+        var base_q = _db.MediaFiles.Where(f => f.Id == req.Id && !f.IsDeleted);
 
-        if (file is null) return false;
+        int updated = req.Action == "meme"
+            ? await base_q.ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.OriginClass, "meme")
+                .SetProperty(f => f.OriginReviewed, true), ct)
+            : await base_q.ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.OriginReviewed, true), ct);
 
-        if (req.Action == "meme")
-            file.OriginClass = "meme";
-        // "real" keeps the original AI classification intact
-        file.OriginReviewed = true;
-
-        await _db.SaveChangesAsync(ct);
-        return true;
+        return updated > 0;
     }
 }
