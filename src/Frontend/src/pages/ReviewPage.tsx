@@ -12,7 +12,7 @@ export function ReviewPage() {
 
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['review-queue'],
-    queryFn: getReviewQueue,
+    queryFn: () => getReviewQueue(),
     staleTime: 60_000,
   })
 
