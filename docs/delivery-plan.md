@@ -316,10 +316,25 @@ End-to-end smoke test (manual):
 
 - **Lightbox file path**: Replaced hidden `<abbr title>` tooltip with a visible `.lb-filepath` row (monospace, full path, ellipsis truncation, `folder_open` icon). Always visible above the date in the lightbox info bar.
 - **Meme/Review feature**:
-  - `/review` page and nav link: grid of AI-flagged items (`screenshot`, `document`, `artwork`, `reference`), each with "Meme" and "Real Photo" action buttons
-  - `PATCH /api/media/{id}/review` — `{ action: "meme"|"real" }`: sets `origin_reviewed = true`; "meme" also sets `origin_class = 'meme'`
+  - `/review` page and nav link: paginated grid (50/page, URL-backed) of AI-flagged items (`screenshot`, `document`, `artwork`, `reference`), each with "Meme" and "Real Photo" action buttons
+  - `GET /api/media/review` — paginated (`page`, `pageSize`), returns `{ items, total }`, sorted by `origin_confidence DESC`
+  - `PATCH /api/media/{id}/review` — `{ action: "meme"|"real" }`: sets `origin_reviewed = true`; "meme" also sets `origin_class = 'meme'`; uses `ExecuteUpdateAsync` (not `SaveChangesAsync`) to bypass the global `NoTracking` context
   - Gallery (`GET /api/media`), semantic search, and On This Day all exclude `origin_class = 'meme'`
   - `origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE` column added to `media_files`
+- **OriginClass rework**: AI sidecar expanded from 3 to 6 classes
+  - `photo` — real camera photograph (landscape, object, scene)
+  - `screenshot` — computer or phone screen capture
+  - `document` — printed paper, forms, passports, ID cards, credit cards, driver's licenses
+  - `artwork` — drawings, paintings, illustrations, digital art
+  - `reference` — informational photos: utility meters, signs, notices, labels
+  - `people` — portraits and group shots (NOT flagged for review — normal photos)
+  - `meme` — user-assigned only, never set by AI
+  - Gallery: color-coded origin badge on each card; filter chip row (All · Photo · People · Screenshot · Artwork · Document · Reference · Meme)
+  - Search: origin type dropdown filter
+  - Lightbox: origin class + confidence % shown in info bar
+  - Both `GET /api/media` and `GET /api/search/semantic` accept `?originClass=` query param
+- **Migration squash**: `AddRefreshTokens` migration folded into `CreateIdentitySchema`. Refresh token columns (`refresh_token_hash`, `refresh_token_expiry`) added directly to `AspNetUsers` CREATE TABLE. Single EF migration now. No manual column patching needed on fresh deployments.
+- **Bug fix — ReviewMediaHandler**: `AppDbContext` sets `QueryTrackingBehavior.NoTracking` globally. Original handler loaded entity + `SaveChangesAsync` — UPDATE was silently discarded. Fixed by switching to `ExecuteUpdateAsync`.
 
 ---
 
