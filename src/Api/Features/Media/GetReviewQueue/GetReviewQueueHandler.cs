@@ -19,7 +19,9 @@ public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueReques
             .Include(f => f.Thumbnail)
             .Include(f => f.Metadata)
             .Where(f => !f.IsDeleted &&
-                        (f.OriginClass == "meme" || f.OriginClass == "screenshot" || f.OriginClass == "artwork"))
+                        !f.OriginReviewed &&
+                        (f.OriginClass == "screenshot" || f.OriginClass == "document" ||
+                         f.OriginClass == "artwork"    || f.OriginClass == "reference"))
             .OrderByDescending(f => f.OriginConfidence)
             .Take(req.Limit)
             .ToListAsync(ct);

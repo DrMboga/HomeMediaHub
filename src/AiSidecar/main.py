@@ -17,11 +17,14 @@ _clip_preprocess = None
 _text_features = None  # pre-computed at startup — prompts never change
 
 _ORIGIN_LABELS = [
-    "a real photograph taken with a camera",
+    "a real photograph taken with a camera, such as a landscape, object, or scene",
     "a screenshot of a computer or phone screen",
-    "a scanned document or text page",
+    "a photograph of a document, printed paper, form, passport, ID card, credit card, or driver's license",
+    "a drawing, painting, illustration, or digital artwork",
+    "a photograph taken to record information: a utility meter, a sign, a notice, a label, or text on a surface",
+    "a portrait or group photograph where the main subject is one or more people",
 ]
-_ORIGIN_CLASSES = ["photo", "screenshot", "document"]
+_ORIGIN_CLASSES = ["photo", "screenshot", "document", "artwork", "reference", "people"]
 _YOLO_CONFIDENCE_THRESHOLD = 0.30
 
 # Serialise all inference — PyTorch CPU inference is not thread-safe under

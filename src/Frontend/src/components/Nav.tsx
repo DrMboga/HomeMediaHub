@@ -35,6 +35,9 @@ export function Nav() {
         <NavLink to="/videos"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
           <span className="mi">videocam</span>Videos
         </NavLink>
+        <NavLink to="/review"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+          <span className="mi">rate_review</span>Review
+        </NavLink>
       </div>
       <div className="nav-user">
         <div className="nav-avatar" onClick={handleLogout} title="Logout">

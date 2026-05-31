@@ -10,6 +10,7 @@ import { GeoPage } from './pages/GeoPage'
 import { SearchPage } from './pages/SearchPage'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { VideosPage } from './pages/VideosPage'
+import { ReviewPage } from './pages/ReviewPage'
 
 function ProtectedLayout() {
   const { isLoggedIn } = useAuth()
@@ -25,6 +26,7 @@ function ProtectedLayout() {
         <Route path="/search"     element={<SearchPage />} />
         <Route path="/albums"     element={<AlbumsPage />} />
         <Route path="/videos"     element={<VideosPage />} />
+        <Route path="/review"     element={<ReviewPage />} />
         <Route path="*"           element={<Navigate to="/" replace />} />
       </Routes>
       <Lightbox />

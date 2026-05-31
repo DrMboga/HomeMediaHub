@@ -13,6 +13,17 @@ const SS_YEAR  = 'gallery-year'
 const SS_MONTH = 'gallery-month'
 const UNDATED  = 0  // sentinel year value for photos with null taken_at
 
+const ORIGIN_FILTERS = [
+  { value: '',           label: 'All' },
+  { value: 'photo',      label: 'Photo' },
+  { value: 'people',     label: 'People' },
+  { value: 'screenshot', label: 'Screenshot' },
+  { value: 'artwork',    label: 'Artwork' },
+  { value: 'document',   label: 'Document' },
+  { value: 'reference',  label: 'Reference' },
+  { value: 'meme',       label: 'Meme' },
+]
+
 function currentYear()  { return new Date().getFullYear() }
 function currentMonth() { return new Date().getMonth() + 1 }
 
@@ -20,9 +31,10 @@ export function GalleryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const pageSize = 50
 
-  const year  = parseInt(searchParams.get('year')  ?? sessionStorage.getItem(SS_YEAR)  ?? String(currentYear()))
-  const month = parseInt(searchParams.get('month') ?? sessionStorage.getItem(SS_MONTH) ?? String(currentMonth()))
-  const page  = parseInt(searchParams.get('page')  ?? '1')
+  const year        = parseInt(searchParams.get('year')  ?? sessionStorage.getItem(SS_YEAR)  ?? String(currentYear()))
+  const month       = parseInt(searchParams.get('month') ?? sessionStorage.getItem(SS_MONTH) ?? String(currentMonth()))
+  const page        = parseInt(searchParams.get('page')  ?? '1')
+  const originClass = searchParams.get('originClass') ?? ''
 
   const isUndated = year === UNDATED
 
@@ -31,21 +43,29 @@ export function GalleryPage() {
     sessionStorage.setItem(SS_MONTH, String(month))
   }, [year, month])
 
-  const setParams = (updates: { year?: number; month?: number; page?: number }) =>
-    setSearchParams({
+  const setParams = (updates: { year?: number; month?: number; page?: number; originClass?: string }) => {
+    const next: Record<string, string> = {
       year:  String(updates.year  ?? year),
       month: String(updates.month ?? month),
       page:  String(updates.page  ?? page),
-    })
+    }
+    const oc = updates.originClass !== undefined ? updates.originClass : originClass
+    if (oc) next.originClass = oc
+    setSearchParams(next)
+  }
 
   const from = new Date(Date.UTC(year, month - 1, 1)).toISOString()
   const to   = new Date(Date.UTC(year, month, 0, 23, 59, 59)).toISOString()
 
+  const oc = originClass || undefined
+
   const { data, isFetching } = useQuery({
-    queryKey: isUndated ? ['gallery', 'undated', page] : ['gallery', year, month, page],
+    queryKey: isUndated
+      ? ['gallery', 'undated', page, originClass]
+      : ['gallery', year, month, page, originClass],
     queryFn: () => isUndated
-      ? getMediaList({ page, pageSize, noDate: true })
-      : getMediaList({ page, pageSize, from, to }),
+      ? getMediaList({ page, pageSize, noDate: true, originClass: oc })
+      : getMediaList({ page, pageSize, from, to, originClass: oc }),
     staleTime: 30_000,
   })
 
@@ -92,6 +112,18 @@ export function GalleryPage() {
             <option value={UNDATED}>Undated</option>
           </select>
         </div>
+      </div>
+
+      <div className="origin-filter-row">
+        {ORIGIN_FILTERS.map(f => (
+          <button
+            key={f.value}
+            className={`origin-chip${originClass === f.value ? ' active' : ''}`}
+            onClick={() => setParams({ originClass: f.value, page: 1 })}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
       {isFetching && <div className="loading">Loading…</div>}

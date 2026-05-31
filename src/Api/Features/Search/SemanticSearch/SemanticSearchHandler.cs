@@ -8,7 +8,7 @@ using Pgvector.EntityFrameworkCore;
 
 namespace Api.Features.Search.SemanticSearch;
 
-public record SemanticSearchRequest(string Query, int Limit = 50, DateTime? From = null, DateTime? To = null) : IRequest<IReadOnlyList<MediaListItemDto>>;
+public record SemanticSearchRequest(string Query, int Limit = 50, DateTime? From = null, DateTime? To = null, string? OriginClass = null) : IRequest<IReadOnlyList<MediaListItemDto>>;
 
 public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchRequest, IReadOnlyList<MediaListItemDto>>
 {
@@ -37,12 +37,14 @@ public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchReques
         // Find top-N media by cosine distance
         var q = _db.MediaEmbeddings
             .Join(_db.MediaFiles, e => e.MediaFileId, f => f.Id, (e, f) => new { e, f })
-            .Where(x => !x.f.IsDeleted);
+            .Where(x => !x.f.IsDeleted && x.f.OriginClass != "meme");
 
         if (req.From.HasValue)
             q = q.Where(x => x.f.TakenAt >= DateTime.SpecifyKind(req.From.Value, DateTimeKind.Utc));
         if (req.To.HasValue)
             q = q.Where(x => x.f.TakenAt < DateTime.SpecifyKind(req.To.Value.AddDays(1), DateTimeKind.Utc));
+        if (!string.IsNullOrEmpty(req.OriginClass))
+            q = q.Where(x => x.f.OriginClass == req.OriginClass);
 
         var ids = await q
             .OrderBy(x => x.e.Embedding!.CosineDistance(queryVector))

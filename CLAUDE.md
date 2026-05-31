@@ -8,6 +8,11 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 
 **Phase 6 prototype complete** (2026-05-06). Frontend UI prototype in `prototype/` (`index.html` + `server.js`, served at `http://localhost:3333`). Covers all pages: Dashboard (POTD, OTD strip, library stats), Gallery (square grid, year dropdown, month breadcrumb, 50/page paged), On This Day, Geo (Leaflet dark map), Search (semantic + tag + date + country), Albums, Videos. Lightbox: always bottom-bar layout, full-size originals from TestPhoto, video playback, zoom, map tab. Prototype is the React implementation spec.
 
+**Post-Phase 7 improvements** (2026-05-31). Three follow-on changes after Phase 7:
+- **Lightbox file path visible**: Replaced hidden `<abbr title>` tooltip with a dedicated `.lb-filepath` row (monospace, full path, truncated with ellipsis, folder_open icon). Always visible above the date in the info bar.
+- **Meme/Review feature**: New `/review` page and nav link. AI-flagged items (`screenshot`, `document`, `artwork`) surface on the Review page. User clicks "Meme" → `origin_class = 'meme'` + `origin_reviewed = true` (hidden from gallery, search, On This Day). "Real Photo" → `origin_reviewed = true`, `origin_class` unchanged (item leaves review queue). New endpoint: `PATCH /api/media/{id}/review` with `{ action: "meme" | "real" }`. Gallery and semantic search both exclude `origin_class = 'meme'` items. `ReviewPage.tsx` uses optimistic card removal via TanStack Query.
+- **`origin_reviewed` column**: `BOOLEAN NOT NULL DEFAULT FALSE` added to `media_files`. Tracks whether a user has acted on the review for a given item. Review queue filters on `!origin_reviewed`. Run `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE;` on existing stage DB, or wipe and re-import (stage only).
+
 **Phase 7 complete** (2026-05-06). All Phase 6 validation bugs fixed:
 - **Semantic search 500**: AI sidecar (`src/AiSidecar/main.py`) was missing the `POST /embed/text` endpoint. Added it; promoted `_tokenizer` to module level.
 - **Lightbox — file path tooltip**: Date `<span>` wrapped in `<abbr title={detail.filePath}>` so hovering shows the full path.

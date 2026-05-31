@@ -121,9 +121,8 @@
 - **Image:** custom `Python 3.11` build
 - **Port:** 8000 (FastAPI)
 - **Responsibility:** Stateless inference service.
-  - `POST /process { filePath }` → `{ tags: [{label, confidence}], embedding: [512 floats] }`
+  - `POST /analyze { filePath }` → `{ tags: [{label, confidence}], embedding: [512 floats], originClass, originConfidence }` — combined YOLOv8 detection + CLIP embedding + CLIP zero-shot origin classification in a single call
   - `POST /embed/text { text }` → `{ embedding: [512 floats] }` (for search queries)
-  - `POST /classify-origin { filePath }` → `{ originClass, confidence }` — CLIP zero-shot classification of whether a file is a real photo, document, meme, screenshot, or artwork. Used to populate `origin_class` / `origin_confidence` on `media_files`.
 - **Models:** YOLOv8n (object detection, 6 MB) + CLIP ViT-B/32 (semantic embeddings and origin classification, 151 MB). Both baked into the image.
 
 ### geoservice
@@ -298,22 +297,20 @@ All originals live under a single directory tree. No duplication.
   │
   ├─[Postgres] INSERT INTO media_thumbnails (media_file_id, thumbnail_path)
   │
-  ├─[HTTP Request] POST ai-sidecar:8000/process { filePath: workPath }
-  │   → { tags: [{label, confidence}], embedding: [512 floats] }
+  ├─[HTTP Request] POST ai-sidecar:8000/analyze { filePath: workPath }
+  │   → { tags: [{label, confidence}], embedding: [512 floats],
+  │       originClass: "photo"|"screenshot"|"document"|"artwork"|"reference"|"people",
+  │       originConfidence: 0.0–1.0 }
   │   Note: workPath is the JPEG frame for video — good enough for object detection
+  │   (continue-on-fail — AI enrichment is not required for a valid media record)
   │
   ├─[Loop] for each tag:
   │   └─[Postgres] INSERT INTO media_tags (media_file_id, tag, confidence, model)
   │
   ├─[Postgres] INSERT INTO media_embeddings (media_file_id, embedding)
   │
-  ├─[HTTP Request] POST ai-sidecar:8000/classify-origin { filePath: workPath }
-  │   → { originClass: "real_photo"|"document"|"meme"|"screenshot"|"artwork",
-  │       confidence: 0.0–1.0 }
-  │   (continue-on-fail — classification is enrichment, not required)
-  │
   ├─[Postgres] UPDATE media_files
-  │             SET origin_class = {{ originClass }}, origin_confidence = {{ confidence }}
+  │             SET origin_class = {{ originClass }}, origin_confidence = {{ originConfidence }}
   │             WHERE id = {{ id }}
   │
   └─[Postgres] UPDATE processing_jobs SET status='completed', completed_at=NOW()
@@ -434,8 +431,9 @@ CREATE TABLE media_files (
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     is_deleted      BOOLEAN DEFAULT FALSE,
     is_favorite     BOOLEAN DEFAULT FALSE,
-    origin_class    TEXT,                    -- 'real_photo' | 'document' | 'meme' | 'screenshot' | 'artwork' | NULL (not yet classified)
-    origin_confidence FLOAT                  -- CLIP classification confidence [0.0–1.0]
+    origin_class    TEXT,                    -- AI: 'photo'|'screenshot'|'document'|'artwork'|'reference'|'people' | user: 'meme' | NULL (not yet classified)
+    origin_confidence FLOAT,                 -- CLIP classification confidence [0.0–1.0]
+    origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE  -- TRUE once user has acted on this item in the Review page
 );
 CREATE INDEX ON media_files (taken_at DESC);
 CREATE INDEX ON media_files (file_hash);
@@ -556,23 +554,27 @@ CREATE INDEX ON processing_jobs (started_at DESC);
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/media` | Paginated. Params: `page`, `pageSize`, `from`, `to`, `tag`, `favorite` |
+| GET | `/api/media` | Paginated. Params: `page`, `pageSize`, `from`, `to`, `tag`, `favorite`, `isVideo`, `noDate`, `originClass`. Excludes `origin_class = 'meme'` unconditionally. |
+| GET | `/api/media/stats` | `{ totalCount, photoCount, videoCount, totalSizeMb, oldestTakenAt, newestTakenAt }` |
+| GET | `/api/media/on-this-day` | `?month=&day=` → grouped by year, items with `taken_at` on that calendar date |
+| GET | `/api/media/geo` | Array of `{ id, lat, lon, thumbnailPath }` for all geotagged media |
+| GET | `/api/media/review` | Items where `!origin_reviewed && origin_class IN (screenshot, document, artwork, reference)`, sorted by `origin_confidence DESC`. Excludes `people` (normal photos). |
 | GET | `/api/media/{id}` | Single item with metadata and tags |
 | GET | `/api/media/{id}/thumbnail` | Serve thumbnail (WebP, via nginx X-Accel-Redirect) |
 | GET | `/api/media/{id}/original` | Stream original file (JPEG/HEIC/MOV as-is) |
 | GET | `/api/media/{id}/display` | Browser-renderable image. Serves original for JPEG/PNG/etc; converts HEIC/HEIF → JPEG via `heif-convert` on first request, caches at `/display-cache/{id}.jpg`, subsequent requests serve the cache. Used by the lightbox. |
 | GET | `/api/media/{id}/stream` | Browser-compatible video stream. Checks `video_transcodes` cache; if absent, transcodes original → H.264 MP4 via ffmpeg on first request, caches result, then streams. Returns 404 for non-video media. |
-| PATCH | `/api/media/{id}` | `{ isFavorite?, seriesId? }` |
+| PATCH | `/api/media/{id}` | `{ isFavorite? }` |
+| PATCH | `/api/media/{id}/review` | `{ action: "meme" \| "real" }` — "meme" sets `origin_class = 'meme'`; both actions set `origin_reviewed = true`. Used by the Review page. |
 | DELETE | `/api/media/{id}` | Soft delete |
-| GET | `/api/media/review` | Returns media where `origin_class` is `meme`, `screenshot`, or `artwork`, sorted by `origin_confidence DESC`. Used by the Review page so the user can inspect and delete non-real photos. |
-| DELETE | `/api/media/bulk` | `{ ids: [uuid, ...] }` — hard-deletes files from disk and DB. Used by the Review page bulk-delete action. |
+| DELETE | `/api/media/bulk` | `{ ids: [uuid, ...] }` — hard-deletes files from disk and DB |
 
 ### Search
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/search?q=` | Semantic CLIP search — calls AI sidecar for query embedding, then pgvector |
-| GET | `/api/search/tags?tag=` | Tag filter |
+| GET | `/api/search/semantic?q=` | Semantic CLIP search — calls AI sidecar for query embedding, then pgvector. Excludes `origin_class = 'meme'`. Optional `originClass` filter param. |
+| GET | `/api/search/tags?q=` | Tag filter |
 
 ### Albums
 
@@ -626,7 +628,7 @@ CREATE INDEX ON processing_jobs (started_at DESC);
 ```
 n8n Workflow 1 calls:
 
-  POST ai-sidecar:8000/process { filePath }
+  POST ai-sidecar:8000/analyze { filePath }
       │
       ├─ Pillow decode (HEIC via pillow-heif, MP4 extracts first frame via ffmpeg)
       │
@@ -638,36 +640,35 @@ n8n Workflow 1 calls:
       └─ CLIP ViT-B/32 inference
             input:  224×224 center crop, normalized
             output: float32[512] (L2-normalized)
+            + zero-shot origin classification across 6 labels:
+                "a real photograph taken with a camera, such as a landscape, object, or scene"
+                "a screenshot of a computer or phone screen"
+                "a photograph of a document, printed paper, form, passport, ID card, credit card, or driver's license"
+                "a drawing, painting, illustration, or digital artwork"
+                "a photograph taken to record information: a utility meter, a sign, a notice, a label, or text on a surface"
+                "a portrait or group photograph where the main subject is one or more people"
+            → pick highest cosine similarity → originClass + originConfidence
 
   → returns { tags: [{label, confidence, model: "yolov8"}],
-               embedding: [512 floats] }
-
-  POST ai-sidecar:8000/classify-origin { filePath }
-      │
-      └─ CLIP ViT-B/32 zero-shot classification
-            candidates:
-              "a photograph of people, places, or real life events"
-              "a financial document, receipt, invoice, or payment confirmation"
-              "a meme, joke, or internet image with text captions"
-              "a screenshot of a phone or computer screen"
-              "a painting, artwork, or illustration"
-            → pick highest cosine similarity
-
-  → returns { originClass: "real_photo"|"document"|"meme"|"screenshot"|"artwork",
-               confidence: 0.0–1.0 }
+               embedding: [512 floats],
+               originClass: "photo"|"screenshot"|"document"|"artwork"|"reference"|"people",
+               originConfidence: 0.0–1.0 }
 
   POST ai-sidecar:8000/embed/text { text: "birthday cake" }
   → returns { embedding: [512 floats] }
 
 Semantic search:
-  .NET API receives GET /api/search?q="birthday cake"
+  .NET API receives GET /api/search/semantic?q="birthday cake"
   → POST ai-sidecar:8000/embed/text
   → pgvector: SELECT ... ORDER BY embedding <=> $vec LIMIT 50
+  → excludes origin_class = 'meme'
 
-Origin classification (runs after /process in Workflow 1):
+Origin classification (stored in Workflow 1):
   → result stored in media_files.origin_class / origin_confidence
-  → GET /api/media/review queries WHERE origin_class IN ('meme','screenshot','artwork')
-  → user reviews flagged items in UI and bulk-deletes via DELETE /api/media/bulk
+  → GET /api/media/review queries WHERE !origin_reviewed AND origin_class IN ('screenshot','document','artwork','reference')
+  → user reviews each item: "Meme" → PATCH /api/media/{id}/review {action:"meme"} sets origin_class='meme', origin_reviewed=true
+                             "Real Photo" → PATCH /api/media/{id}/review {action:"real"} sets origin_reviewed=true, origin_class unchanged
+  → memes are excluded from gallery, search, and On This Day queries
 ```
 
 **Model choices:**

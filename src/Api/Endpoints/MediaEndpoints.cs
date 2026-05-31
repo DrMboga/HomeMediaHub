@@ -7,6 +7,7 @@ using Api.Features.Media.GeoMedia;
 using Api.Features.Media.GetMediaDetail;
 using Api.Features.Media.GetMediaList;
 using Api.Features.Media.GetReviewQueue;
+using Api.Features.Media.ReviewMedia;
 using Api.Features.Media.GetStats;
 using Api.Features.Media.OnThisDay;
 using Api.Features.Media.SaveMedia;
@@ -121,6 +122,13 @@ public static class MediaEndpoints
             return Results.Ok(items);
         });
 
+        g.MapPatch("/{id:guid}/review", async (Guid id, [FromBody] ReviewActionRequest req, IMediator m, CancellationToken ct) =>
+        {
+            if (req.Action is not ("meme" or "real")) return Results.BadRequest("action must be 'meme' or 'real'");
+            var ok = await m.Send(new ReviewMediaRequest(id, req.Action), ct);
+            return ok ? Results.NoContent() : Results.NotFound();
+        });
+
         // Bulk delete — must come before /{id}
         g.MapDelete("/bulk", async (
             [FromBody] BulkDeleteRequest req,
@@ -140,12 +148,13 @@ public static class MediaEndpoints
             [FromQuery] string? tag = null,
             [FromQuery] bool? favorite = null,
             [FromQuery] bool? isVideo = null,
-            [FromQuery] bool? noDate = null) =>
+            [FromQuery] bool? noDate = null,
+            [FromQuery] string? originClass = null) =>
         {
             var result = await m.Send(new GetMediaListRequest(
                 page > 0 ? page : 1,
                 pageSize is > 0 and <= 200 ? pageSize : 50,
-                from, to, tag, favorite, isVideo, noDate), ct);
+                from, to, tag, favorite, isVideo, noDate, originClass), ct);
             return Results.Ok(result);
         });
 
@@ -171,3 +180,4 @@ public static class MediaEndpoints
 
 public record BulkDeleteRequest(List<Guid> Ids);
 public record PatchMediaRequest(bool? IsFavorite, Guid? SeriesId);
+public record ReviewActionRequest(string Action);

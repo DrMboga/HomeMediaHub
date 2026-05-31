@@ -33,6 +33,11 @@ export function PhotoCard({ item, className = 'gallery-card', durationSec }: Pro
           {durationSec != null ? formatDuration(durationSec) : ''}
         </div>
       )}
+      {item.originClass && item.originClass !== 'photo' && (
+        <span className={`origin-badge origin-badge--${item.originClass}`}>
+          {item.originClass}
+        </span>
+      )}
       <div className="photo-card-date">{formatCardDate(item.takenAt)}</div>
     </div>
   )

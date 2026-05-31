@@ -16,7 +16,8 @@ CREATE TABLE media_files (
     is_deleted      BOOLEAN DEFAULT FALSE,
     is_favorite     BOOLEAN DEFAULT FALSE,
     origin_class    TEXT,                    -- 'real_photo' | 'document' | 'meme' | 'screenshot' | 'artwork' | NULL (not yet classified)
-    origin_confidence FLOAT                  -- CLIP classification confidence [0.0–1.0]
+    origin_confidence FLOAT,                 -- CLIP classification confidence [0.0–1.0]
+    origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE  -- TRUE once user has acted on this item in the Review page
 );
 CREATE INDEX ON media_files (taken_at DESC);
 CREATE INDEX ON media_files (file_hash);

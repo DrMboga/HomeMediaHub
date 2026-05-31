@@ -21,12 +21,12 @@ namespace Api.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("identity")
-                .HasAnnotation("ProductVersion", "9.0.5")
+                .HasAnnotation("ProductVersion", "10.0.7")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Api.Data.MediaFileRecord", b =>
+            modelBuilder.Entity("Api.Data.MediaFile", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -104,6 +104,14 @@ namespace Api.Data.Migrations
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("boolean")
                         .HasColumnName("phone_number_confirmed");
+
+                    b.Property<DateTimeOffset?>("RefreshTokenExpiry")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("refresh_token_expiry");
+
+                    b.Property<string>("RefreshTokenHash")
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token_hash");
 
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("text")

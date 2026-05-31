@@ -17,12 +17,13 @@ public static class SearchEndpoints
             [FromQuery] string q = "",
             [FromQuery] int limit = 0,
             [FromQuery] DateTime? from = null,
-            [FromQuery] DateTime? to = null) =>
+            [FromQuery] DateTime? to = null,
+            [FromQuery] string? originClass = null) =>
         {
             if (string.IsNullOrWhiteSpace(q))
                 return Results.BadRequest(new { error = "q is required" });
 
-            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 50, from, to), ct);
+            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 50, from, to, originClass), ct);
             return Results.Ok(items);
         });
 

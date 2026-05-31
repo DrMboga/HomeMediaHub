@@ -57,7 +57,12 @@
       "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; [System.Environment]::SetEnvironmentVariable\\(\"Path\", $env:PATH, \"Process\"\\); Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npm install\" 2>&1 | Select-Object -Last 8)",
       "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npx tsc --noEmit -p tsconfig.app.json 2>&1\")",
       "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + $env:PATH; Set-Location \"C:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Frontend\"; cmd /c \"set PATH=C:\\\\Program Files\\\\nodejs;%PATH% && npm run build 2>&1\")",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "Bash(npx tsc *)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Api\\\\Data\\\\Migrations\\\\20260501000000_AddRefreshTokens.cs\" -Force)",
+      "Bash(cd /mnt/c/Users/Mike/Projects/HomeMediaHub && dotnet build src/Api/Api.csproj --no-restore -c Release 2>&1 | tail -5)",
+      "Read(//mnt/c/Users/Mike/Projects/**)",
+      "PowerShell(dotnet build src/Api/Api.csproj --no-restore -c Release 2>&1)"
     ]
   },
   "enabledPlugins": {

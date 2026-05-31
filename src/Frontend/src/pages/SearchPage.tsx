@@ -10,6 +10,7 @@ export function SearchPage() {
   const [dateOpen, setDateOpen] = useState(false)
   const [dateFrom, setDateFrom] = useState(searchParams.get('from') ?? '')
   const [dateTo, setDateTo] = useState(searchParams.get('to') ?? '')
+  const [originClass, setOriginClass] = useState(searchParams.get('originClass') ?? '')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -20,14 +21,15 @@ export function SearchPage() {
     if (query.trim()) params.q = query.trim()
     if (dateFrom) params.from = dateFrom
     if (dateTo) params.to = dateTo
+    if (originClass) params.originClass = originClass
     setSearchParams(params, { replace: true })
-  }, [query, dateFrom, dateTo, setSearchParams])
+  }, [query, dateFrom, dateTo, originClass, setSearchParams])
 
   const debouncedQuery = query.trim()
 
   const { data: results, isFetching } = useQuery({
-    queryKey: ['search', debouncedQuery, dateFrom, dateTo],
-    queryFn: () => semanticSearch(debouncedQuery, dateFrom || undefined, dateTo || undefined),
+    queryKey: ['search', debouncedQuery, dateFrom, dateTo, originClass],
+    queryFn: () => semanticSearch(debouncedQuery, dateFrom || undefined, dateTo || undefined, 50, originClass || undefined),
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,
   })
@@ -55,6 +57,20 @@ export function SearchPage() {
             >
               <span className="mi">calendar_today</span>Date range
             </div>
+            <select
+              className="year-select"
+              value={originClass}
+              onChange={e => setOriginClass(e.target.value)}
+              title="Filter by type"
+            >
+              <option value="">All types</option>
+              <option value="photo">Photo</option>
+              <option value="people">People</option>
+              <option value="screenshot">Screenshot</option>
+              <option value="artwork">Artwork</option>
+              <option value="document">Document</option>
+              <option value="reference">Reference</option>
+            </select>
           </div>
         </div>
 

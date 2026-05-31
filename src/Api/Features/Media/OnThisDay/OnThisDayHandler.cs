@@ -20,6 +20,7 @@ public sealed class OnThisDayHandler : IRequestHandler<OnThisDayRequest, List<Ot
             .Include(f => f.Thumbnail)
             .Include(f => f.Metadata)
             .Where(f => !f.IsDeleted &&
+                        f.OriginClass != "meme" &&
                         f.TakenAt.HasValue &&
                         f.TakenAt.Value.Month == req.Month &&
                         f.TakenAt.Value.Day == req.Day)

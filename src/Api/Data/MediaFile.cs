@@ -17,6 +17,7 @@ public sealed class MediaFile
     public bool IsFavorite { get; set; }
     public string? OriginClass { get; set; }
     public double? OriginConfidence { get; set; }
+    public bool OriginReviewed { get; set; }
 
     public MediaMetadata? Metadata { get; set; }
     public MediaThumbnail? Thumbnail { get; set; }

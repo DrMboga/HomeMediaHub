@@ -35,6 +35,7 @@ export async function getMediaList(params: {
   favorite?: boolean
   isVideo?: boolean
   noDate?: boolean
+  originClass?: string
 }): Promise<PagedResult<MediaListItem>> {
   const { data } = await client.get<PagedResult<MediaListItem>>('/media', { params })
   return data
@@ -74,4 +75,13 @@ export async function getAlbumDetail(id: string): Promise<AlbumDetailDto> {
 
 export async function patchMedia(id: string, body: { isFavorite?: boolean }): Promise<void> {
   await client.patch(`/media/${id}`, body)
+}
+
+export async function getReviewQueue(limit = 200): Promise<MediaListItem[]> {
+  const { data } = await client.get<MediaListItem[]>('/media/review', { params: { limit } })
+  return data
+}
+
+export async function confirmReview(id: string, action: 'meme' | 'real'): Promise<void> {
+  await client.patch(`/media/${id}/review`, { action })
 }

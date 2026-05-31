@@ -172,6 +172,20 @@ export function Lightbox() {
                   </span>
                 </>
               )}
+              {detail?.originClass && detail.originClass !== 'photo' && (
+                <>
+                  <span className="lb-sep">·</span>
+                  <span className="lb-meta-item">
+                    <span className="mi">category</span>
+                    {detail.originClass}
+                    {detail.originConfidence != null && (
+                      <span className="lb-meta-conf">
+                        {Math.round(detail.originConfidence * 100)}%
+                      </span>
+                    )}
+                  </span>
+                </>
+              )}
             </div>
 
             {detail?.tags && detail.tags.length > 0 && (

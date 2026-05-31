@@ -13,7 +13,8 @@ public record GetMediaListRequest(
     string? Tag,
     bool? Favorite,
     bool? IsVideo = null,
-    bool? NoDate = null
+    bool? NoDate = null,
+    string? OriginClass = null
 ) : IRequest<PagedResult<MediaListItemDto>>;
 
 public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, PagedResult<MediaListItemDto>>
@@ -27,7 +28,7 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
         var q = _db.MediaFiles
             .Include(f => f.Thumbnail)
             .Include(f => f.Metadata)
-            .Where(f => !f.IsDeleted)
+            .Where(f => !f.IsDeleted && f.OriginClass != "meme")
             .AsQueryable();
 
         if (req.NoDate == true)    q = q.Where(f => f.TakenAt == null);
@@ -42,6 +43,8 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
             : q.Where(f => !f.DurationSec.HasValue);
         if (!string.IsNullOrEmpty(req.Tag))
             q = q.Where(f => f.Tags.Any(t => t.Tag == req.Tag));
+        if (!string.IsNullOrEmpty(req.OriginClass))
+            q = q.Where(f => f.OriginClass == req.OriginClass);
 
         var total = await q.CountAsync(ct);
         var items = await q

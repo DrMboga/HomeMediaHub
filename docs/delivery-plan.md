@@ -173,13 +173,12 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
   - YOLOv8n (`ultralytics` — 6 MB)
   - CLIP ViT-B/32 (`openai/clip-vit-base-patch32` via `transformers` or `clip` package — 151 MB)
 - Endpoints:
-  - `POST /process { filePath }` → `{ tags: [{label, confidence}], embedding: [512] }`
+  - `POST /analyze { filePath }` → `{ tags: [{label, confidence}], embedding: [512], originClass, originConfidence }` — combined YOLOv8 + CLIP in a single call
   - `POST /embed/text { text }` → `{ embedding: [512] }`
-  - `POST /classify-origin { filePath }` → `{ originClass, confidence }` — CLIP zero-shot; classifies as `real_photo`, `document`, `meme`, `screenshot`, or `artwork`
 - Confidence threshold: ≥ 0.40 for YOLOv8 tags
 - L2-normalised CLIP embeddings
-- Workflow 1 already calls `/process`; simply uncomment the AI step (it was `continue-on-fail`)
-- Workflow 1 also calls `/classify-origin` after `/process` (continue-on-fail); result written to `media_files.origin_class` / `origin_confidence`
+- Origin classification: CLIP zero-shot across 6 classes — `photo`, `screenshot`, `document`, `artwork`, `reference`, `people`. `meme` is user-assigned only (never set by AI).
+- Workflow 1 calls `/analyze` (continue-on-fail); tags, embedding, and `origin_class`/`origin_confidence` all written in one step
 
 ### Done when
 
@@ -277,7 +276,7 @@ curl -s "http://localhost/api/search?q=birthday+cake" \
 - Favorites toggle (star icon)
 - Admin jobs panel: list jobs by status, view error detail, trigger retry
 - SignalR integration: new photos appear in grid without page reload
-- **Review page** (`/review`): grid of items flagged as `meme`, `screenshot`, or `artwork` by CLIP, sorted by confidence. Checkbox multi-select with a "Delete selected" button that calls `DELETE /api/media/bulk`. Lets users clean non-real photos out of the library without any automatic routing.
+- **Review page** (`/review`): grid of items AI-flagged as `screenshot`, `document`, `artwork`, or `reference` (not yet reviewed by user), sorted by confidence. Each card has two buttons: **"Meme"** (sets `origin_class = 'meme'`, hidden from gallery/search/OTD) and **"Real Photo"** (marks reviewed, keeps original AI class). Optimistic card removal on action.
 
 ### Done when
 
@@ -306,6 +305,21 @@ End-to-end smoke test (manual):
 
 1. Inject a deliberately corrupt HEIC → Library Scanner run → Telegram admin message received within ~30 s
 2. Wait for 15:00 (or advance system clock in test) → Photo of the Day message received in Telegram channel
+
+---
+
+## Phase 7.5 — Post-Phase Improvements ✅ COMPLETE (2026-05-31)
+
+**Goal:** Incremental quality improvements after Phase 7 validation.
+
+### Deliverables
+
+- **Lightbox file path**: Replaced hidden `<abbr title>` tooltip with a visible `.lb-filepath` row (monospace, full path, ellipsis truncation, `folder_open` icon). Always visible above the date in the lightbox info bar.
+- **Meme/Review feature**:
+  - `/review` page and nav link: grid of AI-flagged items (`screenshot`, `document`, `artwork`, `reference`), each with "Meme" and "Real Photo" action buttons
+  - `PATCH /api/media/{id}/review` — `{ action: "meme"|"real" }`: sets `origin_reviewed = true`; "meme" also sets `origin_class = 'meme'`
+  - Gallery (`GET /api/media`), semantic search, and On This Day all exclude `origin_class = 'meme'`
+  - `origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE` column added to `media_files`
 
 ---
 

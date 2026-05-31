@@ -49,7 +49,9 @@ namespace Api.Data.Migrations
                     two_factor_enabled = table.Column<bool>(type: "boolean", nullable: false),
                     lockout_end = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     lockout_enabled = table.Column<bool>(type: "boolean", nullable: false),
-                    access_failed_count = table.Column<int>(type: "integer", nullable: false)
+                    access_failed_count = table.Column<int>(type: "integer", nullable: false),
+                    refresh_token_hash = table.Column<string>(type: "text", nullable: true),
+                    refresh_token_expiry = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
