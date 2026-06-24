@@ -12,7 +12,7 @@ public sealed class DedupHandler : IRequestHandler<DedupRequest, DedupResponse>
     public async Task<DedupResponse> Handle(DedupRequest request, CancellationToken cancellationToken)
     {
         var id = await _db.MediaFiles
-            .Where(f => f.FileHash == request.Hash && !f.IsDeleted)
+            .Where(f => f.FileHash == request.Hash)
             .Select(f => (Guid?)f.Id)
             .FirstOrDefaultAsync(cancellationToken);
 

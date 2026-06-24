@@ -117,7 +117,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Production
     volumes:
-      - ${PHOTO_DIR}:/photo:ro
+      - ${PHOTO_DIR}:/photo
       - ${THUMBNAILS_DIR}:/thumbnails
       - ${VIDEO_CACHE_DIR}:/video-cache
       - ${DISPLAY_CACHE_DIR}:/display-cache

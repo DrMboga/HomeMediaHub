@@ -17,7 +17,6 @@ public sealed class ScanDirectoryHandler : IRequestHandler<ScanDirectoryRequest,
     public async Task<ScanDirectoryResult> Handle(ScanDirectoryRequest request, CancellationToken cancellationToken)
     {
         var existing = await _db.MediaFiles
-            .Where(f => !f.IsDeleted)
             .Select(f => f.FilePath)
             .ToHashSetAsync(cancellationToken);
 
