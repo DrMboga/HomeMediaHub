@@ -1,6 +1,6 @@
 # Immich iPhone Setup
 
-Immich runs on the server as the iPhone backup endpoint. It receives photos directly from the iOS app and writes them to `/mnt/usb-hdd/Photo/iPhone/`. HomeMediaHub's Library Scanner (W2) picks them up from there.
+Immich runs on the server as the iPhone backup endpoint. It receives photos directly from the iOS app and writes them to `/mnt/storage/Photo/iPhone/`. HomeMediaHub's Library Scanner (W2) picks them up from there.
 
 You do not use the Immich web UI day-to-day — it is purely an ingest mechanism.
 
@@ -20,7 +20,7 @@ On first visit, Immich prompts you to create an admin account. Use any name/emai
 
 ### 2. Verify the storage template
 
-Immich should already be configured via the env file to write uploads to `/mnt/usb-hdd/Photo/iPhone/`. To confirm:
+Immich should already be configured via the env file to write uploads to `/mnt/storage/Photo/iPhone/`. To confirm:
 
 Admin → Server Settings → Storage Template — verify it shows:
 
@@ -55,7 +55,7 @@ Search for **Immich** in the App Store (it's free, open-source).
 
 ## What happens after backup
 
-1. Immich receives the photo and writes the original file to `/mnt/usb-hdd/Photo/iPhone/{y}/{y-MM-dd}/`
+1. Immich receives the photo and writes the original file to `/mnt/storage/Photo/iPhone/{y}/{y-MM-dd}/`
 2. The file sits there until Library Scanner runs
 3. To ingest immediately: open n8n (`http://192.168.0.192:5678`) → find **W2 Library Scanner** → click **Execute Workflow**
 4. The monthly cron (`0 2 1 * *`) catches any backups automatically

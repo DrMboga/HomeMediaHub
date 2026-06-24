@@ -18,7 +18,7 @@ Self-hosted home photo and video library running on a single Dell Precision 3620
 |-----------|------|
 | Host | Dell Precision 3620 — Intel i7-6700, 32 GB RAM, 500 GB SSD |
 | OS | Ubuntu Server 24.04 |
-| Storage | USB HDD 500 GB — mounted at `/mnt/usb-hdd` |
+| Storage | 2TB HGST Ultrastar 7K4000 SATA HDD — mounted at `/mnt/storage` |
 | Network | LAN-only |
 
 ## Stack
@@ -54,7 +54,7 @@ Self-hosted home photo and video library running on a single Dell Precision 3620
 ## Storage Layout
 
 ```
-/mnt/usb-hdd/
+/mnt/storage/
 ├── Photo/               ← single source of truth (Samba share root)
 │   ├── 2005/ ... 2025/  ← existing archive
 │   └── iPhone/          ← new uploads from Immich
@@ -67,7 +67,7 @@ Self-hosted home photo and video library running on a single Dell Precision 3620
 | # | Name | Trigger | Purpose |
 |---|------|---------|---------|
 | 1 | Process Single File | Webhook / sub-workflow | Core pipeline: hash → dedup → convert → metadata → thumbnail → geocode → AI → DB |
-| 2 | Library Scanner | Manual or monthly cron | Scans `/mnt/usb-hdd/Photo`, calls W1 for each unprocessed file |
+| 2 | Library Scanner | Manual or monthly cron | Scans `/mnt/storage/Photo`, calls W1 for each unprocessed file |
 | 3 | Photo of the Day | Daily cron 15:00 | Picks a notable photo and posts to Telegram |
 | 4 | Error Handler | Global n8n error trigger | Updates `processing_jobs`, sends Telegram alert |
 
@@ -92,7 +92,7 @@ docker compose exec postgres psql -U postgres -d homemediahub_db
 
 ## Ingest Strategy
 
-Immich writes iPhone backups directly to `/mnt/usb-hdd/Photo/iPhone/`. The Library Scanner (Workflow 2) is the only ingest entry point — run it manually after a large import, or let the monthly cron catch it automatically. No Immich webhooks are used (fire-and-forget webhooks can silently drop events if n8n is unavailable).
+Immich writes iPhone backups directly to `/mnt/storage/Photo/iPhone/`. The Library Scanner (Workflow 2) is the only ingest entry point — run it manually after a large import, or let the monthly cron catch it automatically. No Immich webhooks are used (fire-and-forget webhooks can silently drop events if n8n is unavailable).
 
 ## AI Pipeline
 
@@ -109,10 +109,10 @@ ASP.NET Core Identity with two users (Mike + Badger). No roles — both share th
 
 ## Samba Share
 
-`\\<server-ip>\Photo` → `/mnt/usb-hdd/Photo`. Read-write for the `mediahub` group.
+`\\<server-ip>\Storage` → `/mnt/storage` (whole drive). Read-write for the `mediahub` group.
 
-- **Windows:** `\\<server-ip>\Photo`
-- **macOS:** Finder → Go → Connect to Server → `smb://<server-ip>/Photo`
+- **Windows:** `\\<server-ip>\Storage`
+- **macOS:** Finder → Go → Connect to Server → `smb://<server-ip>/Storage`
 
 ## Documentation
 

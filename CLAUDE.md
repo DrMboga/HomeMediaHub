@@ -53,7 +53,7 @@ Self-hosted home photo and video library. Replaces manual iPhone → MacBook →
 |-----------|------|
 | Host | Dell Precision 3620 — Intel i7-6700, 32 GB RAM, 500 GB SSD |
 | OS | Ubuntu Server 24.04 |
-| Storage | USB HDD 500 GB — mounted at `/mnt/usb-hdd` |
+| Storage | 2TB HGST Ultrastar 7K4000 SATA HDD — mounted at `/mnt/storage` |
 | Network | LAN-only (no public internet exposure) |
 
 ## Stack
@@ -105,9 +105,9 @@ Two isolated environments run from the same `docker-compose.yml` via separate en
 | Environment | Command | Photo library | Data root |
 |-------------|---------|---------------|-----------|
 | **stage** | `docker compose --env-file .env.stage up -d` | `/opt/homemediahub/stage/TestPhoto` (SSD) | `/opt/homemediahub/stage/data/` |
-| **prod** | `docker compose --env-file .env.prod up -d` | `/mnt/usb-hdd/Photo` (USB HDD) | `/opt/homemediahub/data/` |
+| **prod** | `docker compose --env-file .env.prod up -d` | `/mnt/storage/Photo` (SATA HDD) | `/opt/homemediahub/data/` |
 
-Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so the USB HDD is not required during development. Switch to prod when the USB HDD is attached and the full library is ready.
+Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so the SATA HDD is not required during development. Switch to prod when the drive is mounted and the full library is ready.
 
 ## Key Paths on Disk
 
@@ -128,9 +128,9 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 /tmp/homemediahub-stage/  ← shared temp (stage)
 ```
 
-### Prod (USB HDD)
+### Prod (SATA HDD)
 ```
-/mnt/usb-hdd/
+/mnt/storage/
 ├── Photo/               ← single source of truth for all originals
 │   ├── 2005/ ... 2025/  ← existing archive (not reorganised)
 │   └── iPhone/          ← new uploads from Immich (storage template: {y}/{y-MM-dd}/)
@@ -149,16 +149,16 @@ Stage uses the `TestPhoto` folder (copied from Windows laptop to server SSD) so 
 
 ## Samba Share
 
-`\\<server-ip>\Photo` maps to `/mnt/usb-hdd/Photo`. Read-write for `mediahub` group.
-- Windows: `\\<server-ip>\Photo`
-- macOS: Finder → Go → Connect to Server → `smb://<server-ip>/Photo`
+`\\<server-ip>\Storage` maps to `/mnt/storage` (whole drive). Read-write for `mediahub` group.
+- Windows: `\\<server-ip>\Storage`
+- macOS: Finder → Go → Connect to Server → `smb://<server-ip>/Storage`
 
 ## n8n Workflows
 
 | # | Name | Trigger | Purpose |
 |---|------|---------|---------|
 | 1 | Process Single File | Webhook / sub-workflow call | Core pipeline: hash → dedup → convert → metadata → thumbnail → geocode → AI → DB |
-| 2 | Library Scanner | Manual button OR monthly cron (`0 2 1 * *`) | Scans `/mnt/usb-hdd/Photo`, finds unprocessed files, calls W1 for each |
+| 2 | Library Scanner | Manual button OR monthly cron (`0 2 1 * *`) | Scans `/mnt/storage/Photo`, finds unprocessed files, calls W1 for each |
 | 3 | Photo of the Day | Daily cron `0 15 * * *` | Picks a notable photo from DB, sends to Telegram channel |
 | 4 | Error Handler | Global n8n error trigger | Updates `processing_jobs` table, sends Telegram alert to admin |
 
@@ -172,7 +172,7 @@ Always pass `--env-file` to target the right environment. Omitting it defaults t
 # Start stage (TestPhoto on SSD)
 docker compose --env-file .env.stage up -d
 
-# Start prod (USB HDD — ensure drive is mounted first)
+# Start prod (SATA HDD — ensure /mnt/storage is mounted first)
 docker compose --env-file .env.prod up -d
 
 # View logs (same flag required)
@@ -206,8 +206,8 @@ ASP.NET Core Identity. Two users: Mike and Badger. No roles — both users share
 - **Tool endpoints pattern.** n8n calls small atomic .NET endpoints for operations it cannot perform natively: SHA-256 hashing, EXIF extraction, thumbnail generation, directory scanning.
 - **HEIC/video conversion in n8n.** HEIC conversion is a two-step Execute Command node: `heif-convert -q 90` converts pixels, then `exiftool -TagsFromFile` copies all EXIF/GPS/XMP metadata from the original — `heif-convert` alone strips metadata. `ffmpeg` handles video frame extraction. Both run as Execute Command nodes in n8n (installed in the custom n8n Alpine image via `apk add libheif-tools libde265 perl-image-exiftool ffmpeg`). Converted temp files go to `/tmp/homemediahub-work/` (shared with the api container).
 - **Thumbnails on filesystem.** nginx serves thumbnails directly via `X-Accel-Redirect` — no Postgres or .NET involved per thumbnail request.
-- **Video on-demand transcoding.** iPhone HEVC videos are transcoded to H.264 MP4 on first play request by the .NET API. Cached in `/mnt/usb-hdd/video-cache/`. Original is never modified.
-- **Single storage tree.** All originals (archive + new iPhone uploads) live under `/mnt/usb-hdd/Photo/`. No duplication. Immich's storage template writes new uploads to `Photo/iPhone/{y}/{y-MM-dd}/`.
+- **Video on-demand transcoding.** iPhone HEVC videos are transcoded to H.264 MP4 on first play request by the .NET API. Cached in `/mnt/storage/video-cache/`. Original is never modified.
+- **Single storage tree.** All originals (archive + new iPhone uploads) live under `/mnt/storage/Photo/`. No duplication. Immich's storage template writes new uploads to `Photo/iPhone/{y}/{y-MM-dd}/`.
 - **Separate Postgres instances.** Immich gets its own Postgres (port 5433). The custom stack uses a separate container (port 5432) with two databases: `homemediahub_db` and `n8n_db`. GeoService gets its own Postgres (port 5434) so it is fully self-contained and portable to other projects.
 - **GeoService is a standalone microservice.** Reverse geocoding is extracted into its own .NET 10 service (`geoservice:8001`) with its own database. n8n calls `GET geoservice:8001/reverse?lat=&lon=` instead of Nominatim directly. The service looks up coordinates (rounded to 4 decimal places, ~11 m precision) in its local cache first; only on a cache miss does it call Nominatim, then persists the result. Nominatim's 1 req/sec policy is enforced inside the service.
 - **Samba native, not containerised.** Running Samba in a container requires `--privileged` and `--network host`, eliminating isolation benefits.

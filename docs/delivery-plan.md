@@ -4,12 +4,12 @@ Each phase produces a running, testable increment. Later phases build on earlier
 
 ## Development strategy: stage → prod
 
-All phases are validated on the **stage** environment first (TestPhoto folder on server SSD, no USB HDD required). When a phase is stable on stage, it is smoke-tested on **prod** (USB HDD, full Photo library). The same `docker-compose.yml` is used for both; only the env file differs.
+All phases are validated on the **stage** environment first (TestPhoto folder on server SSD, no SATA HDD required). When a phase is stable on stage, it is smoke-tested on **prod** (SATA HDD, full Photo library). The same `docker-compose.yml` is used for both; only the env file differs.
 
 | Env | Photo source | How to start |
 |-----|-------------|--------------|
 | stage | `/opt/homemediahub/stage/TestPhoto` | `docker compose --env-file .env.stage up -d` |
-| prod  | `/mnt/usb-hdd/Photo` | `docker compose --env-file .env.prod up -d` |
+| prod  | `/mnt/storage/Photo` | `docker compose --env-file .env.prod up -d` |
 
 **TestPhoto setup (one-time):** Create a `TestPhoto` folder on your Windows laptop with a small representative sample (a handful of JPEGs, HEICs, and one short video). Copy it to the server:
 ```bash
@@ -39,7 +39,7 @@ scp -r "C:\Users\Mike\TestPhoto" mike@<server-ip>:/opt/homemediahub/stage/TestPh
   - Runs `CREATE EXTENSION IF NOT EXISTS vector`
 - Full DB schema applied via init SQL (Section 5 of architecture doc)
 - NGINX config with routing rules (all upstreams may return 502 at this point — routing is declared)
-- Volume mounts wired: `/mnt/usb-hdd/Photo`, `/mnt/usb-hdd/thumbnails`, `/mnt/usb-hdd/video-cache`, `/tmp/homemediahub-work`
+- Volume mounts wired: `/mnt/storage/Photo`, `/mnt/storage/thumbnails`, `/mnt/storage/video-cache`, `/tmp/homemediahub-work`
 - Immich + its Postgres + Redis declared and wired to iPhone storage path
 
 ### Done when (validate on stage first)
@@ -143,7 +143,7 @@ curl http://localhost:8000/health   # → {"status":"ok","phase":1}
 
 ### Done when
 
-1. Drop a test HEIC and JPEG into `/mnt/usb-hdd/Photo/test/`
+1. Drop a test HEIC and JPEG into `/mnt/storage/Photo/test/`
 2. Trigger Library Scanner manually
 3. Confirm rows appear in `media_files`, `media_metadata`, `media_thumbnails`; `media_tags` will be empty until Phase 4 (AI not wired yet)
 
@@ -344,7 +344,7 @@ End-to-end smoke test (manual):
 
 ### Deliverables
 
-- Run Library Scanner (Workflow 2) against `/mnt/usb-hdd/Photo` — covers all existing year folders
+- Run Library Scanner (Workflow 2) against `/mnt/storage/Photo` — covers all existing year folders
 - Monitor `processing_jobs` for failures; investigate and re-run as needed
 - Verify row counts: `SELECT COUNT(*) FROM media_files` ≈ known archive size
 - Confirm semantic search and Photo of the Day draw from historical photos

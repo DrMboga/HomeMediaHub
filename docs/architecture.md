@@ -23,7 +23,7 @@
  ┌──────────┐    │                                                                      │
  │ Windows  │    │  ┌──────────────────────────────────────────────────────────────┐   │
  │ MacOS    │────┼─►│  Samba  (native Ubuntu service, not containerized)           │   │
- │ (LAN)    │    │  │  share: \\server\Photo → /mnt/usb-hdd/Photo                  │   │
+ │ (LAN)    │    │  │  share: \\server\Storage → /mnt/storage                       │   │
  └──────────┘    │  └──────────────────────────────────────────────────────────────┘   │
                  │                                                                      │
  ┌──────────┐    │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -62,7 +62,7 @@
                  │  └──────────────────────┘                                            │
                  │                                                                      │
                  │  ┌──────────────────────────────────────────────────────────────┐   │
-                 │  │  USB HDD  /mnt/usb-hdd/                                      │   │
+                 │  │  USB HDD  /mnt/storage/                                      │   │
                  │  │   └── Photo/                  ← single source of truth        │   │
                  │  │        ├── 2005/                                              │   │
                  │  │        ├── 2006/                                              │   │
@@ -82,8 +82,8 @@
 ### immich-server
 - **Image:** `ghcr.io/immich-app/immich-server:release`
 - **Port:** 2283
-- **Responsibility:** Receive iPhone backups via the Immich mobile app. Configured with a storage template so it writes originals directly into `/mnt/usb-hdd/Photo/iPhone/{y}/{y}-{MM}-{dd}/`. Fires `asset.uploaded` webhook to n8n. No custom UI, no ML processing.
-- **Storage template env:** `IMMICH_MEDIA_LOCATION=/mnt/usb-hdd/Photo/iPhone`
+- **Responsibility:** Receive iPhone backups via the Immich mobile app. Configured with a storage template so it writes originals directly into `/mnt/storage/Photo/iPhone/{y}/{y}-{MM}-{dd}/`. Fires `asset.uploaded` webhook to n8n. No custom UI, no ML processing.
+- **Storage template env:** `IMMICH_MEDIA_LOCATION=/mnt/storage/Photo/iPhone`
 - **Boundaries:** Owns its own Postgres and Redis. Not accessed by any custom service directly.
 
 ### immich-postgres
@@ -165,13 +165,13 @@
 - **Routes:**
   - `/` → frontend :3000
   - `/api/`, `/hubs/` → api :8080 (WebSocket upgrade for `/hubs/`)
-  - `/thumbs/` → served directly from `/mnt/usb-hdd/thumbnails/` by nginx (no .NET involved). The .NET API returns an `X-Accel-Redirect: /thumbs/<id>.webp` header; nginx intercepts it and serves the file from disk. This bypasses the .NET process entirely for thumbnail delivery.
+  - `/thumbs/` → served directly from `/mnt/storage/thumbnails/` by nginx (no .NET involved). The .NET API returns an `X-Accel-Redirect: /thumbs/<id>.webp` header; nginx intercepts it and serves the file from disk. This bypasses the .NET process entirely for thumbnail delivery.
   - `/immich/` → immich-server :2283 (mobile app connectivity)
   - `/n8n/` → n8n :5678 (admin access only, restrict by IP in nginx config)
 
 ### Samba (native Ubuntu — not containerized)
 - **Package:** `samba` installed on host
-- **Share:** `\\<server-ip>\Photo` → `/mnt/usb-hdd/Photo`
+- **Share:** `\\<server-ip>\Photo` → `/mnt/storage/Photo`
 - **Access:** read-write for family members on LAN (Windows and macOS)
 - **Why not containerized:** Samba at the container level requires `--privileged` and `--network host` which eliminates the isolation benefit. Running it natively on Ubuntu is standard, simpler, and more reliable.
 
@@ -184,10 +184,10 @@ Two isolated environments share the same `docker-compose.yml`. Path-sensitive va
 | Variable | Stage | Prod |
 |----------|-------|------|
 | `COMPOSE_PROJECT_NAME` | `hmh-stage` | `hmh-prod` |
-| `PHOTO_DIR` | `/opt/homemediahub/stage/TestPhoto` | `/mnt/usb-hdd/Photo` |
-| `THUMBNAILS_DIR` | `/opt/homemediahub/stage/thumbnails` | `/mnt/usb-hdd/thumbnails` |
-| `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/usb-hdd/video-cache` |
-| `DISPLAY_CACHE_DIR` | `/opt/homemediahub/stage/display-cache` | `/mnt/usb-hdd/display-cache` |
+| `PHOTO_DIR` | `/opt/homemediahub/stage/TestPhoto` | `/mnt/storage/Photo` |
+| `THUMBNAILS_DIR` | `/opt/homemediahub/stage/thumbnails` | `/mnt/storage/thumbnails` |
+| `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/storage/video-cache` |
+| `DISPLAY_CACHE_DIR` | `/opt/homemediahub/stage/display-cache` | `/mnt/storage/display-cache` |
 | `WORK_DIR` | `/tmp/homemediahub-stage` | `/tmp/homemediahub-prod` |
 | `DATA_DIR` | `/opt/homemediahub/stage/data` | `/opt/homemediahub/data` |
 | `GEOSERVICE_DB_PASSWORD` | (set in .env.stage) | (set in .env.prod) |
@@ -203,8 +203,8 @@ Two isolated environments share the same `docker-compose.yml`. Path-sensitive va
 All originals live under a single directory tree. No duplication.
 
 ```
-/mnt/usb-hdd/
-├── Photo/                          ← Samba share root (\\server\Photo)
+/mnt/storage/
+├── Photo/                          ← photo library (accessible via \\server\Storage\Photo)
 │   ├── 2005/                       ← existing archive (untouched)
 │   ├── 2006/
 │   ├── iPhoneMike2025-06-09/       ← existing archive (untouched)
@@ -228,7 +228,7 @@ All originals live under a single directory tree. No duplication.
 ### Workflow 1 — Process Single File (core pipeline)
 
 **Trigger:** Webhook `POST /webhook/process-file` or sub-workflow call
-**Input:** `{ filePath: "/mnt/usb-hdd/Photo/...", source: "immich"|"archive" }`
+**Input:** `{ filePath: "/mnt/storage/Photo/...", source: "immich"|"archive" }`
 
 ```
 [Webhook / Execute Workflow trigger]
@@ -493,7 +493,7 @@ CREATE TABLE album_media (
 -- On-demand video transcodes (H.264 cache — recreatable from original)
 CREATE TABLE video_transcodes (
     media_file_id   UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
-    transcode_path  TEXT NOT NULL,       -- /mnt/usb-hdd/video-cache/<id>.mp4
+    transcode_path  TEXT NOT NULL,       -- /mnt/storage/video-cache/<id>.mp4
     codec           TEXT NOT NULL,       -- 'h264'
     container       TEXT NOT NULL,       -- 'mp4'
     file_size       BIGINT,
@@ -682,23 +682,23 @@ Origin classification (stored in Workflow 1):
 
 | Container | Mount | Host path | Access |
 |-----------|-------|-----------|--------|
-| immich-server | `/usr/src/app/upload` | `/mnt/usb-hdd/Photo/iPhone` | rw |
-| api | `/photo` | `/mnt/usb-hdd/Photo` | ro |
-| api | `/thumbnails` | `/mnt/usb-hdd/thumbnails` | rw |
+| immich-server | `/usr/src/app/upload` | `/mnt/storage/Photo/iPhone` | rw |
+| api | `/photo` | `/mnt/storage/Photo` | ro |
+| api | `/thumbnails` | `/mnt/storage/thumbnails` | rw |
 | api | `/shared-temp` | `/tmp/homemediahub-work` | rw |
-| api | `/video-cache` | `/mnt/usb-hdd/video-cache` | rw |
-| api | `/display-cache` | `/mnt/usb-hdd/display-cache` | rw |
-| ai-sidecar | `/photo` | `/mnt/usb-hdd/Photo` | ro |
-| n8n | `/photo` | `/mnt/usb-hdd/Photo` | ro |
+| api | `/video-cache` | `/mnt/storage/video-cache` | rw |
+| api | `/display-cache` | `/mnt/storage/display-cache` | rw |
+| ai-sidecar | `/photo` | `/mnt/storage/Photo` | ro |
+| n8n | `/photo` | `/mnt/storage/Photo` | ro |
 | n8n | `/shared-temp` | `/tmp/homemediahub-work` | rw |
-| nginx | `/thumbs` | `/mnt/usb-hdd/thumbnails` | ro |
+| nginx | `/thumbs` | `/mnt/storage/thumbnails` | ro |
 | postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/postgres` | rw |
 | immich-postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/immich-postgres` | rw |
 | geoservice-postgres | `/var/lib/postgresql/data` | `/opt/homemediahub/data/geoservice-postgres` | rw |
 | n8n | `/home/node/.n8n` | `/opt/homemediahub/data/n8n` | rw |
 
 **Samba (native Ubuntu):**
-- `/mnt/usb-hdd/Photo` → share name `Photo` — readable and writable from Windows/macOS on LAN
+- `/mnt/storage` → share name `Storage` — whole drive readable and writable from Windows/macOS on LAN
 
 ---
 
@@ -707,8 +707,8 @@ Origin classification (stored in Workflow 1):
 ```ini
 # /etc/samba/smb.conf (additions)
 
-[Photo]
-   path = /mnt/usb-hdd/Photo
+[Storage]
+   path = /mnt/storage
    browseable = yes
    read only = no
    guest ok = no

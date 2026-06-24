@@ -36,17 +36,17 @@ rsync -av /mnt/c/Users/Mike/Projects/HomeMediaHub/ mike@192.168.0.192:/opt/homem
 SSH into the server, then:
 
 ```bash
-lsblk -f                    # find device — look for the 500 GB drive, e.g. /dev/sdb1
+lsblk -f                    # find device — look for the 2TB drive, e.g. /dev/sdb1
 sudo blkid /dev/sdb1        # note the UUID
 
 # Create mount point
-sudo mkdir -p /mnt/usb-hdd
+sudo mkdir -p /mnt/storage
 
 # Add to /etc/fstab for auto-mount on boot
-echo 'UUID=<paste-uuid-here>  /mnt/usb-hdd  ext4  defaults,nofail  0  2' | sudo tee -a /etc/fstab
+echo 'UUID=<paste-uuid-here>  /mnt/storage  ext4  defaults,nofail  0  2' | sudo tee -a /etc/fstab
 
 sudo mount -a               # mount now without rebooting
-df -h /mnt/usb-hdd          # confirm it shows ~500 GB
+df -h /mnt/storage          # confirm it shows ~1.8 TB
 ```
 
 ---
@@ -157,9 +157,9 @@ curl http://localhost:8000/health   # AI sidecar stub → {"status":"ok","phase"
 # Stop stage
 docker compose --env-file .env.stage down
 
-# Mount USB HDD (if not already in fstab — see section 2)
+# Mount SATA HDD (if not already in fstab — see section 2)
 sudo mount -a
-df -h /mnt/usb-hdd
+df -h /mnt/storage
 
 # Start prod
 docker compose --env-file .env.prod up -d

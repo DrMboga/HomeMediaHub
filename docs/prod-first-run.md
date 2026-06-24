@@ -1,12 +1,12 @@
 # Production First Run
 
-Switch from stage (TestPhoto on SSD) to prod (full archive on USB HDD).
+Switch from stage (TestPhoto on SSD) to prod (full archive on SATA HDD).
 
 **Prerequisites:** stage environment validated, all code committed and pushed.
 
 ---
 
-## 1. Attach and verify the USB HDD
+## 1. Verify the SATA HDD is mounted
 
 ```bash
 ssh mike@192.168.0.192
@@ -14,33 +14,25 @@ ssh mike@192.168.0.192
 # Check the drive is visible
 lsblk
 # Expect something like:
-# sdb      8:16   0  500G  0 disk
-# └─sdb1   8:17   0  500G  0 part
+# sdb      8:16   0  1.8T  0 disk
+# └─sdb1   8:17   0  1.8T  0 part  /mnt/storage
 
 # Verify it is mounted
-findmnt /mnt/usb-hdd
+findmnt /mnt/storage
 # If not mounted:
-sudo mount /dev/sdb1 /mnt/usb-hdd
+sudo mount -a
 
 # Verify the photo library is accessible
-ls /mnt/usb-hdd/Photo | head -20
+ls /mnt/storage/Photo | head -20
 ```
 
-### Make the mount permanent (if not already in fstab)
+### fstab entry (already configured)
 
-```bash
-# Get the UUID of the partition
-sudo blkid /dev/sdb1
-# e.g. UUID="a1b2c3d4-..."
-
-# Add to fstab
-echo 'UUID=a1b2c3d4-... /mnt/usb-hdd ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab
-
-# Test without rebooting
-sudo mount -a
+```
+UUID=247b5598-b391-45cb-9634-68a08571a352  /mnt/storage  ext4  defaults,noatime,nofail  0  2
 ```
 
-The `nofail` option prevents boot failures if the drive is accidentally disconnected.
+The `nofail` option prevents boot failures if the drive is unexpectedly unavailable.
 
 ---
 
@@ -49,9 +41,9 @@ The `nofail` option prevents boot failures if the drive is accidentally disconne
 The prod directories may not exist yet if only stage has been used:
 
 ```bash
-sudo mkdir -p /mnt/usb-hdd/thumbnails
-sudo mkdir -p /mnt/usb-hdd/video-cache
-sudo mkdir -p /mnt/usb-hdd/display-cache
+sudo mkdir -p /mnt/storage/thumbnails
+sudo mkdir -p /mnt/storage/video-cache
+sudo mkdir -p /mnt/storage/display-cache
 sudo mkdir -p /opt/homemediahub/data/postgres
 sudo mkdir -p /opt/homemediahub/data/immich-postgres
 sudo mkdir -p /opt/homemediahub/data/geoservice-postgres
@@ -166,5 +158,5 @@ The scanner can be interrupted and resumed safely — it skips files already in 
 ## Notes
 
 - **File copy with mtime preservation**: If copying new files to the server, use `rsync -av --times` or `scp -p` to preserve modification times. Without `-p`/`--times`, mtime is set to the copy time, which becomes the `taken_at` date for files without EXIF.
-- **Samba share**: After switching to prod, the Samba share (`\\192.168.0.192\Photo`) maps to the live archive. New files copied there will be picked up by the next Library Scanner run.
+- **Samba share**: After switching to prod, the Samba share (`\\192.168.0.192\Storage`) maps to the whole drive. Navigate to the `Photo/` subfolder to access the live archive. New files copied there will be picked up by the next Library Scanner run.
 - **Switching back to stage**: `docker compose --env-file .env.prod down` then `docker compose --env-file .env.stage up -d`. The two environments share ports 80/8080/etc. — only one can run at a time.

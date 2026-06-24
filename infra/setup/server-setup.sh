@@ -52,24 +52,22 @@ sudo mkdir -p /opt/homemediahub/stage/data/geoservice-postgres
 sudo mkdir -p /opt/homemediahub/stage/data/n8n
 sudo mkdir -p /tmp/homemediahub-stage
 
-# ── Prod (USB HDD — only needed when drive is attached) ────────────────────
-# The USB HDD directories are created here so they exist when the drive is
-# mounted later. They are harmless if the drive is not yet attached.
+# ── Prod (SATA HDD — /mnt/storage must be mounted first) ──────────────────
 sudo mkdir -p /opt/homemediahub/data/postgres
 sudo mkdir -p /opt/homemediahub/data/immich-postgres
 sudo mkdir -p /opt/homemediahub/data/geoservice-postgres
 sudo mkdir -p /opt/homemediahub/data/n8n
 # TODO: 1 Make this when HDD mounted
-# sudo mkdir -p /mnt/usb-hdd/Photo/iPhone
-# sudo mkdir -p /mnt/usb-hdd/thumbnails
-# sudo mkdir -p /mnt/usb-hdd/video-cache
-# sudo mkdir -p /mnt/usb-hdd/display-cache
+# sudo mkdir -p /mnt/storage/Photo/iPhone
+# sudo mkdir -p /mnt/storage/thumbnails
+# sudo mkdir -p /mnt/storage/video-cache
+# sudo mkdir -p /mnt/storage/display-cache
 sudo mkdir -p /tmp/homemediahub-prod
 
 # Fix ownership so docker containers (running as non-root) can write
 sudo chown -R "$USER":"$USER" /opt/homemediahub
 # TODO: 2 Make this when HDD mounted
-# sudo chown -R "$USER":"$USER" /mnt/usb-hdd
+# sudo chown -R "$USER":"$USER" /mnt/storage
 sudo chown -R "$USER":"$USER" /tmp/homemediahub-stage
 sudo chown -R "$USER":"$USER" /tmp/homemediahub-prod
 
@@ -84,8 +82,8 @@ sudo chown -R "$USER":"$USER" /tmp/homemediahub-prod
 
 # sudo tee -a /etc/samba/smb.conf > /dev/null <<'SAMBA'
 
-# [Photo]
-#    path = /mnt/usb-hdd/Photo
+# [Storage]
+#    path = /mnt/storage
 #    browseable = yes
 #    read only = no
 #    guest ok = no
@@ -134,7 +132,7 @@ echo "================================================================"
 #   sudo blkid /dev/sdb1              # copy the UUID
 #
 #   # Add to /etc/fstab for auto-mount on boot:
-#   UUID=<uuid>  /mnt/usb-hdd  ext4  defaults,nofail  0  2
+#   UUID=<uuid>  /mnt/storage  ext4  defaults,noatime,nofail  0  2
 #
 #   sudo mount -a                     # mount now without rebooting
 # ─────────────────────────────────────────────────────────────────────────────
