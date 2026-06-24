@@ -39,7 +39,6 @@ export function DashboardPage() {
     queryKey: ['recent'],
     queryFn: () => getMediaList({ page: 1, pageSize: 1, from: '2000-01-01T00:00:00.000Z' }),
     staleTime: 60_000,
-    enabled: !potdResult?.items?.length,
   })
 
   const { data: otdGroups } = useQuery({
@@ -136,9 +135,9 @@ export function DashboardPage() {
             <span className="card-title">Library</span>
             <Link to="/gallery" className="card-action">All photos</Link>
           </div>
-          {potd && (
+          {recentResult?.items?.[0] && (
             <div className="stats-banner">
-              <img src={thumbnailUrl(potd.id)} alt="" />
+              <img src={thumbnailUrl(recentResult.items[0].id)} alt="" />
               <div className="stats-banner-fade" />
             </div>
           )}
