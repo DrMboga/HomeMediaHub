@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
-import { useQuery } from '@tanstack/react-query'
-import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl } from '../api/media'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 
 function formatDate(iso: string | null): string {
@@ -26,9 +26,11 @@ function Resizer() {
 
 export function Lightbox() {
   const { mediaId, close } = useLightbox()
+  const queryClient = useQueryClient()
   const [zoom, setZoom] = useState(1)
   const [tab, setTab] = useState<'info' | 'map'>('info')
   const [imgFailed, setImgFailed] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const photoAreaRef = useRef<HTMLDivElement>(null)
 
@@ -39,6 +41,16 @@ export function Lightbox() {
     staleTime: Infinity,
   })
 
+  const { mutate: doDelete } = useMutation({
+    mutationFn: () => softDeleteMedia(mediaId!),
+    onSuccess: () => {
+      close()
+      queryClient.invalidateQueries({ queryKey: ['gallery'] })
+      queryClient.invalidateQueries({ queryKey: ['search'] })
+      queryClient.invalidateQueries({ queryKey: ['otd'] })
+    },
+  })
+
   // Body scroll lock + reset per-photo state
   useEffect(() => {
     if (mediaId) {
@@ -46,6 +58,7 @@ export function Lightbox() {
       setZoom(1)
       setTab('info')
       setImgFailed(false)
+      setDeleteConfirm(false)
     } else {
       document.body.classList.remove('lb-open')
     }
@@ -198,6 +211,25 @@ export function Lightbox() {
           </div>
 
           <div className="lb-right">
+            {deleteConfirm ? (
+              <>
+                <span className="lb-del-prompt">Delete this photo?</span>
+                <button className="ib lb-del-confirm" onClick={() => doDelete()} title="Confirm delete">
+                  <span className="mi">delete_forever</span>
+                </button>
+                <button className="ib" onClick={() => setDeleteConfirm(false)} title="Cancel">
+                  <span className="mi">close</span>
+                </button>
+                <div style={{ width: 8 }} />
+              </>
+            ) : (
+              <>
+                <button className="ib" onClick={() => setDeleteConfirm(true)} title="Delete (soft)">
+                  <span className="mi">delete_outline</span>
+                </button>
+                <div style={{ width: 8 }} />
+              </>
+            )}
             {!isVideo && (
               <>
                 <button className="ib" onClick={() => setZoom(z => Math.max(0.5, z - 0.15))}>

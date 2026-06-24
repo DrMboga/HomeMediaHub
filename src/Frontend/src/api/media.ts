@@ -85,3 +85,12 @@ export async function getReviewQueue(page = 1, pageSize = 50): Promise<{ items: 
 export async function confirmReview(id: string, action: 'meme' | 'real'): Promise<void> {
   await client.patch(`/media/${id}/review`, { action })
 }
+
+export async function softDeleteMedia(id: string): Promise<void> {
+  await client.delete(`/media/${id}`)
+}
+
+export async function bulkDeleteMedia(ids: string[]): Promise<{ deleted: number }> {
+  const { data } = await client.delete<{ deleted: number }>('/media/bulk', { data: { ids } })
+  return data
+}
