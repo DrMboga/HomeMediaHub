@@ -8,14 +8,18 @@ import { useLightbox } from '../context/LightboxContext'
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
-  const datePart = d.toLocaleDateString('en-US', {
-    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-  })
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
+  const datePart = `${dd}.${mm}.${yyyy}`
   // Midnight UTC exactly means the time came from a path-year fallback, not real EXIF.
   // Don't show a misleading time in that case.
   const isMidnightUtc = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
-  if (isMidnightUtc) return datePart
-  return datePart + ' · ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  if (isMidnightUtc) return `${datePart}, ${weekday}`
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${datePart} ${hh}:${min}, ${weekday}`
 }
 
 function Resizer() {

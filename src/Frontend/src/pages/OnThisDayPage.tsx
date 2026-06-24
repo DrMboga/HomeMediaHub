@@ -32,8 +32,8 @@ export function OnThisDayPage() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
         {groups?.map(group => {
-          const dayLabel = new Date(group.year, today.getMonth(), today.getDate())
-            .toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
+          const d = new Date(group.year, today.getMonth(), today.getDate())
+          const dayLabel = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
           return (
             <div key={group.year} className="otd-section">
               <div className="otd-section-title">
