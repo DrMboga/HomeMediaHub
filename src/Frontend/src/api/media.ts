@@ -36,6 +36,7 @@ export async function getMediaList(params: {
   isVideo?: boolean
   noDate?: boolean
   originClass?: string
+  sortAsc?: boolean
 }): Promise<PagedResult<MediaListItem>> {
   const { data } = await client.get<PagedResult<MediaListItem>>('/media', { params })
   return data

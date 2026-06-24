@@ -64,8 +64,8 @@ export function GalleryPage() {
       ? ['gallery', 'undated', page, originClass]
       : ['gallery', year, month, page, originClass],
     queryFn: () => isUndated
-      ? getMediaList({ page, pageSize, noDate: true, originClass: oc })
-      : getMediaList({ page, pageSize, from, to, originClass: oc }),
+      ? getMediaList({ page, pageSize, noDate: true, originClass: oc, sortAsc: true })
+      : getMediaList({ page, pageSize, from, to, originClass: oc, sortAsc: true }),
     staleTime: 30_000,
   })
 

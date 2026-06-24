@@ -151,12 +151,13 @@ public static class MediaEndpoints
             [FromQuery] bool? favorite = null,
             [FromQuery] bool? isVideo = null,
             [FromQuery] bool? noDate = null,
-            [FromQuery] string? originClass = null) =>
+            [FromQuery] string? originClass = null,
+            [FromQuery] bool sortAsc = false) =>
         {
             var result = await m.Send(new GetMediaListRequest(
                 page > 0 ? page : 1,
                 pageSize is > 0 and <= 200 ? pageSize : 50,
-                from, to, tag, favorite, isVideo, noDate, originClass), ct);
+                from, to, tag, favorite, isVideo, noDate, originClass, sortAsc), ct);
             return Results.Ok(result);
         });
 

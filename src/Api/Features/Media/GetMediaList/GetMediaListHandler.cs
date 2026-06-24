@@ -14,7 +14,8 @@ public record GetMediaListRequest(
     bool? Favorite,
     bool? IsVideo = null,
     bool? NoDate = null,
-    string? OriginClass = null
+    string? OriginClass = null,
+    bool SortAsc = false
 ) : IRequest<PagedResult<MediaListItemDto>>;
 
 public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, PagedResult<MediaListItemDto>>
@@ -47,9 +48,10 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
             q = q.Where(f => f.OriginClass == req.OriginClass);
 
         var total = await q.CountAsync(ct);
-        var items = await q
-            .OrderByDescending(f => f.TakenAt)
-            .ThenByDescending(f => f.Id)
+        var ordered = req.SortAsc
+            ? q.OrderBy(f => f.TakenAt).ThenBy(f => f.Id)
+            : (IOrderedQueryable<Data.MediaFile>)q.OrderByDescending(f => f.TakenAt).ThenByDescending(f => f.Id);
+        var items = await ordered
             .Skip((req.Page - 1) * req.PageSize)
             .Take(req.PageSize)
             .ToListAsync(ct);

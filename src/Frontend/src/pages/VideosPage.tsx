@@ -12,7 +12,7 @@ export function VideosPage() {
 
   const { data, isFetching } = useQuery({
     queryKey: ['videos', page],
-    queryFn: () => getMediaList({ page, pageSize, isVideo: true }),
+    queryFn: () => getMediaList({ page, pageSize, isVideo: true, sortAsc: true }),
     staleTime: 30_000,
   })
 
