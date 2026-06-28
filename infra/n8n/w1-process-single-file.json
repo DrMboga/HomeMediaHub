@@ -218,14 +218,15 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ filePath: $('Code: Init').item.json.workFilePath }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 300000
         }
       },
       "id": "550e8400-e29b-41d4-a716-446655440019",
       "name": "HTTP: AI Analyze",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [2960, 300]
+      "position": [2960, 300],
+      "continueOnFail": true
     },
     {
       "parameters": {
