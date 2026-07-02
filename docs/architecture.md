@@ -1,680 +1,484 @@
-# HomeMediaHub — Architecture
+# HomeMediaHub — Architecture (Phase 8 Target)
+
+> **Status:** This document describes the **target** architecture of the Phase 8 migration
+> (n8n → RabbitMQ + MassTransit). Implementation has **not started** — the running system
+> is still n8n-orchestrated. The step-by-step migration guide lives in
+> [`delivery-plan.md`](delivery-plan.md).
 
 ## 1. System Context
 
 ```
                  ┌─────────────────────────────────────────────────────────────────────┐
-                 │                      Dell Precision 3620                             │
-                 │                      Intel i7-6700 · 32 GB RAM                      │
-                 │                      Ubuntu Server 24.04                             │
+                 │              Dell Precision 3620 · i7-6700 (4c/8t) · 32 GB RAM       │
+                 │              Ubuntu Server 24.04 · Docker Compose · LAN-only         │
                  │                                                                      │
  ┌──────────┐    │  ┌──────────────────────────────────────────────────────────────┐   │
  │ iPhone   │────┼─►│  Immich  :2283   (mobile backup endpoint only, no UI used)   │   │
- │ (family) │    │  └──────────────────────┬─────────────────────────────────────-─┘   │
- └──────────┘    │     writes originals to  │ /photo/iPhone/...                        │
-                 │                          │                                           │
- ┌──────────┐    │  ┌──────────────────────▼─────────────────────────────────────┐    │
- │ Browser  │────┼─►│  NGINX  :80                                                  │    │
- │ (LAN)    │    │  │   /         → frontend (React)   :3000                      │    │
- └──────────┘    │  │   /api/     → .NET API            :8080                     │    │
-                 │  │   /thumbs/  → filesystem direct (X-Accel-Redirect)          │    │
-                 │  └─────────────────────────────────────────────────────────────┘    │
+ │ (family) │    │  └──────────────────────┬───────────────────────────────────────┘   │
+ └──────────┘    │     writes originals to │ /photo/iPhone/...                          │
+                 │                         │                                            │
+ ┌──────────┐    │  ┌──────────────────────▼───────────────────────────────────────┐   │
+ │ Browser  │────┼─►│  NGINX  :80                                                  │   │
+ │ (LAN)    │    │  │   /         → frontend (React)    :3000                      │   │
+ └──────────┘    │  │   /api/     → .NET API            :8080                      │   │
+                 │  │   /thumbs/  → filesystem direct (X-Accel-Redirect)           │   │
+                 │  │   /immich/  → immich-server       :2283                      │   │
+                 │  └──────────────────────────────────────────────────────────────┘   │
  ┌──────────┐    │                                                                      │
- │ Windows  │    │  ┌──────────────────────────────────────────────────────────────┐   │
- │ MacOS    │────┼─►│  Samba  (native Ubuntu service, not containerized)           │   │
- │ (LAN)    │    │  │  share: \\server\Storage → /mnt/storage                     │   │
- └──────────┘    │  └──────────────────────────────────────────────────────────────┘   │
-                 │                                                                      │
+ │ Windows/ │────┼─►│  Samba (native Ubuntu, not containerized)                        │
+ │ macOS    │    │  │  \\server\Storage → /mnt/storage                                 │
+ └──────────┘    │                                                                      │
                  │  ┌──────────────────────────────────────────────────────────────┐   │
-                 │  │  .NET 10 API  :8080                                           │   │
-                 │  │   • REST endpoints for the React frontend                    │   │
+                 │  │  .NET 10 API  :8080                                          │   │
+                 │  │   • REST for the React frontend + JWT auth                   │   │
                  │  │   • POST /api/admin/scan → publishes ScanRequested           │   │
-                 │  │   • Monthly ScanScheduler IHostedService (cron 0 2 1 * *)    │   │
-                 │  │   • Prometheus /metrics on :8080                             │   │
-                 │  └──────────────────┬────────────────────┬──────────────────────┘   │
-                 │                     │ publishes           │ HTTP POST /embed/text    │
-                 │                     ▼                     ▼                          │
-                 │  ┌──────────────────────────────┐  ┌───────────────────────────┐   │
-                 │  │  RabbitMQ  :5672             │  │  AI Sidecar  :8000 (health)│   │
-                 │  │  :15672 (mgmt UI)            │  │              :8001 (metrics)│  │
-                 │  │  :15692 (Prometheus metrics) │  │  Python 3.11              │   │
-                 │  └──────┬───────────────────────┘  │  pika RabbitMQ consumer   │   │
-                 │         │ messages                  │  YOLOv8n + CLIP           │   │
-                 │         ▼                           └───────────────────────────┘   │
-                 │  ┌──────────────────────────────────────────────────────────────┐   │
-                 │  │  MediaWorker  (.NET 10 Worker Service)                        │   │
-                 │  │   :9090 (Prometheus /metrics only)                           │   │
-                 │  │                                                               │   │
-                 │  │  ScanConsumer      — finds new files → FileDiscovered        │   │
-                 │  │  IngestConsumer    — hash/dedup/convert/metadata/thumbnail   │   │
-                 │  │  ProcessingSaga    — aggregates AI + Geo fan-out results     │   │
-                 │  │  MediaSaveConsumer — EF Core → homemediahub_db               │   │
-                 │  └──────────────────────────────────────────────────────────────┘   │
+                 │  │   • ScanScheduler BackgroundService (cron 0 2 1 * *)         │   │
+                 │  │   • Owns the media DB schema (EF Core migrations)            │   │
+                 │  │   • OTel Prometheus /metrics                                 │   │
+                 │  └────────────┬──────────────────────────┬──────────────────────┘   │
+                 │    publishes  │                          │ HTTP POST /embed/text     │
+                 │               ▼                          ▼                           │
+                 │  ┌──────────────────────────┐  ┌────────────────────────────────┐   │
+                 │  │  RabbitMQ 4  :5672 AMQP  │  │  AI Sidecar (Python 3.11)      │   │
+                 │  │  :15672 management UI    │  │   :8000 FastAPI /health,       │   │
+                 │  │  :15692 Prometheus       │  │         /embed/text            │   │
+                 │  └──────┬───────────────────┘  │   :8001 Prometheus metrics     │   │
+                 │         │ messages             │   pika consumer (main thread)  │   │
+                 │         ▼                      │   YOLOv8n + CLIP ViT-B/32 (CPU)│   │
+                 │  ┌───────────────────────────┐ └────────────────────────────────┘   │
+                 │  │  MediaWorker (.NET 10     │                                       │
+                 │  │  Worker Service)  :9090   │  ┌────────────────────────────────┐   │
+                 │  │   ScanConsumer            │  │  GeoService (.NET 10)  :8001   │   │
+                 │  │   IngestConsumer          │  │   HTTP GET /reverse (kept)     │   │
+                 │  │   EnrichmentStateMachine  │  │   GeoLookupConsumer            │   │
+                 │  │   AiResultBridgeConsumer  │  │   (MassTransit)                │   │
+                 │  │   ApplyEnrichmentConsumer │  │   Nominatim cache, 1 req/s     │   │
+                 │  │   JobFailureConsumer      │  └────────────────────────────────┘   │
+                 │  └───────────────────────────┘                                       │
                  │                                                                      │
-                 │  ┌──────────────────────┐  ┌───────────────────────────────────┐   │
-                 │  │  GeoService  :8001   │  │  PostgreSQL  :5432                │   │
-                 │  │  .NET 10             │  │  pgvector/pgvector:pg16            │   │
-                 │  │  HTTP /reverse +     │  │  homemediahub_db                  │   │
-                 │  │  MassTransit consumer│  │  (app data + saga state)          │   │
-                 │  └──────────────────────┘  └───────────────────────────────────┘   │
-                 │  ┌──────────────────────┐  ┌───────────────────────────────────┐   │
-                 │  │  GeoService Postgres  │  │  Prometheus  :9090               │   │
-                 │  │  :5434               │  │  Grafana     :3001               │   │
-                 │  │  geoservice_db       │  │  (scrapes all services + RabbitMQ)│   │
-                 │  └──────────────────────┘  └───────────────────────────────────┘   │
-                 │  ┌──────────────────────┐  ┌───────────────────────────────────┐   │
-                 │  │  Immich PostgreSQL   │  │  Redis  :6379  (Immich only)      │   │
-                 │  │  :5433               │  └───────────────────────────────────┘   │
-                 │  └──────────────────────┘                                           │
+                 │  ┌──────────────────────┐  ┌───────────────────────────────────┐    │
+                 │  │  PostgreSQL  :5432   │  │  Prometheus :9090 · Grafana :3001 │    │
+                 │  │  pgvector:pg16       │  │  scrapes api, media-worker,       │    │
+                 │  │  homemediahub_db     │  │  geoservice, ai-sidecar, rabbitmq │    │
+                 │  │  (app data + sagas)  │  └───────────────────────────────────┘    │
+                 │  └──────────────────────┘                                            │
+                 │  ┌──────────────────────┐  ┌──────────────────────┐  ┌────────────┐ │
+                 │  │  GeoService Postgres │  │  Immich Postgres     │  │ Redis :6379│ │
+                 │  │  :5434 geoservice_db │  │  :5433               │  │ (Immich)   │ │
+                 │  └──────────────────────┘  └──────────────────────┘  └────────────┘ │
                  │                                                                      │
-                 │  ┌──────────────────────────────────────────────────────────────┐   │
-                 │  │  SATA HDD  /mnt/storage/                                     │   │
-                 │  │   └── Photo/               ← single source of truth          │   │
-                 │  │        ├── 2005/ ... 2025/ ← existing archive                │   │
-                 │  │        └── iPhone/         ← new uploads from Immich         │   │
-                 │  │   └── thumbnails/          (generated, recreatable)          │   │
-                 │  │   └── video-cache/         (H.264 transcodes, recreatable)   │   │
-                 │  │   └── display-cache/       (JPEG from HEIC, recreatable)     │   │
-                 │  └──────────────────────────────────────────────────────────────┘   │
+                 │  SATA HDD /mnt/storage/                                              │
+                 │   ├── Photo/           ← single source of truth (archive + iPhone/)  │
+                 │   ├── thumbnails/      ← 400px WebP, recreatable                     │
+                 │   ├── video-cache/     ← H.264 transcodes, recreatable               │
+                 │   └── display-cache/   ← JPEG from HEIC, recreatable                 │
                  └─────────────────────────────────────────────────────────────────────┘
 ```
 
----
+## 2. Processing Pipeline (save-early)
 
-## 2. Processing Pipeline
-
-```
-POST /api/admin/scan  OR  monthly IHostedService cron (0 2 1 * *)
-              │
-              │ publishes ScanRequested
-              ▼
-        ┌─────────────┐
-        │  RabbitMQ   │◄── all inter-service messages flow through here
-        └──────┬──────┘
-               │ FileDiscovered (one per new file)
-               ▼
-   ┌─────────────────────────────────┐
-   │  MediaWorker / ScanConsumer     │  scans /photo, filters already-indexed
-   └────────────┬────────────────────┘
-                │ FileDiscovered published per new file
-                ▼
-   ┌─────────────────────────────────┐
-   │  MediaWorker / IngestConsumer   │
-   │                                 │  1. SHA-256 hash
-   │  prefetch_count = 4             │  2. dedup check → skip if exists
-   │                                 │  3. convert: HEIC → JPEG (heif-convert + exiftool)
-   │                                 │             video → JPEG frame (ffmpeg)
-   │                                 │  4. extract metadata (ImageSharp EXIF + exiftool JSON)
-   │                                 │  5. generate WebP thumbnail (ImageSharp)
-   └────────────┬────────────────────┘
-                │ publishes MediaReadyForEnrichment
-                ▼
-   ┌────────────────────────────────────────┐
-   │  Fan-out → 2 queues simultaneously     │
-   └────────┬──────────────────┬────────────┘
-            │                  │
-   ai-analysis-requested  geo-lookup-requested (skipped if no GPS)
-            │                  │
-            ▼                  ▼
-   ┌─────────────────┐  ┌──────────────────────────┐
-   │  AI Sidecar     │  │  GeoService               │
-   │  Python + pika  │  │  .NET MassTransit consumer│
-   │  prefetch = 1   │  │  + Nominatim cache        │
-   │                 │  │  (same ReverseGeocode      │
-   │  YOLOv8n        │  │   handler as HTTP /reverse)│
-   │  CLIP ViT-B/32  │  └──────────────┬────────────┘
-   └────────┬────────┘                 │
-            │ AiAnalysisCompleted      │ GeoLookupCompleted
-            └──────────────┬───────────┘
-                           ▼
-   ┌──────────────────────────────────────────────┐
-   │  MediaWorker / ProcessingSaga                 │
-   │  (MassTransitStateMachine + PostgreSQL)       │
-   │                                               │
-   │  States: Initial → Enriching → (Finalized)   │
-   │                                               │
-   │  On MediaReadyForEnrichment:                  │
-   │    store all fields                           │
-   │    GeoCompleted = true if no GPS             │
-   │    publish AiAnalysisRequested                │
-   │    publish GeoLookupRequested (if GPS)        │
-   │    → Enriching                                │
-   │                                               │
-   │  On AiDone (in Enriching):                   │
-   │    store tags, embedding, originClass         │
-   │    if GeoCompleted → publish MediaSaveReq     │
-   │                       → Finalize (row deleted)│
-   │                                               │
-   │  On GeoDone (in Enriching):                  │
-   │    store address                              │
-   │    if AiCompleted → publish MediaSaveReq      │
-   │                      → Finalize (row deleted) │
-   └──────────────────────────────────────────────┘
-                           │ MediaSaveRequested
-                           ▼
-   ┌──────────────────────────────────────────────┐
-   │  MediaWorker / MediaSaveConsumer             │
-   │  EF Core → homemediahub_db                   │
-   │  writes: media_files, media_metadata,        │
-   │          media_thumbnails, media_tags,        │
-   │          media_embeddings, processing_jobs    │
-   └──────────────────────────────────────────────┘
-
-Dead Letter Queue → processing_jobs.status = 'failed'
-```
-
-**Key design points:**
-- `IngestConsumer` runs with `prefetch_count = 4` — 4 files processed concurrently (HEIC/video conversion is the bottleneck, not CPU contention)
-- AI Sidecar runs with `prefetch_count = 1` — inference is CPU-bound, no benefit from parallelism on a single host
-- Saga is eliminated immediately on finalization — `SetCompletedWhenFinalized()` removes the row from `media_processing_sagas` once the save request is published
-- No GPS → saga sets `GeoCompleted = true` in `Initially` handler and never publishes `GeoLookupRequested`; the saga remains symmetric — always waits for both flags before finalizing
-
----
-
-## 3. Service Breakdown
-
-### immich-server
-- **Image:** `ghcr.io/immich-app/immich-server:release`
-- **Port:** 2283
-- **Responsibility:** Receive iPhone backups via the Immich mobile app. Writes originals directly into `/photo/iPhone/{y}/{y-MM-dd}/`. No webhooks used — the API's monthly `ScanScheduler` picks up new files.
-- **Boundaries:** Owns its own Postgres and Redis. Not accessed by any custom service.
-
-### immich-postgres
-- **Image:** `pgvector/pgvector:pg16`
-- **Port:** 5433 (internal)
-- **Responsibility:** Immich's private database. Not accessed by custom services.
-
-### redis
-- **Image:** `redis:7-alpine`
-- **Port:** 6379 (internal)
-- **Responsibility:** Immich's job queue. Not shared.
-
-### rabbitmq
-- **Image:** `rabbitmq:3-management-alpine`
-- **Ports:** 5672 (AMQP), 15672 (management UI), 15692 (Prometheus metrics)
-- **Responsibility:** Message broker for all inter-service communication. MassTransit declares all exchanges and queues on startup. Plugins enabled: `rabbitmq_management`, `rabbitmq_prometheus`.
-- **Queue overview (MassTransit conventions):**
-  - `MediaWorker_ScanConsumer` — receives `ScanRequested`
-  - `MediaWorker_IngestConsumer` — receives `FileDiscovered`
-  - `MediaWorker_ProcessingState` — receives `MediaReadyForEnrichment`, `AiAnalysisCompleted`, `GeoLookupCompleted` (saga)
-  - `MediaWorker_MediaSaveConsumer` — receives `MediaSaveRequested`
-  - `GeoService_GeoLookupConsumer` — receives `GeoLookupRequested`
-  - `AiSidecar_AiAnalysisConsumer` — receives `AiAnalysisRequested` (declared by pika, durable)
-  - Dead letter queues: `*_error` suffix for each consumer
-
-### api
-- **Image:** custom `.NET 10` build
-- **Port:** 8080
-- **Responsibilities:**
-  1. **Frontend REST API** — all media queries, search, albums, series, auth; unchanged from Phase 7
-  2. **Scan trigger** — `POST /api/admin/scan` publishes `ScanRequested` via MassTransit (publish-only, no consumers in API)
-  3. **Monthly cron** — `ScanScheduler : BackgroundService` fires `0 2 1 * *` automatically
-  4. **On-demand video transcoding** — `GET /api/media/{id}/stream` transcodes HEVC→H.264 via ffmpeg, cached in `video_transcodes` + disk
-  5. **On-demand HEIC display** — `GET /api/media/{id}/display` converts HEIC→JPEG on first request, caches in `display-cache/`
-  6. **Prometheus** — `/metrics` endpoint via `prometheus-net.AspNetCore`
-- **What it does NOT do:** no background file processing, no hashing, no EXIF extraction, no thumbnail generation, no AI calls, no geocoding
-
-### media-worker
-- **Image:** custom `.NET 10` Worker Service build
-- **Port:** 9090 (Prometheus `/metrics` only — no HTTP API)
-- **Responsibility:** Owns the entire ingestion pipeline. All processing logic ported from the old `/api/tools/*` handlers lives here:
-
-| Service class | Logic |
-|---------------|-------|
-| `FileHashService` | SHA-256 via `System.Security.Cryptography` |
-| `DedupService` | `WorkerDbContext` lookup by hash |
-| `FileConvertService` | `heif-convert -q 90` + `exiftool -TagsFromFile --Orientation`; `ffmpeg` for video frame |
-| `MetadataService` | `Image.IdentifyAsync` (EXIF) + exiftool JSON (video); same logic as old `ExtractMetadataHandler` |
-| `ThumbnailService` | `Image.LoadAsync` + `AutoOrient` + `Resize(Max 400×400)` + WebP 80% via ImageSharp |
-| `ScanService` | `Directory.EnumerateFiles` filtered by extension + DB exclusion |
-
-- **Docker image:** `mcr.microsoft.com/dotnet/aspnet:10.0` + `apt-get install libheif-tools libde265-0 perl-image-exiftool ffmpeg`
-
-### ai-sidecar
-- **Image:** custom `Python 3.11` build
-- **Ports:** 8000 (health check HTTP server), 8001 (Prometheus `/metrics`)
-- **Responsibility:** RabbitMQ consumer for AI inference. Replaces FastAPI HTTP server from Phase 4.
-  - Consumes `ai-analysis-requested` queue (pika, `prefetch_count=1`)
-  - Runs YOLOv8n object detection + CLIP ViT-B/32 embedding + origin classification
-  - Publishes `AiAnalysisCompleted` to `ai-analysis-completed` queue
-  - **Keeps** `POST /embed/text` as a minimal HTTP endpoint on port 8000 (side thread) — API calls this for semantic search query embedding
-- **Models:** YOLOv8n (6 MB) + CLIP ViT-B/32 (151 MB) — baked into image at build time
-
-### geoservice
-- **Image:** custom `.NET 10` build
-- **Port:** 8001
-- **Responsibilities:**
-  1. **RabbitMQ consumer** — `GeoLookupConsumer : IConsumer<GeoLookupRequested>` → calls existing `ReverseGeocodeHandler` → publishes `GeoLookupCompleted`
-  2. **HTTP cache** — `GET /reverse?lat=&lon=` kept for any direct callers (API's display endpoints)
-  3. **Prometheus** — `/metrics` endpoint
-- **Cache logic unchanged:** rounds coordinates to 4 decimal places, `geoservice_db` lookup first, Nominatim fallback, 1 req/sec policy
-
-### geoservice-postgres
-- **Image:** `postgres:16`
-- **Port:** 5434 (internal)
-- **Responsibility:** Geoservice's private address cache. Unchanged.
-
-### postgres (custom)
-- **Image:** `pgvector/pgvector:pg16`
-- **Port:** 5432
-- **Databases:** `homemediahub_db` only (n8n_db removed). Hosts both application tables and the `media_processing_sagas` saga state table (created by MediaWorker EF migration on first startup).
-
-### prometheus
-- **Image:** `prom/prometheus:latest`
-- **Port:** 9090 (internal)
-- **Scrape targets:**
-
-| Job | Target | Path |
-|-----|--------|------|
-| `api` | `api:8080` | `/metrics` |
-| `media-worker` | `media-worker:9090` | `/metrics` |
-| `geoservice` | `geoservice:8001` | `/metrics` |
-| `ai-sidecar` | `ai-sidecar:8001` | `/metrics` |
-| `rabbitmq` | `rabbitmq:15692` | `/metrics` |
-
-### grafana
-- **Image:** `grafana/grafana:latest`
-- **Port:** 3001 (internal, admin only)
-- **Dashboards (pre-provisioned via `infra/grafana/provisioning/`):**
-  - MassTransit .NET (Grafana ID 15467) — message rates, consumer lag, error rates
-  - RabbitMQ Overview (Grafana ID 10991) — queue depths, publish/consume rates, connections
-  - HomeMediaHub Pipeline (custom) — files/hour, AI inference time P95, dead-letter count, saga state breakdown
-
-### frontend
-- **Image:** custom `nginx:alpine` serving the React + TypeScript Vite build
-- **Port:** 3000 (internal, proxied by main NGINX)
-
-### nginx
-- **Image:** `nginx:alpine`
-- **Port:** 80
-- **Routes:**
-  - `/` → frontend :3000
-  - `/api/` → api :8080
-  - `/thumbs/` → filesystem (`/thumbs/`) via `X-Accel-Redirect` (no .NET per thumbnail)
-  - `/immich/` → immich-server :2283
-
-### Samba (native Ubuntu — not containerized)
-- **Share:** `\\<server-ip>\Storage` → `/mnt/storage`
-- **Access:** read-write for `mediahub` group members on LAN
-
----
-
-## 4. Message Contracts (`src/Contracts/`)
-
-Shared `net10.0` class library. No NuGet dependencies — pure C# records. Referenced by `Api`, `MediaWorker`, and `GeoService`.
+The pipeline's defining property: **a photo becomes visible in the gallery as soon as ingest
+finishes** (hash, convert, metadata, thumbnail, DB row). AI tagging and reverse geocoding are
+applied later as an enrichment *update*. On a CPU-only box the full-library AI pass takes days;
+save-early means the library is browsable on day one while tags, origin badges, and addresses
+fill in gradually.
 
 ```
-src/Contracts/Messages/
-├── ScanRequested.cs          record(Path, Source, TriggeredBy, RequestedAt)
-├── FileDiscovered.cs         record(FilePath, Source, DiscoveredAt)
-├── MediaReadyForEnrichment.cs record(MediaFileId, FilePath, WorkFilePath?,
-│                                      FileHash, Source, MimeType, FileSize,
-│                                      Width, Height, DurationSec?, TakenAt?,
-│                                      Lat?, Lon?, CameraMake?, CameraModel?,
-│                                      ThumbnailPath)
-├── AiAnalysisRequested.cs    record(CorrelationId, FilePath)
-├── AiAnalysisCompleted.cs    record(CorrelationId, Tags[], Embedding[], OriginClass, OriginConfidence)
-│                             record AiTag(Tag, Confidence, Model)
-├── GeoLookupRequested.cs     record(CorrelationId, Lat, Lon)
-├── GeoLookupCompleted.cs     record(CorrelationId, Address?)
-├── MediaSaveRequested.cs     record(MediaFileId, FilePath, FileHash, Source,
-│                                     MimeType, FileSize, Width, Height, DurationSec?,
-│                                     TakenAt?, Lat?, Lon?, Address?, CameraMake?,
-│                                     CameraModel?, ThumbnailPath, Tags[], Embedding[],
-│                                     OriginClass, OriginConfidence)
-└── MediaProcessingFailed.cs  record(FilePath, Stage, ErrorMessage, OccurredAt)
+POST /api/admin/scan   or   ScanScheduler (monthly cron 0 2 1 * *, in API)
+  └─ publish ScanRequested
+        ▼
+  ScanConsumer                                                 [queue: media-scan]
+        enumerate ${path} recursively (supported extensions);
+        exclude paths already in media_files OR with an active processing_job;
+        INSERT processing_jobs (status=queued, scan_id) in ~1000-row batches;
+        publish FileDiscovered per file
+        ▼
+  IngestConsumer                              [queue: media-ingest, prefetch 2/concurrency 2]
+        job → processing
+        SHA-256 hash → dedup by file_hash → duplicate? job → skipped_duplicate, stop
+        convert:  HEIC → /shared-temp/{mediaFileId}.jpg (heif-convert + exiftool)
+                  video → single frame JPEG (ffmpeg)
+        extract metadata (ImageSharp EXIF / exiftool -json for video)
+        generate 400px WebP thumbnail (ImageSharp)
+        SAVE MediaFile + MediaMetadata + MediaThumbnail   ◄── visible in gallery NOW
+        job → enriching
+        publish MediaEnrichmentRequested                      (starts the saga)
+        ▼
+  EnrichmentStateMachine (saga)                     [queue: media-enrichment-saga]
+        Initially: publish AiAnalysisRequested;
+                   GPS present? publish GeoLookupRequested : GeoDone = true
+        ▼ fan-out (parallel)
+  ┌─────────────────────────────────┐   ┌─────────────────────────────────────┐
+  │ AI Sidecar (Python + pika)      │   │ GeoService (MassTransit consumer)   │
+  │ [queue: ai-analysis, prefetch 1]│   │ [queue: geo-lookup, concurrency 1]  │
+  │ YOLOv8n tags + CLIP embedding   │   │ cache lookup → Nominatim fallback   │
+  │ + origin classification         │   │ publish GeoLookupCompleted          │
+  │ publish raw JSON →              │   └─────────────────────────────────────┘
+  │   ai-analysis-completed         │
+  └─────────────────────────────────┘
+        ▼
+  AiResultBridgeConsumer            [queue: ai-analysis-completed, raw-JSON endpoint]
+        re-publish AiAnalysisCompleted as a normal MassTransit envelope
+        ▼
+  saga: when AiDone && GeoDone → publish ApplyEnrichmentRequested → Finalize (row deleted)
+        ▼
+  ApplyEnrichmentConsumer                        [queue: media-apply-enrichment]
+        UPDATE media_files (origin_class, origin_confidence)
+        upsert media_embeddings (vector(512), ON CONFLICT DO UPDATE)
+        replace media_tags for the media id
+        UPDATE media_metadata.address
+        delete /shared-temp work file (only if AI succeeded — kept for retry otherwise)
+        job → completed   (or failed + failed_step = ai|geo if a part failed)
 ```
 
-`CorrelationId` = `MediaFileId` (Guid) — MassTransit correlates saga instances on this value.
+Failures anywhere in ingest publish `MediaProcessingFailed`; it and `Fault<FileDiscovered>`
+(retry-exhausted messages) are consumed by `JobFailureConsumer` [queue: `media-job-status`],
+which marks the job `failed` with `failed_step` and `error_message`. MassTransit `_error`
+queues remain as a human-inspectable backstop, not a data path.
 
----
+**Ingest strategy:** No Immich webhooks. Immich writes files to disk; scans (manual or monthly)
+discover them. The API contains no processing logic — it only publishes `ScanRequested`.
 
-## 5. Environments
+## 3. Message Contracts — `src/Contracts/Messages/`
 
-Two isolated environments share the same `docker-compose.yml`. Only one runs at a time.
+Pure C# records, `net10.0` classlib, **zero NuGet dependencies**. Saga correlation uses
+`CorrelateById(ctx => ctx.Message.CorrelationId)` — contracts do not implement
+`CorrelatedBy<Guid>` so the library stays dependency-free. `CorrelationId == MediaFileId`.
 
-| Variable | Stage | Prod |
-|----------|-------|------|
-| `COMPOSE_PROJECT_NAME` | `hmh-stage` | `hmh-prod` |
-| `PHOTO_DIR` | `/opt/homemediahub/stage/TestPhoto` | `/mnt/storage/Photo` |
-| `THUMBNAILS_DIR` | `/opt/homemediahub/stage/thumbnails` | `/mnt/storage/thumbnails` |
-| `VIDEO_CACHE_DIR` | `/opt/homemediahub/stage/video-cache` | `/mnt/storage/video-cache` |
-| `DISPLAY_CACHE_DIR` | `/opt/homemediahub/stage/display-cache` | `/mnt/storage/display-cache` |
-| `WORK_DIR` | `/tmp/homemediahub-stage` | `/tmp/homemediahub-prod` |
-| `DATA_DIR` | `/opt/homemediahub/stage/data` | `/opt/homemediahub/data` |
-| `RABBITMQ_USER` | `hmh` | `hmh` |
-| `RABBITMQ_PASS` | (set in .env.stage) | (set in .env.prod) |
-| `GRAFANA_PASSWORD` | (set in .env.stage) | (set in .env.prod) |
+```csharp
+record ScanRequested(Guid ScanId, string Path, string Source, string TriggeredBy, DateTimeOffset RequestedAt);
 
----
+record FileDiscovered(Guid JobId, Guid ScanId, string FilePath, string Source,
+    bool Reprocess, DateTimeOffset DiscoveredAt);
 
-## 6. Storage Layout
+record MediaEnrichmentRequested(          // starts the saga
+    Guid CorrelationId,                   // = MediaFileId
+    Guid JobId,
+    string OriginalFilePath,
+    string AnalyzeFilePath,               // /shared-temp/{id}.jpg for HEIC/video, else original
+    string? WorkFilePath,                 // temp file to clean up, null if none created
+    bool HasGps, double? Lat, double? Lon);
 
-```
-/mnt/storage/
-├── Photo/                          ← photo library (Samba \\server\Storage\Photo)
-│   ├── 2005/ ... 2025/             ← existing archive (untouched)
-│   └── iPhone/                     ← new uploads from Immich
-│       └── 2026/2026-06-29/        └── IMG_1234.HEIC
-├── thumbnails/                     ← generated WebP thumbnails (recreatable)
-│   └── <media-file-id>.webp
-├── video-cache/                    ← H.264 transcodes (recreatable)
-│   └── <media-file-id>.mp4
-└── display-cache/                  ← JPEG from HEIC (recreatable)
-    └── <media-file-id>.jpg
-```
+record AiAnalysisRequested(Guid CorrelationId, string FilePath);
 
----
+record AiTag(string Tag, double Confidence, string Model);
 
-## 7. Database Schema
+record AiAnalysisCompleted(Guid CorrelationId, bool Success,
+    AiTag[] Tags, float[] Embedding, string? OriginClass, double? OriginConfidence, string? Error);
 
-### `homemediahub_db` (postgres:5432)
+record GeoLookupRequested(Guid CorrelationId, double Lat, double Lon);
 
-Application tables defined in `infra/postgres/init/02-schema.sql`. Saga state table added by EF migration in `MediaWorker`.
+record GeoLookupCompleted(Guid CorrelationId, bool Success, string? Address, string? Error);
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+record ApplyEnrichmentRequested(Guid MediaFileId, Guid JobId, string? WorkFilePath,
+    bool AiSuccess, AiTag[] Tags, float[] Embedding, string? OriginClass, double? OriginConfidence, string? AiError,
+    bool GeoSuccess, string? Address, string? GeoError);
 
--- Application tables (schema: public) ----------------------------------------
-
-CREATE TABLE media_files (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_path         TEXT NOT NULL UNIQUE,
-    file_hash         TEXT NOT NULL,
-    source            TEXT NOT NULL,          -- 'library' | 'scheduled'
-    immich_asset_id   TEXT,
-    mime_type         TEXT NOT NULL,
-    file_size         BIGINT,
-    width             INT,
-    height            INT,
-    duration_sec      FLOAT,
-    taken_at          TIMESTAMPTZ,
-    created_at        TIMESTAMPTZ DEFAULT NOW(),
-    is_deleted        BOOLEAN DEFAULT FALSE,
-    is_favorite       BOOLEAN DEFAULT FALSE,
-    origin_class      TEXT,                   -- 'photo'|'screenshot'|'document'|'artwork'|'reference'|'people'|'meme'
-    origin_confidence FLOAT,
-    origin_reviewed   BOOLEAN NOT NULL DEFAULT FALSE
-);
-
-CREATE TABLE media_metadata (
-    media_file_id  UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
-    latitude       FLOAT,
-    longitude      FLOAT,
-    address        TEXT,
-    camera_make    TEXT,
-    camera_model   TEXT,
-    exif_json      JSONB
-);
-
-CREATE TABLE media_tags (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    media_file_id  UUID NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
-    tag            TEXT NOT NULL,
-    confidence     FLOAT NOT NULL,
-    model          TEXT NOT NULL              -- 'yolov8n'
-);
-
-CREATE TABLE media_embeddings (
-    media_file_id  UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
-    embedding      vector(512),
-    created_at     TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX ON media_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-
-CREATE TABLE media_thumbnails (
-    media_file_id  UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
-    thumbnail_path TEXT NOT NULL
-);
-
-CREATE TABLE processing_jobs (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_path      TEXT NOT NULL,
-    source         TEXT NOT NULL,
-    status         TEXT NOT NULL,             -- 'completed' | 'failed'
-    error_message  TEXT,
-    failed_step    TEXT,                      -- consumer or stage name
-    started_at     TIMESTAMPTZ DEFAULT NOW(),
-    completed_at   TIMESTAMPTZ,
-    retry_count    INT DEFAULT 0
-);
-
-CREATE TABLE albums (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        TEXT NOT NULL,
-    description TEXT,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE album_media (
-    album_id       UUID REFERENCES albums(id) ON DELETE CASCADE,
-    media_file_id  UUID REFERENCES media_files(id) ON DELETE CASCADE,
-    added_at       TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (album_id, media_file_id)
-);
-
-CREATE TABLE video_transcodes (
-    media_file_id  UUID PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
-    transcode_path TEXT NOT NULL,
-    codec          TEXT NOT NULL,
-    container      TEXT NOT NULL,
-    file_size      BIGINT,
-    created_at     TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE photo_series (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    series_type    TEXT NOT NULL,
-    taken_at_start TIMESTAMPTZ,
-    taken_at_end   TIMESTAMPTZ,
-    latitude       FLOAT,
-    longitude      FLOAT,
-    cover_media_id UUID REFERENCES media_files(id)
-);
-
-CREATE TABLE series_media (
-    series_id      UUID REFERENCES photo_series(id) ON DELETE CASCADE,
-    media_file_id  UUID REFERENCES media_files(id) ON DELETE CASCADE,
-    PRIMARY KEY (series_id, media_file_id)
-);
-
--- Saga state table (schema: public) — created by EF migration in MediaWorker --
--- media_processing_sagas: columns generated by MassTransit EF repository
---   correlation_id UUID PK, current_state TEXT, row_version BYTEA (optimistic lock),
---   + all ProcessingState fields stored between the Enriching transitions
+record MediaProcessingFailed(Guid? JobId, Guid? MediaFileId, string FilePath,
+    string Stage, string Error, DateTimeOffset OccurredAt);
 ```
 
-### `geoservice_db` (geoservice-postgres:5434)
+**AI failure contract:** the sidecar never dead-letters an inference failure. Any error
+(missing file, unreadable image, inference exception) produces
+`AiAnalysisCompleted { Success = false, Error = ... }` and an ACK. One publish path in Python,
+one saga event in .NET, and the saga is guaranteed to complete for every file.
+`MediaProcessingFailed` is used only by .NET consumers for ingest-stage failures.
 
-Single table. Created by GeoService EF migration on startup. Unchanged from Phase 2.
+## 4. Queue Topology
 
-### Identity schema (schema: `identity` in `homemediahub_db`)
+All .NET services use `SetKebabCaseEndpointNameFormatter()`. The two Python-facing names are
+pinned explicitly (`cfg.Message<AiAnalysisRequested>(m => m.SetEntityName("ai-analysis-requested"))`);
+everything else uses MassTransit conventions. Exchanges are durable fanout; queues are durable
+classic queues (single node — quorum queues buy nothing here).
 
-ASP.NET Core Identity tables created by EF migration in `src/Api/`. Unchanged from Phase 5.
+| Queue | Consumer (service) | Prefetch / Concurrency | Notes |
+|---|---|---|---|
+| `media-scan` | ScanConsumer (MediaWorker) | 1 / 1 | one scan at a time |
+| `media-ingest` | IngestConsumer (MediaWorker) | **2 / 2** | deliberately low: hashing 750 GB off one SATA spindle — more concurrency = seek thrash, not throughput |
+| `media-enrichment-saga` | EnrichmentStateMachine (MediaWorker) | 8 / 8 | `UseMessageRetry(Intervals: 100ms, 500ms, 1s, 5s, 10s)` + `UseInMemoryOutbox` — absorbs optimistic-concurrency faults |
+| `ai-analysis` | pika worker (AI Sidecar) | 1 / 1 | declared + bound by Python; `torch.set_num_threads(4)` |
+| `ai-analysis-completed` | AiResultBridgeConsumer (MediaWorker) | 4 | **raw-JSON endpoint** — see §5 |
+| `geo-lookup` | GeoLookupConsumer (GeoService) | 1 / 1 | Nominatim hard limit 1 req/s; cache hits dominate after warm-up |
+| `media-apply-enrichment` | ApplyEnrichmentConsumer (MediaWorker) | 4 / 4 | pure DB updates, cheap |
+| `media-job-status` | JobFailureConsumer (MediaWorker) | 4 | `MediaProcessingFailed` + `Fault<FileDiscovered>` |
 
----
+**Backpressure model:** a scan of 190K files publishes 190K `FileDiscovered` messages up front
+(RabbitMQ stores them on disk — tens of MB, not a problem). Consumers pull at their own pace via
+prefetch. Nothing ever overloads the AI sidecar again: it takes exactly one message at a time.
+Queue depth *is* the progress bar (visible in the management UI and Grafana).
 
-## 8. API Surface
+## 5. Python ↔ MassTransit Interop
 
-### Media (frontend — all require JWT)
+The AI sidecar is plain pika, not MassTransit, so the two directions need explicit treatment:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/media` | Paginated. Params: `page`, `pageSize`, `from`, `to`, `tag`, `favorite`, `isVideo`, `noDate`, `originClass`. Excludes `meme` unconditionally. |
-| GET | `/api/media/stats` | `{ totalCount, photoCount, videoCount, totalSizeMb, oldestTakenAt, newestTakenAt }` |
-| GET | `/api/media/on-this-day` | `?month=&day=` → grouped by year |
-| GET | `/api/media/geo` | `[{ id, lat, lon, thumbnailPath }]` for all geotagged items |
-| GET | `/api/media/review` | Unreviewed items with `origin_class IN (screenshot, document, artwork, reference)`, sorted by confidence DESC |
-| GET | `/api/media/{id}` | Single item with metadata and tags |
-| GET | `/api/media/{id}/thumbnail` | WebP via nginx `X-Accel-Redirect` |
-| GET | `/api/media/{id}/original` | Stream original file as-is |
-| GET | `/api/media/{id}/display` | Browser-renderable image. HEIC→JPEG on first request, cached. |
-| GET | `/api/media/{id}/stream` | H.264 MP4 transcode on first request, cached. |
-| PATCH | `/api/media/{id}` | `{ isFavorite? }` |
-| PATCH | `/api/media/{id}/review` | `{ action: "meme" \| "real" }` |
-| DELETE | `/api/media/{id}` | Soft delete |
-| DELETE | `/api/media/bulk` | `{ ids: [...] }` hard-delete from disk + DB |
+**.NET → Python (AiAnalysisRequested).** MassTransit publishes its standard JSON envelope
+(content-type `application/vnd.masstransit+json`) to the fanout exchange
+`ai-analysis-requested`:
 
-### Search
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/search/semantic?q=` | CLIP semantic search — calls AI sidecar `POST /embed/text`, then pgvector `<=>`. Excludes `meme`. Optional `?originClass=` filter. |
-| GET | `/api/search/tags?q=` | Tag filter |
-
-### Albums
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/albums` | List |
-| POST | `/api/albums` | `{ name, description }` |
-| GET | `/api/albums/{id}` | Detail + media |
-| POST | `/api/albums/{id}/media` | `{ mediaFileId }` |
-| DELETE | `/api/albums/{id}/media/{mediaId}` | Remove from album |
-| DELETE | `/api/albums/{id}` | Delete album (not media) |
-
-### Admin
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/admin/scan` | Publish `ScanRequested` to RabbitMQ → triggers MediaWorker scan |
-| GET | `/api/admin/jobs` | List processing jobs. Params: `status` (failed/completed), `page` |
-| GET | `/api/admin/jobs/{id}` | Job detail including error message and failed stage |
-
-### Series / Auth (unchanged from Phase 7)
-
----
-
-## 9. AI Pipeline
-
-```
-RabbitMQ: ai-analysis-requested queue
-              │
-              ▼ (pika consumer, prefetch=1)
-AI Sidecar — _load_models() at startup (once, blocking)
-
-on_message(body):
-    req = { correlationId, filePath }
-
-    1. Pillow open (JPEG or converted frame)
-    2. YOLOv8n inference on original file path
-          output: [{label, confidence, bbox}]
-          filter: confidence ≥ 0.30
-    3. CLIP ViT-B/32 inference
-          input: 224×224 center crop
-          output: float32[512] L2-normalized embedding
-          zero-shot origin classification over 6 prompts:
-              "a real photograph taken with a camera..."    → photo
-              "a screenshot of a computer or phone screen" → screenshot
-              "a photograph of a document, printed paper..." → document
-              "a drawing, painting, illustration..."        → artwork
-              "a photograph taken to record information..." → reference
-              "a portrait or group photograph..."           → people
-          → pick highest cosine similarity
-
-    publish to ai-analysis-completed:
-        { correlationId, tags, embedding, originClass, originConfidence }
-
-POST /embed/text (side thread, port 8000):
-    .NET API calls this for semantic search query embedding
-    tokens = tokenizer([text])
-    features = clip_model.encode_text(tokens)  [L2-normalized]
-    → { embedding: [512 floats] }
+```json
+{
+  "messageId": "…", "correlationId": "…",
+  "messageType": ["urn:message:Contracts.Messages:AiAnalysisRequested"],
+  "message": { "correlationId": "3f2a…", "filePath": "/shared-temp/3f2a….jpg" },
+  "sentTime": "…", "headers": {}, "host": { … }
+}
 ```
 
-**Model details:**
-- **YOLOv8n:** 6 MB, ~50 ms/image on CPU, 80 COCO object classes, confidence threshold 0.30
-- **CLIP ViT-B/32:** 151 MB, 512-dim L2-normalized embeddings, shared image+text vector space
-- Both baked into Docker image at build time (no cold-start downloads)
-- `_inference_lock` (threading.Semaphore) serializes all inference — PyTorch CPU is not thread-safe under concurrent load
+Python declares the exchange (fanout, durable), declares + binds queue `ai-analysis`,
+sets `basic_qos(prefetch_count=1)`, and reads `json.loads(body)["message"]` (camelCase keys).
 
----
+**Python → .NET (AiAnalysisCompleted).** Python publishes **plain JSON** — no envelope —
+to the fanout exchange `ai-analysis-completed` with `content_type='application/json'`,
+`delivery_mode=2`:
 
-## 10. Volume Map
+```json
+{ "correlationId": "3f2a…", "success": true, "tags": [{"tag":"dog","confidence":0.91,"model":"yolov8n"}],
+  "embedding": [0.012, …], "originClass": "photo", "originConfidence": 0.93, "error": null }
+```
 
-| Container | Mount | Host path | Access |
-|-----------|-------|-----------|--------|
-| immich-server | `/usr/src/app/upload` | `${PHOTO_DIR}/iPhone` | rw |
-| api | `/photo` | `${PHOTO_DIR}` | ro |
-| api | `/thumbnails` | `${THUMBNAILS_DIR}` | rw |
-| api | `/video-cache` | `${VIDEO_CACHE_DIR}` | rw |
-| api | `/display-cache` | `${DISPLAY_CACHE_DIR}` | rw |
-| media-worker | `/photo` | `${PHOTO_DIR}` | ro |
-| media-worker | `/thumbnails` | `${THUMBNAILS_DIR}` | rw |
-| media-worker | `/shared-temp` | `${WORK_DIR}` | rw |
-| ai-sidecar | `/photo` | `${PHOTO_DIR}` | ro |
-| ai-sidecar | `/shared-temp` | `${WORK_DIR}` | ro |
-| nginx | `/thumbs` | `${THUMBNAILS_DIR}` | ro |
-| postgres | `/var/lib/postgresql/data` | `${DATA_DIR}/postgres` | rw |
-| immich-postgres | `/var/lib/postgresql/data` | `${DATA_DIR}/immich-postgres` | rw |
-| geoservice-postgres | `/var/lib/postgresql/data` | `${DATA_DIR}/geoservice-postgres` | rw |
-| rabbitmq | `/var/lib/rabbitmq` | `${DATA_DIR}/rabbitmq` | rw |
-| grafana | `/var/lib/grafana` | `${DATA_DIR}/grafana` | rw |
+The .NET side receives it on a dedicated raw-JSON endpoint:
 
-**Samba (native Ubuntu):** `/mnt/storage` → share name `Storage` — whole drive r/w from Windows/macOS on LAN.
+```csharp
+cfg.ReceiveEndpoint("ai-analysis-completed", e =>
+{
+    e.ConfigureConsumeTopology = false;                    // no urn-based bindings
+    e.DefaultContentType = new ContentType("application/json");
+    e.UseRawJsonDeserializer(isDefault: true);
+    e.Bind("ai-analysis-completed", b => { b.ExchangeType = "fanout"; b.Durable = true; });
+    e.ConfigureConsumer<AiResultBridgeConsumer>(context);  // the ONLY consumer here
+});
+```
 
----
+`AiResultBridgeConsumer : IConsumer<AiAnalysisCompleted>` does one thing:
+`await context.Publish(context.Message)` — re-publishing the payload as a proper MassTransit
+envelope that the saga consumes normally. **The saga must never sit on the raw endpoint
+directly**: raw JSON carries no `messageType`, and a saga endpoint registers multiple event
+types — the lenient deserializer could bind the payload ambiguously. The bridge is a
+one-message-type anti-corruption layer (the AWS analogue: a Lambda normalizing webhook input
+before it hits Step Functions).
+
+## 6. Enrichment Saga
+
+`EnrichmentStateMachine` / `EnrichmentState` in `src/MediaWorker/Sagas/`. This is the
+Step-Functions-style coordinator: it exists because AI and geo run in parallel and finish in
+any order, and something must decide "both are done — apply the update".
+
+**State row** (`enrichment_sagas` table in `homemediahub_db`, EF-persisted):
+`CorrelationId` (= MediaFileId, PK), `CurrentState`, `Version` (`uint`, mapped
+`.IsRowVersion()` → Npgsql `xmin` system column — optimistic concurrency without an extra
+column), `JobId`, `WorkFilePath`, `AiDone`, `AiSuccess`, `TagsJson`, `EmbeddingJson`,
+`OriginClass`, `OriginConfidence`, `AiError`, `GeoDone`, `GeoSuccess`, `Address`, `GeoError`,
+`StartedAt`.
+
+**Transitions:**
+
+| State | Event | Action | Next |
+|---|---|---|---|
+| Initial | `MediaEnrichmentRequested` | store JobId/WorkFilePath; publish `AiAnalysisRequested`; if HasGps publish `GeoLookupRequested` else `GeoDone = true` | Enriching |
+| Enriching | `AiAnalysisCompleted` | store AI result (success **or** failure), `AiDone = true`; if `GeoDone` → publish `ApplyEnrichmentRequested`, **Finalize** | Enriching / Final |
+| Enriching | `GeoLookupCompleted` | symmetric | Enriching / Final |
+| Enriching | `MediaEnrichmentRequested` (retry re-trigger) | re-publish whichever of AI/geo is not yet done | Enriching |
+
+- `SetCompletedWhenFinalized()` — the saga row is deleted on finalize; the table only ever
+  holds in-flight items (bounded by the AI backlog during a big scan).
+- `.OnMissingInstance(m => m.Discard())` on the AI/Geo events — duplicate deliveries after
+  finalize are dropped silently.
+- Repository: `EntityFrameworkRepository` with `ConcurrencyMode.Optimistic` +
+  `ExistingDbContext<WorkerDbContext>()`. Endpoint-level `UseMessageRetry` retries the losing
+  side when AI and geo results land simultaneously.
+- **No scheduler-based timeout in this phase** (would require the RabbitMQ delayed-message
+  -exchange plugin). The always-publish AI contract (§3) makes orphaned sagas unlikely; the
+  Admin page surfaces jobs stuck in `enriching` > 24 h as *stale* with a retry button.
+  Accepted, revisitable risk.
+
+## 7. Job Tracking — `processing_jobs`
+
+The pipeline's user-facing ledger (n8n's execution list replacement). One row per discovered
+file per scan.
+
+**Lifecycle:** `queued → processing → enriching → completed | failed | skipped_duplicate`
+
+| Transition | Written by |
+|---|---|
+| insert `queued` (+ `scan_id`) | ScanConsumer (or retry endpoint resets to `queued`) |
+| → `processing` | IngestConsumer (start) |
+| → `skipped_duplicate` | IngestConsumer (dedup hit) |
+| → `enriching` (+ `media_file_id`) | IngestConsumer (after save + saga start) |
+| → `completed` | ApplyEnrichmentConsumer (both parts OK) |
+| → `failed` (+ `failed_step` = `ingest`/`ai`/`geo`, `error_message`) | JobFailureConsumer (ingest faults) or ApplyEnrichmentConsumer (enrichment partial failure — the media row stays visible in the gallery) |
+
+**Retry — one uniform path.** `POST /api/admin/jobs/{id}/retry` resets the job to `queued`,
+increments `retry_count`, and publishes `FileDiscovered(Reprocess: true)`. IngestConsumer with
+`Reprocess = true`: if a media row already exists for the path it reuses the Id, regenerates
+the converted temp file / thumbnail if missing, and goes straight to publishing
+`MediaEnrichmentRequested`; otherwise it runs the full ingest. This one flag covers both
+"failed before save" and "failed during enrichment", and the saga tolerates being re-triggered
+(§6).
+
+**Idempotency & dedup (at-least-once delivery is a given):**
+- Unique indexes on `media_files(file_path)` and `media_files(file_hash)` — the database is
+  the final arbiter; `IngestConsumer` catches `PostgresException 23505` and treats it as a
+  duplicate.
+- `ApplyEnrichmentConsumer` is a pure idempotent UPDATE/upsert — consuming the same message
+  twice is harmless.
+- ScanConsumer excludes paths with an active job (`queued`/`processing`/`enriching`), plus a
+  partial unique index `processing_jobs(file_path) WHERE status IN ('queued','processing','enriching')`
+  as a backstop against rescans while files are in flight.
+
+## 8. Projects & Code Layout
+
+```
+src/
+├── Contracts/            message records only, zero deps (§3)
+├── Data/                 shared entity POCOs + one copy of the EF fluent mapping
+│                         MediaModelConfiguration.ConfigureMediaEntities(builder, excludeFromMigrations)
+├── Api/                  frontend-facing REST + JWT auth + admin endpoints + ScanScheduler
+│                         AppDbContext (Identity + media entities) — OWNS media schema migrations
+├── MediaWorker/          Worker Service: consumers, saga, ported processing services
+│   ├── Services/         FileHashService, DedupService, FileConvertService,
+│   │                     MetadataService, ThumbnailService, ScanService
+│   ├── Consumers/        ScanConsumer, IngestConsumer, AiResultBridgeConsumer,
+│   │                     ApplyEnrichmentConsumer, JobFailureConsumer
+│   ├── Sagas/            EnrichmentState, EnrichmentStateMachine
+│   └── WorkerDbContext   media entities ExcludeFromMigrations; owns ONLY enrichment_sagas,
+│                         separate history table __ef_migrations_history_worker
+├── MediaWorker.Tests/    xunit + NSubstitute + EFCore.InMemory + MassTransit test harness
+├── GeoService/           HTTP /reverse + GeoLookupConsumer; own DB (geoservice_db)
+├── AiSidecar/            inference.py (models) + app.py (FastAPI) + worker.py (pika entrypoint)
+├── Frontend/             React + TS SPA (adds /admin page)
+├── Api.Tests/, GeoService.Tests/
+```
+
+**Version pins that matter:**
+- **MassTransit 8.5.x** — pinned `[8.*,9.0)`. MassTransit v9 moved to a commercial license;
+  v8 is the last Apache-2.0 major. 8.x targets net8.0 and runs on net10.
+- **RabbitMQ 4** (`rabbitmq:4-management-alpine`) — 3.x is EOL.
+- OTel Prometheus exporter packages are pre-release — pin exact versions.
+
+## 9. Database Schema
+
+| Database | Host | Purpose |
+|---|---|---|
+| `homemediahub_db` | postgres:5432 | media, tags, embeddings, jobs, identity, saga state |
+| Immich DB | immich-postgres:5433 | Immich internal — never touched by custom services |
+| `geoservice_db` | geoservice-postgres:5434 | geo cache (lat/lon rounded 4dp → address) |
+
+**Schema ownership moves to EF Core migrations** (the raw `infra/postgres/init/*.sql` scripts
+are deleted; the database itself is created by `POSTGRES_DB=homemediahub_db`):
+
+- **Api's `AppDbContext`** owns Identity (existing `CreateIdentitySchema` migration) **and** the
+  media schema (new `AddMediaSchema` migration): `media_files`, `media_metadata`, `media_tags`,
+  `media_embeddings` (`vector(512)` via `HasPostgresExtension("vector")` + Pgvector), `media_thumbnails`,
+  `albums`, `album_media`, `photo_series`, `series_media`, `video_transcodes`, `processing_jobs`.
+  Notable in `AddMediaSchema`:
+  - **unique** `media_files(file_path)` and `media_files(file_hash)`
+  - `processing_jobs`: `n8n_execution_id` dropped; `scan_id`, `media_file_id` added; indexes on
+    `(status)` and `(scan_id, status)`; partial unique on `(file_path)` for active statuses (raw
+    `migrationBuilder.Sql`)
+  - ivfflat index on embeddings (`vector_cosine_ops, lists=100`) via `migrationBuilder.Sql` —
+    created on an empty table, so **recreate it once after the full archive import** for recall
+  - `media_files.created_at` mapped (existed in old init SQL, was unmapped)
+- **MediaWorker's `WorkerDbContext`** maps the same entities via the shared
+  `ConfigureMediaEntities(…, excludeFromMigrations: true)` and owns exactly one migration:
+  `AddEnrichmentSaga` (the `enrichment_sagas` table) recorded in its own history table
+  `__ef_migrations_history_worker`. Two migrators, one database, zero collisions — media tables
+  only ever change via Api migrations.
+- Startup ordering is enforced by compose healthchecks: postgres → api (migrates identity +
+  media) → media-worker (migrates saga table).
+
+## 10. API Surface (after Phase 8)
+
+Frontend-facing endpoints are unchanged from Phase 6/7.5 (media list/detail/stats/on-this-day/
+geo/review, semantic + tag search, albums, series, auth, thumbnail/original/display/stream).
+On-demand HEIC display conversion and video transcoding **stay in the API** — they are
+interactive request-path features, not pipeline steps.
+
+**Removed:** all `/api/tools/*` endpoints, `POST /api/media` (SaveMedia) — the worker writes
+directly via EF Core.
+
+**Admin (JWT-protected):**
+
+| Endpoint | Behavior |
+|---|---|
+| `POST /api/admin/scan` `{path?}` | publish `ScanRequested` (default path `/photo`) → `202 { scanId }` |
+| `GET /api/admin/pipeline/status` | `{ scanId, startedAt, counts: {queued, processing, enriching, completed, failed, skippedDuplicate}, total, completedLastHour, staleCount }` — computed from `processing_jobs` |
+| `GET /api/admin/jobs?status=&page=&pageSize=` | job list (DTO: `mediaFileId`, `scanId`; no more `n8nExecutionId`) |
+| `GET /api/admin/jobs/{id}` | job detail |
+| `POST /api/admin/jobs/{id}/retry` | reset to `queued`, `retry_count++`, publish `FileDiscovered(Reprocess: true)` |
+| `POST /api/admin/jobs/retry-failed` | bulk retry of all failed jobs |
+
+The frontend `/admin` page consumes these: scan trigger, polling progress card
+(5 s `refetchInterval`), failed-jobs table with retry.
 
 ## 11. Observability
 
-### Prometheus metrics
+- **.NET services (api, media-worker, geoservice):** OpenTelemetry Metrics with the Prometheus
+  exporter. MassTransit v8 emits its instrumentation as **OTel Meters** (`AddMeter("MassTransit")`)
+  — *not* prometheus-net; the older MassTransit.Prometheus package is dead. Api and GeoService
+  expose `/metrics` on their existing HTTP ports (nginx does not route them — scraping happens
+  on the docker network only); MediaWorker has no HTTP API, so it uses the Prometheus
+  HttpListener exporter on `:9090`.
+- **AI sidecar:** `prometheus-client` on `:8001` — `ai_messages_total{status="ok|error"}`
+  counter and `ai_inference_seconds` histogram.
+- **RabbitMQ:** `rabbitmq_prometheus` plugin on `:15692` (queue depths, rates, acks).
+- **Prometheus** (`:9090`, loopback-bound) scrapes all five targets at 15 s.
+- **Grafana** (`:3001`, LAN) with provisioned datasource + one **custom pipeline dashboard**
+  (`infra/grafana/dashboards/pipeline.json`): queue depth per queue, publish/deliver rates,
+  MassTransit consume duration & faults, AI inference P95, jobs completed/hour, error-queue
+  depth. Community dashboard IDs from the MassTransit-Prometheus era (15467) don't match OTel
+  metric names — don't use them.
 
-| Service | Key metrics |
-|---------|-------------|
-| API (`prometheus-net.AspNetCore`) | HTTP request rate, latency percentiles, error rate by endpoint |
-| MediaWorker (MassTransit built-in) | `masstransit_consume_total` by message type, consume duration, fault rate |
-| GeoService (MassTransit + ASP.NET) | Geocode request rate, cache hit/miss ratio, Nominatim call latency |
-| AI Sidecar (`prometheus_client`) | `ai_messages_processed_total`, `ai_processing_seconds` histogram |
-| RabbitMQ (`rabbitmq_prometheus`) | Queue depths, publish/consume rates, connection count, memory |
+## 12. Environments
 
-### Grafana dashboards
+Two isolated environments from one `docker-compose.yml`, selected by env file. Only one runs at
+a time (shared ports).
 
-| Dashboard | Source |
-|-----------|--------|
-| MassTransit .NET | Grafana ID 15467 — consumer lag, message rates, fault counts |
-| RabbitMQ Overview | Grafana ID 10991 — queue depths, publish/consume rates |
-| HomeMediaHub Pipeline | Custom — files/hour, AI inference P95, dead-letter count, saga states |
+| Environment | Command | Photo library | Data root |
+|---|---|---|---|
+| **stage** | `docker compose --env-file .env.stage up -d` | `/opt/homemediahub/stage/TestPhoto` (SSD) | `/opt/homemediahub/stage/data/` |
+| **prod** | `docker compose --env-file .env.prod up -d` | `/mnt/storage/Photo` (SATA HDD) | `/opt/homemediahub/data/` |
 
-### Failure handling
+Env vars (examples in `.env.stage.example` / `.env.prod.example`): `COMPOSE_PROJECT_NAME`,
+`POSTGRES_USER/PASSWORD`, `IMMICH_DB_USER/PASSWORD`, `GEOSERVICE_DB_PASSWORD`,
+`MIKE_PASSWORD`, `BADGER_PASSWORD`, `PHOTO_DIR`, `THUMBNAILS_DIR`, `VIDEO_CACHE_DIR`,
+`DISPLAY_CACHE_DIR`, `WORK_DIR`, `DATA_DIR`, **`RABBITMQ_USER`, `RABBITMQ_PASS`,
+`GRAFANA_PASSWORD`** (new). `SERVER_IP` is removed (only n8n's webhook URL used it).
 
-| Stage | On failure | Effect |
-|-------|-----------|--------|
-| IngestConsumer | Unhandled exception | Message moves to dead-letter queue; `processing_jobs` row written with `status = 'failed'` by `DeadLetterConsumer` |
-| AI Sidecar | pika nack | Message retried up to RabbitMQ retry policy; after max retries → dead letter |
-| GeoService consumer | MassTransit fault | Retried by MassTransit; after retries exhausted → fault exchange |
-| MediaSaveConsumer | EF Core error | MassTransit retry policy; after exhaustion → dead letter |
-| Duplicate file | Detected in `DedupService` by hash | Silently dropped in `IngestConsumer` (return early, no message published) |
+## 13. Design Decisions
 
-### Re-processing failed files
+- **RabbitMQ + MassTransit replaces n8n as the orchestrator.** The old design hid the work
+  queue inside n8n's engine with no observability and uncontrolled W1 parallelism that
+  overloaded the API and AI sidecar. Now every stage is an explicit durable queue with its own
+  prefetch — backpressure by construction, progress visible in RabbitMQ mgmt UI and Grafana.
+  This mirrors the AWS patterns being studied: SQS/SNS ≈ RabbitMQ exchanges/queues,
+  Step Functions ≈ MassTransit saga, Lambda ≈ consumers.
+- **Save-early, enrich-later.** Ingest (fast, I/O-bound) and enrichment (slow, CPU-bound) are
+  decoupled; the gallery never waits for AI.
+- **MassTransit pinned to v8.** v9 is commercial; v8 is Apache-2.0.
+- **MediaWorker hosts all pipeline processing.** Hashing, HEIC/video conversion
+  (`heif-convert` + `exiftool -TagsFromFile --Orientation`, `ffmpeg` frame extract via
+  `Process.Start`), metadata, thumbnails, scanning, dedup — ported from the old `/api/tools/*`
+  handlers. Its Docker image installs the same libheif PPA package set as the API image.
+- **AI Sidecar stays Python** (YOLOv8n + CLIP have no .NET equivalents), gains a pika consumer
+  loop; FastAPI is kept only for `/embed/text` (semantic search) + `/health` on a side thread.
+  Inference is single-flight (`prefetch 1`, threading lock, `torch.set_num_threads(4)`).
+- **Bridge consumer as anti-corruption layer** between raw-JSON Python output and typed
+  MassTransit envelopes (§5).
+- **EF Core over raw SQL** — including schema ownership now (§9). Raw SQL only where EF cannot
+  express it (partial/ivfflat indexes inside migrations, `ExecuteUpdateAsync` bulk ops).
+- **On-demand display/stream conversion stays in the API** — interactive latency, cached on
+  disk, not pipeline work.
+- **Thumbnails served by nginx** via `X-Accel-Redirect` — no .NET/Postgres per request.
+- **Separate Postgres per concern** (app, Immich, geo cache). **Samba native**, not
+  containerized. **All AI local**, CPU-only; face recognition out of scope.
 
-Files that failed with no `media_files` row (failed before save) are re-processed automatically on the next scan — `ScanService` excludes only files already in `media_files`. Files that failed geocoding or AI enrichment (partial records) can be targeted by querying:
+## 14. Out of Scope
 
-```sql
--- Files missing AI embedding (AI step failed)
-SELECT mf.file_path FROM media_files mf
-LEFT JOIN media_embeddings me ON me.media_file_id = mf.id
-WHERE me.media_file_id IS NULL AND mf.is_deleted = false;
-
--- Failed processing jobs
-SELECT file_path, error_message, failed_step
-FROM processing_jobs WHERE status = 'failed'
-ORDER BY started_at DESC;
-```
-
----
-
-## 12. Samba Configuration
-
-```ini
-# /etc/samba/smb.conf (additions)
-[Storage]
-   path = /mnt/storage
-   browseable = yes
-   read only = no
-   guest ok = no
-   valid users = @mediahub
-   create mask = 0664
-   directory mask = 0775
-```
-
-macOS: Finder → Go → Connect to Server → `smb://<server-ip>/Storage`. Windows: `\\<server-ip>\Storage`.
+- Face / people recognition
+- Remote access (LAN only) · web upload (use Samba + scan)
+- RAW camera files (CR2/ARW/NEF)
+- Per-user library separation (shared pool)
+- Telegram notifications / Photo-of-the-Day posts (dropped with n8n; future: dead-letter
+  consumer or scheduled worker)
+- Saga scheduler timeouts (needs delayed-message-exchange plugin; revisit if stale sagas
+  actually occur)

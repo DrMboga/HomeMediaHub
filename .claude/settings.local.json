@@ -62,7 +62,8 @@
       "Bash(Remove-Item \"c:\\\\Users\\\\Mike\\\\Projects\\\\HomeMediaHub\\\\src\\\\Api\\\\Data\\\\Migrations\\\\20260501000000_AddRefreshTokens.cs\" -Force)",
       "Bash(cd /mnt/c/Users/Mike/Projects/HomeMediaHub && dotnet build src/Api/Api.csproj --no-restore -c Release 2>&1 | tail -5)",
       "Read(//mnt/c/Users/Mike/Projects/**)",
-      "PowerShell(dotnet build src/Api/Api.csproj --no-restore -c Release 2>&1)"
+      "PowerShell(dotnet build src/Api/Api.csproj --no-restore -c Release 2>&1)",
+      "Bash(git tag *)"
     ]
   },
   "enabledPlugins": {

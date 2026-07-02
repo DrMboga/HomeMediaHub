@@ -1,533 +1,298 @@
-# HomeMediaHub — Phased Delivery Plan
+# HomeMediaHub — Delivery Plan
 
-Each phase produces a running, testable increment. Later phases build on earlier ones without requiring rework of completed pieces.
-
-## Development strategy: stage → prod
-
-All phases are validated on the **stage** environment first (TestPhoto folder on server SSD, no SATA HDD required). When a phase is stable on stage, it is smoke-tested on **prod** (SATA HDD, full Photo library). The same `docker-compose.yml` is used for both; only the env file differs.
-
-| Env | Photo source | How to start |
-|-----|-------------|--------------|
-| stage | `/opt/homemediahub/stage/TestPhoto` | `docker compose --env-file .env.stage up -d` |
-| prod  | `/mnt/storage/Photo` | `docker compose --env-file .env.prod up -d` |
-
-**TestPhoto setup (one-time):** Create a `TestPhoto` folder on your Windows laptop with a small representative sample (a handful of JPEGs, HEICs, and one short video). Copy it to the server:
-```bash
-scp -r "C:\Users\Mike\TestPhoto" mike@<server-ip>:/opt/homemediahub/stage/TestPhoto
-```
+Each phase produces a running, testable increment. Everything is validated on **stage**
+(TestPhoto on server SSD) before touching **prod** (full library on the SATA HDD). Same
+`docker-compose.yml`, different env file.
 
 ---
 
-## Phase 1 — Infrastructure Skeleton ✅ COMPLETE (2026-04-22)
+## Completed phases (history, condensed)
 
-**Goal:** Docker Compose stack boots; all containers start and can reach each other.
+| Phase | Delivered | Status |
+|---|---|---|
+| **1 — Infrastructure skeleton** | Compose stack, Postgres (pgvector) + init SQL schema, nginx routing, Immich + its Postgres + Redis, volume mounts | ✅ 2026-04-22 |
+| **2 — Tool endpoints + GeoService** | `/api/tools/*` (hash/metadata/thumbnail/scan), Identity schema + seeded users, GeoService (`/reverse`, Nominatim cache, 1 req/s throttle, own DB :5434) | ✅ 2026-04-24 |
+| **3 — n8n ingest pipeline** | W1 per-file webhook workflow, W2 scanner, HEIC (`heif-convert` + `exiftool -TagsFromFile`), video frame extract, dedup, 281-file stage validation | ✅ 2026-04-28 |
+| **4 — AI sidecar** | Python FastAPI, YOLOv8n tags + CLIP ViT-B/32 embeddings, `/analyze` + `/embed/text`, models baked into image, origin classification (6 classes; `meme` user-only) | ✅ |
+| **5 — Frontend API + auth** | JWT (15 min) + sliding refresh (30 d), media/search/albums/series/admin/review endpoints, X-Accel-Redirect thumbnails, on-demand HEVC→H.264 transcode | ✅ 2026-05-03 |
+| **6 — React frontend** | Vite + TS SPA, 7 pages, lightbox, Leaflet geo map, semantic search UI | ✅ 2026-05-06 |
+| **7 — Telegram automation** | *Superseded by Phase 8* — n8n workflows 3 & 4 dropped with n8n | ⬜ superseded |
+| **7.5 — Post-phase improvements** | Review/meme feature + pagination, 6-class origin rework + badges/filters, migration squash, `ReviewMediaHandler` NoTracking fix, lightbox file path | ✅ 2026-05-31 |
 
-### Notes from implementation
-
-- `immich-postgres` image changed from `postgres:16` to `pgvector/pgvector:pg16` — Immich v2.7.5 requires the vector extension.
-- `Dockerfile.n8n` changed from `FROM n8nio/n8n:latest` + `apk add` to `FROM node:20-alpine` + `npm install -g n8n` — the current n8n:latest image ships without a package manager.
-- Added loopback port bindings (`127.0.0.1:8080`, `127.0.0.1:8000`, `127.0.0.1:8001`) for api, ai-sidecar, and geoservice so health endpoints are reachable from the server via SSH.
-- Added `N8N_SECURE_COOKIE=false` to n8n env — required for HTTP access on a LAN without TLS.
-- nginx n8n `proxy_pass` uses trailing slash (`http://n8n/`) to strip the `/n8n/` prefix before forwarding, which is required for n8n's Vite asset paths to resolve correctly.
-
-### Deliverables
-
-- `docker-compose.yml` with all services declared (images, ports, volumes, env vars, depends_on)
-- Custom `Dockerfile` stubs for `api`, `ai-sidecar`, `n8n` (minimal — just enough to build)
-- PostgreSQL container (`pgvector/pgvector:pg16`) with init script:
-  - Creates `homemediahub_db` and `n8n_db`
-  - Runs `CREATE EXTENSION IF NOT EXISTS vector`
-- Full DB schema applied via init SQL (Section 5 of architecture doc)
-- NGINX config with routing rules (all upstreams may return 502 at this point — routing is declared)
-- Volume mounts wired: `/mnt/storage/Photo`, `/mnt/storage/thumbnails`, `/mnt/storage/video-cache`, `/tmp/homemediahub-work`
-- Immich + its Postgres + Redis declared and wired to iPhone storage path
-
-### Done when (validate on stage first)
-
-```bash
-# Start stage
-docker compose --env-file .env.stage up -d
-
-# All containers running?
-docker compose --env-file .env.stage ps
-
-# Schema applied?
-docker compose --env-file .env.stage exec postgres \
-    psql -U postgres -d homemediahub_db -c "\dt"
-# Expected: 10 tables listed
-
-# Health checks?
-curl http://localhost:8080/health   # → {"status":"ok","phase":1}
-curl http://localhost:8000/health   # → {"status":"ok","phase":1}
-```
+Durable lessons from those phases (still apply):
+- Npgsql hardening: `Keepalive=30;Connection Idle Lifetime=300` + `EnableRetryOnFailure(3, 5s)` + `CommandTimeout(60)` — Docker bridge conntrack drops idle TCP.
+- `Image.IdentifyAsync` (header-only), never `LoadAsync`, for metadata — avoids memory spikes.
+- ExifTool subprocess capped at 30 s with `Kill(entireProcessTree: true)`.
+- `heif-convert` alone loses metadata — must be followed by `exiftool -TagsFromFile <src> --Orientation <dest>`.
+- Docker build context excludes parent dirs — `src/Directory.Build.props` is invisible unless the context includes it (Phase 8 fixes this properly by moving the context to `./src`).
+- Global `QueryTrackingBehavior.NoTracking`: mutations must use `.AsTracking()` or `ExecuteUpdateAsync`.
 
 ---
 
-## Phase 2 — .NET Tool Endpoints + GeoService ✅ VALIDATED (2026-04-24)
+# Phase 8 — RabbitMQ + MassTransit Migration 📋 PLANNED (docs complete 2026-07-02, code not started)
 
-**Goal:** n8n can call all four `.NET` tool endpoints and the reverse-geocoding service; each returns correct output against real files.
+**Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
+written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
+updates via a saga. Server is torn down and rebuilt fresh — no DB migration constraints.
 
-> **Phase 8 note:** The tool endpoints (`/api/tools/*`) are removed in Phase 8. Their logic (hashing, conversion, metadata extraction, thumbnail generation, scanning, dedup) is ported to `src/MediaWorker/Services/`. The GeoService HTTP endpoint (`GET /reverse`) is kept; Phase 8 adds a RabbitMQ consumer alongside it.
+**Target architecture, message contracts, topology, saga design, interop mechanics:** see
+[`architecture.md`](architecture.md). This document is the execution order.
 
-### Notes from implementation
+**Locked decisions:**
+1. Save-early (media visible before AI completes; multi-day initial AI pass accepted — CPU-only, ~2–5 s/image, 190K files ≈ 5–11 days)
+2. MassTransit pinned to **8.5.x** (`[8.*,9.0)`) — v9 is commercial
+3. RabbitMQ **4** (`rabbitmq:4-management-alpine`) — 3.x EOL
+4. Metrics via **OpenTelemetry** (MassTransit v8 emits OTel Meters; prometheus-net cannot see them); Python uses `prometheus-client`
+5. EF Core migrations take over the media schema; `infra/postgres/init/*.sql` deleted
+6. Shared `src/Data` classlib for entity POCOs (no duplication between Api and MediaWorker)
+7. Minimal Admin page in the frontend (scan trigger, progress, failed jobs + retry)
+8. Frontend **visual redesign is sub-phase 8b**, own branch, only after 8a is verified on stage
 
-- `MetadataExtractor` replaced with `SixLabors.ImageSharp` for EXIF extraction — ImageSharp is already a dependency for thumbnail generation, removing a redundant package.
-- `ImplicitUsings` and `Nullable` must be declared explicitly in each `.csproj` — the Docker build context (`src/Api`, `src/GeoService`) does not include the root `src/Directory.Build.props`, so MSBuild cannot walk up to find it inside the container.
-- Identity tables land in PascalCase (`AspNetUsers`, `AspNetRoles`, etc.) despite `UseSnakeCaseNamingConvention()` — ASP.NET Core Identity sets table names explicitly, and the naming convention plugin does not override explicit names. Functionally correct; `UserManager` uses the EF model names, not raw SQL. Fix in a future migration if consistency with snake_case application tables matters.
-- `docker compose down -v` only removes named Docker volumes, not bind mounts. The Postgres data directories (`/opt/homemediahub/stage/data/postgres`, etc.) are bind mounts and survive `down -v`. Wipe them manually when a clean slate is needed.
-
-### Deliverables
-
-**API (`src/Api/`)**
-- `.NET 10` Web API project
-- ASP.NET Core Identity schema via EF Core migration (users table only — no auth wired yet)
-- Seed script: create Mike and Badger accounts
-- Four tool endpoints:
-  - `POST /api/tools/hash` — SHA-256 via `System.Security.Cryptography`
-  - `POST /api/tools/metadata` — EXIF via `SixLabors.ImageSharp`; accepts JPEG only
-  - `POST /api/tools/thumbnail` — 400 px WebP via `SixLabors.ImageSharp`; writes to `/thumbnails/<id>.webp`
-  - `GET  /api/tools/scan?path=` — walks directory, excludes paths already in `media_files`
-- Serilog structured JSON logging (file path, duration_ms, outcome per request)
-- Docker image build (`src/Api/Dockerfile`)
-
-**GeoService (`src/GeoService/`)**
-- `.NET 10` minimal API project — standalone microservice on port 8001
-- `GET /reverse?lat=&lon=` — rounds coordinates to 4 decimal places (~11 m), looks up in local cache first, calls Nominatim on miss, persists result; enforces Nominatim's 1 req/sec policy
-- `GET /health` — liveness check
-- EF Core with `geoservice_db` on its own Postgres container (port 5434)
-- Serilog structured JSON logging (cache hit/miss, Nominatim latency)
-- Docker image build (`src/GeoService/Dockerfile`)
-
-### Validation results (stage, 2026-04-24)
-
-| Check | Result |
-|---|---|
-| `GET /health` (api + geoservice) | ✅ `{"status":"ok","phase":2}` |
-| `GET /api/tools/scan?path=/photo` | ✅ returns file list |
-| `POST /api/tools/hash` | ✅ SHA-256 hex string |
-| `POST /api/tools/metadata` | ✅ EXIF, GPS, camera make/model |
-| `POST /api/tools/thumbnail` | ✅ WebP written to `/thumbnails/<id>.webp` |
-| `GET /reverse` — cache miss | ✅ `{"address":"...","cached":false}` |
-| `GET /reverse` — cache hit | ✅ `{"address":"...","cached":true}` |
-| Identity schema migrated | ✅ `identity` schema, 7 ASP.NET tables |
-| Users seeded | ✅ `mike` and `badger` in `identity."AspNetUsers"` |
+Every step below must end with the solution compiling and `dotnet test` green.
 
 ---
 
-## Phase 3 — n8n Ingest Pipeline ✅ VALIDATED (2026-04-28)
+### Step 1 — `src/Contracts` + `src/Data` (shared libraries)
 
-**Goal:** Library Scanner finds files and fully processes them through Workflow 1 into the database.
+1. `dotnet new classlib -n Contracts -o src/Contracts --framework net10.0` — zero NuGet deps.
+   Add `src/Contracts/Messages/` with the 10 records from architecture.md §3
+   (`ScanRequested`, `FileDiscovered`, `MediaEnrichmentRequested`, `AiAnalysisRequested`,
+   `AiTag`, `AiAnalysisCompleted`, `GeoLookupRequested`, `GeoLookupCompleted`,
+   `ApplyEnrichmentRequested`, `MediaProcessingFailed`).
+2. `dotnet new classlib -n Data -o src/Data --framework net10.0` — packages:
+   `Npgsql.EntityFrameworkCore.PostgreSQL`, `Pgvector.EntityFrameworkCore`,
+   `EFCore.NamingConventions` (same versions as Api).
+3. **Move** entity POCOs from `src/Api/Data/` to `src/Data/Entities/`: `MediaFile`,
+   `MediaMetadata`, `MediaTag`, `MediaEmbedding`, `MediaThumbnail`, `Album`, `AlbumMedia`,
+   `PhotoSeries`, `SeriesMedia`, `VideoTranscode`, `ProcessingJob`.
+   Rework `ProcessingJob`: **drop** `N8nExecutionId`; **add** `Guid? ScanId`, `Guid? MediaFileId`.
+   Add previously unmapped `MediaFile.CreatedAt`.
+4. Create `src/Data/MediaModelConfiguration.cs` —
+   `ConfigureMediaEntities(ModelBuilder builder, bool excludeFromMigrations)` — the single copy
+   of the fluent mapping (moved out of `AppDbContext.OnModelCreating`), applying
+   `ExcludeFromMigrations()` conditionally.
+5. Api: add ProjectReferences to `Contracts` + `Data`; `AppDbContext` calls
+   `ConfigureMediaEntities(builder, excludeFromMigrations: true)` (still true — flips in Step 2);
+   fix namespaces. Add both projects to `HomeMediaHub.slnx`.
 
-> **Phase 8 note:** n8n and all its workflows are removed in Phase 8 and replaced by RabbitMQ + MassTransit consumers in `src/MediaWorker/`. The processing logic (HEIC conversion, metadata extraction, dedup, thumbnail, geocode, DB insert) is equivalent — ported to `FileConvertService`, `MetadataService`, `IngestConsumer`, `MediaSaveConsumer`. The n8n workflow JSON files are deleted along with `Dockerfile.n8n`.
+**Verify:** `dotnet build` + `dotnet test` (Api.Tests, GeoService.Tests) green. No behavior change.
 
-### Notes from implementation
+### Step 2 — EF Core takes over the media schema
 
-- W1 deployed as a webhook-triggered workflow. W2 calls it via `POST http://n8n:5678/webhook/process-file` (HTTP Request node with `continueOnFail: true`) rather than n8n's Execute Workflow node — each W1 call becomes a discrete execution in n8n history, making failures easier to inspect individually.
-- W2 processes files sequentially (one at a time), not in parallel batches of 10 — the HTTP Request node iterates items one at a time. This is simpler, avoids concurrency pressure, and throughput is adequate for the library size.
-- EF Core entity classes (`MediaFile`, `MediaMetadata`, `MediaThumbnail`, `MediaTag`) added to the API with `ExcludeFromMigrations()` — tables already exist via init SQL. EF entities enable `SaveChangesAsync` which is compatible with Npgsql's `EnableRetryOnFailure` policy (raw `ExecuteSqlAsync` inside `BeginTransactionAsync` is not retry-compatible).
-- Npgsql connection reliability hardened on both API and GeoService: `Keepalive=30;Connection Idle Lifetime=300` in the connection string; `EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: 5 s)` and `CommandTimeout(60)` on each `DbContext`. Docker's bridge network silently drops idle TCP connections via conntrack; without these settings, any connection idle for ~4 minutes fails the next request with "connection closed unexpectedly".
-- `Image.LoadAsync` (full pixel decode) replaced with `Image.IdentifyAsync` (header-only) in the metadata handler — avoids memory spikes under concurrent load that caused Kestrel to drop connections.
-- ExifTool subprocess capped at 30 seconds with `proc.Kill(entireProcessTree: true)` on cancellation — prevents indefinite hangs on malformed video containers.
-- `processing_jobs` table write deferred to Phase 7 (Error Handler workflow). W2's final `Code: Build Summary` node provides interim run observability: total/succeeded/failed counts and a list of failed file paths with error messages.
+1. `AppDbContext`: `ConfigureMediaEntities(…, excludeFromMigrations: false)` +
+   `modelBuilder.HasPostgresExtension("vector")`.
+2. `dotnet ef migrations add AddMediaSchema` (Api). Hand-edit the migration to add:
+   - unique indexes `media_files(file_path)` and `media_files(file_hash)`
+   - `processing_jobs` indexes `(status)`, `(scan_id, status)` + partial unique
+     `(file_path) WHERE status IN ('queued','processing','enriching')` via `migrationBuilder.Sql`
+   - ivfflat index: `CREATE INDEX ... ON media_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)` via `migrationBuilder.Sql`
+3. Delete `infra/postgres/init/01-init.sh` and `02-schema.sql`; in `docker-compose.yml` set
+   `POSTGRES_DB: homemediahub_db` on the `postgres` service and drop the init mount.
+4. Add/refresh a `DesignTimeDbContextFactory` in Api for `dotnet ef` outside Docker.
 
-### Deliverables
+**Verify:** run a throwaway Postgres 16 pgvector container; point Api at it; startup
+`MigrateAsync()` creates identity + all media tables; `\di` shows the unique + partial + ivfflat
+indexes; Api.Tests green.
 
-- Custom n8n image (`Dockerfile.n8n`): `FROM node:20-alpine` + `npm install -g n8n` + `apk add ffmpeg libheif-tools libde265 perl-image-exiftool`
-- n8n configured to use `n8n_db` (`DB_TYPE=postgresdb`)
-- **Workflow 1 — Process Single File** (JSON export committed to `n8n/workflows/`)
-  - All branches: HEIC, VIDEO (ffprobe + frame extract), JPEG/PNG pass-through
-  - hash → dedup check → convert → metadata → thumbnail → geocode (continue-on-fail) → DB insert
-  - `processing_jobs` written at start; updated on completion or failure
-  - Shared-temp cleanup after conversion
-- **Workflow 2 — Library Scanner** (JSON export committed)
-  - Calls `GET /api/tools/scan`, splits into batches of 10, calls W1 per file
-  - Trigger: Manual button + monthly cron `0 2 1 * *`
-- n8n Nominatim geocoding: 1 req/sec rate limit enforced via Wait node (1 000 ms)
-- HEIC conversion is a two-command Execute Command node: `heif-convert -q 90` then `exiftool -TagsFromFile` to copy EXIF/GPS from the original — `heif-convert` alone does not preserve metadata
+### Step 3 — `src/MediaWorker` + `src/MediaWorker.Tests`
 
-### Validation results (stage, 2026-04-28)
+1. `dotnet new worker -n MediaWorker -o src/MediaWorker --framework net10.0`. Packages:
+   `MassTransit` `[8.*,9.0)`, `MassTransit.RabbitMQ`, `MassTransit.EntityFrameworkCore`,
+   EF/Npgsql/Pgvector/NamingConventions (Api versions), `SixLabors.ImageSharp 3.1.12`,
+   Serilog (compact JSON console, as Api), `OpenTelemetry.Extensions.Hosting`,
+   `OpenTelemetry.Exporter.Prometheus.HttpListener` (pin exact pre-release). Refs: `Contracts`, `Data`.
+2. **Port services** from `src/Api/Features/Tools/*` to `src/MediaWorker/Services/`, MediatR
+   stripped (plain classes, ctor-injected `WorkerDbContext` + `ILogger`):
+   `HashFileHandler→FileHashService`, `DedupHandler→DedupService`,
+   `ConvertFileHandler→FileConvertService`, `ExtractMetadataHandler→MetadataService`,
+   `GenerateThumbnailHandler→ThumbnailService`, `ScanDirectoryHandler→ScanService`.
+   Keep the hardening: IdentifyAsync, exiftool 30 s kill, heif-convert + TagsFromFile.
+3. `Sagas/WorkerDbContext.cs`: `ConfigureMediaEntities(…, excludeFromMigrations: true)` +
+   `EnrichmentState` entity; `UseNpgsql(o => o.MigrationsHistoryTable("__ef_migrations_history_worker", "public"))`;
+   `MigrateAsync()` on startup. `dotnet ef migrations add AddEnrichmentSaga`.
+   Add a `DesignTimeDbContextFactory`.
+4. `Sagas/EnrichmentState.cs` + `EnrichmentStateMachine.cs` per architecture.md §6
+   (`Version` mapped `.IsRowVersion()` → xmin; `SetCompletedWhenFinalized()`;
+   `OnMissingInstance(Discard)`; re-trigger handling in `Enriching`).
+5. `Consumers/`: `ScanConsumer` (batch job inserts ~1000/SaveChanges), `IngestConsumer`
+   (Reprocess flag, 23505→duplicate, job transitions), `AiResultBridgeConsumer` (re-publish),
+   `ApplyEnrichmentConsumer` (idempotent update/upsert, temp cleanup only on AI success,
+   job completed/failed), `JobFailureConsumer` (`MediaProcessingFailed` + `Fault<FileDiscovered>`).
+6. `Program.cs` MassTransit bus: kebab-case formatter; `SetEntityName("ai-analysis-requested")`
+   for `AiAnalysisRequested`; endpoints + prefetch/concurrency per architecture.md §4; the
+   raw-JSON `ai-analysis-completed` receive endpoint per §5; saga endpoint with
+   `UseMessageRetry(Intervals 100ms…10s)` + `UseInMemoryOutbox`; EF saga repository optimistic.
+   OTel: `AddMeter("MassTransit")` + Prometheus HttpListener on `http://+:9090/`.
+7. `src/MediaWorker/Dockerfile`: sdk build (context `./src`) → `aspnet:10.0-noble` + **the exact
+   apt block from `src/Api/Dockerfile`** (strukturag PPA: `ffmpeg libheif1 libheif-examples
+   libheif-plugin-libde265 libheif-plugin-aomdec libheif-plugin-aomenc libimage-exiftool-perl`).
+8. `src/MediaWorker.Tests`: **move** `src/Api.Tests/Features/Tools/*` tests here (renamed to the
+   service classes; port `TestDbContextFactory` with the InMemory + `Ignore(Embedding)` trick).
+   New tests (MassTransit in-memory test harness + `InMemorySagaRepository`):
+   - saga: GPS path, no-GPS path, AI `Success:false` still finalizes, geo-before-AI order,
+     duplicate event after finalize discarded, `MediaEnrichmentRequested` re-trigger while Enriching
+   - IngestConsumer: dedup→`skipped_duplicate`; unique-violation→duplicate; `Reprocess:true` with
+     existing row → straight to enrichment; failure → `MediaProcessingFailed`
+   - ApplyEnrichmentConsumer: double-consume idempotent; temp file kept when `AiSuccess:false`
 
-| Check | Result |
-|---|---|
-| W2 Manual Trigger → scan → W1 per file | ✅ 281 files processed |
-| JPEG pipeline (hash → dedup → metadata → thumbnail → geocode → save) | ✅ |
-| HEIC pipeline (heif-convert → exiftool TagsFromFile → metadata → thumbnail → geocode → save) | ✅ |
-| MOV/video pipeline (ffmpeg frame extract → metadata → thumbnail → geocode → save) | ✅ |
-| Dedup check (re-run W2 on already-processed library — 0 new inserts) | ✅ |
-| Files with GPS: address populated via geoservice | ✅ |
-| Files without GPS: lat/lon/address null | ✅ |
-| W2 Code: Build Summary output | ✅ `{ total: 281, succeeded: 281, failed: 0, failedFiles: [] }` |
+**Verify:** `dotnet test` green across the solution.
+
+### Step 4 — Api rework
+
+1. **Delete:** `src/Api/Features/Tools/` (whole folder), `src/Api/Endpoints/ToolEndpoints.cs`
+   + its `Map` call, `src/Api/Features/Media/SaveMedia/` + the `POST /api/media` mapping in
+   `MediaEndpoints.cs`, `N8nWebhookUrl` config usage. Delete the corresponding Api.Tests.
+2. **Add** MassTransit publish-only (`AddMassTransit` + `UsingRabbitMq`, host/user/pass from
+   config, `SetEntityName` for `AiAnalysisRequested`, no consumers).
+3. **Admin endpoints** (`Endpoints/AdminEndpoints.cs` + `Features/Admin/`, all authorized):
+   `POST /api/admin/scan {path?}` → 202 `{scanId}`; `GET /api/admin/pipeline/status` (counts per
+   status from `processing_jobs`, `completedLastHour`, `staleCount` = enriching > 24 h);
+   `GET /api/admin/jobs` DTO rework (−`n8nExecutionId`, +`mediaFileId`, `scanId`);
+   **rewrite** `RetryJobHandler` (reset to queued via `ExecuteUpdateAsync`, `retry_count++`,
+   publish `FileDiscovered(Reprocess: true)`); `POST /api/admin/jobs/retry-failed` (bulk).
+4. `Services/ScanScheduler.cs` — `BackgroundService`, next 1st-of-month 02:00, publishes
+   `ScanRequested`; config gate `Scan:Enabled` (off by default in stage).
+5. OTel metrics: `AddOpenTelemetry().WithMetrics(AddAspNetCoreInstrumentation +
+   AddMeter("MassTransit") + AddPrometheusExporter)` + `MapPrometheusScrapingEndpoint("/metrics")`.
+6. `src/Api/Dockerfile`: fix the duplicated trailing `COPY`/`ENTRYPOINT` (lines 28-29); add
+   `curl` for the compose healthcheck; adapt COPY paths to the `./src` build context
+   (Contracts/, Data/, Api/).
+7. New Api.Tests: pipeline-status counts; retry publishes `FileDiscovered(Reprocess:true)`
+   (NSubstitute `IPublishEndpoint`).
+
+**Verify:** `dotnet test`; Api runs locally with RabbitMQ absent only if MassTransit host is
+reachable — acceptance is in Step 8's compose run.
+
+### Step 5 — GeoService consumer
+
+1. Refs `Contracts`; packages MassTransit `[8.*,9.0)` + `MassTransit.RabbitMQ`, OTel +
+   `OpenTelemetry.Exporter.Prometheus.AspNetCore`.
+2. `Features/GeoLookup/GeoLookupConsumer.cs : IConsumer<GeoLookupRequested>` — send existing
+   `ReverseGeocodeRequest` via MediatR; publish `GeoLookupCompleted(Success:true, Address)`;
+   catch → `(Success:false, Error)`. Endpoint `geo-lookup`, `ConcurrentMessageLimit = 1`.
+3. Keep `GET /reverse`, `/health`, NominatimClient throttle untouched. Map `/metrics`.
+4. Dockerfile COPY paths for `./src` context. GeoService.Tests: consumer success/failure shapes
+   via test harness.
+
+**Verify:** `dotnet test`.
+
+### Step 6 — AiSidecar pika worker
+
+1. Split `main.py` → `inference.py` (model load, inference lock, analyze + text-embed —
+   logic unchanged), `app.py` (FastAPI `/health` + `POST /embed/text`), `worker.py` (entrypoint):
+   uvicorn on :8000 in a daemon thread; `prometheus_client.start_http_server(8001)`;
+   pika `BlockingConnection` loop on the main thread with reconnect-on-error outer loop;
+   declare fanout exchanges `ai-analysis-requested` / `ai-analysis-completed`, declare + bind
+   queue `ai-analysis`, `basic_qos(prefetch_count=1)`.
+2. Message handler: `payload = json.loads(body)["message"]`; try inference; **any exception →
+   result with `success: false` + error string**; always `basic_publish` (plain JSON, camelCase,
+   `content_type=application/json`, `delivery_mode=2`) then `basic_ack`. Never nack on
+   inference errors (poison-image safety).
+3. `torch.set_num_threads(4)`; `ENV OMP_NUM_THREADS=4` in Dockerfile.
+4. Metrics: `ai_messages_total{status="ok|error"}`, `ai_inference_seconds` histogram.
+5. `requirements.txt`: **add** `pika`, `prometheus-client`; **keep** `fastapi`, `uvicorn`.
+   Dockerfile: CMD `python worker.py`; EXPOSE 8000 8001; env `RABBITMQ_HOST/USER/PASS`;
+   healthcheck unchanged (:8000/health).
+6. pytest for pure helpers (`parse_request`, `build_result`, error path) — no model loading.
+
+**Verify:** `pytest`; container builds.
+
+### Step 7 — Compose, infra, nginx, env
+
+1. `docker-compose.yml`:
+   - remove `n8n` service + its nginx `depends_on` + all `SERVER_IP` usage
+   - .NET build contexts → `context: ./src`, `dockerfile: Api/Dockerfile` etc.
+   - add `rabbitmq` (`rabbitmq:4-management-alpine`; `RABBITMQ_DEFAULT_USER/PASS`;
+     `infra/rabbitmq/enabled_plugins` mount; `${DATA_DIR}/rabbitmq` volume; ports
+     `127.0.0.1:5672`, `15672` (LAN), `127.0.0.1:15692`; healthcheck `rabbitmq-diagnostics -q ping`)
+   - add `media-worker` (build `./src` + `MediaWorker/Dockerfile`; mounts `${PHOTO_DIR}:/photo:ro`,
+     `${THUMBNAILS_DIR}:/thumbnails`, `${WORK_DIR}:/shared-temp`; depends_on postgres +
+     rabbitmq + **api** all `service_healthy` — api's migration must create the media schema first)
+   - api: healthcheck (`curl -f localhost:8080/health`), RabbitMQ env, depends_on rabbitmq
+   - geoservice / ai-sidecar: RabbitMQ env + depends_on
+   - add `prometheus` (`127.0.0.1:9090`, config + volume) and `grafana`
+     (`GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}`, provisioning mount, volume, `3001:3000`)
+2. `infra/rabbitmq/enabled_plugins`: `[rabbitmq_management,rabbitmq_prometheus].`
+3. `infra/prometheus/prometheus.yml`: 15 s scrape of `api:8080`, `media-worker:9090`,
+   `geoservice:8001`, `ai-sidecar:8001`, `rabbitmq:15692`.
+4. `infra/grafana/provisioning/{datasources,dashboards}/` + custom
+   `infra/grafana/dashboards/pipeline.json` (queue depths, rates, MassTransit consume
+   duration/faults, AI P95, jobs/hour, error-queue depth).
+5. nginx.conf: remove n8n upstream + `/n8n/` location.
+6. Env examples: **add** `RABBITMQ_USER`, `RABBITMQ_PASS`, `GRAFANA_PASSWORD`; **remove** `SERVER_IP`.
+7. **Delete:** `Dockerfile.n8n`, `infra/n8n/` (all three workflow JSONs).
+
+**Verify:** `docker compose --env-file .env.stage config` validates; full stage build succeeds.
+
+### Step 8 — Frontend Admin page (sub-phase 8a)
+
+1. `src/Frontend/src/api/admin.ts` — clients for scan / pipeline-status / jobs / retry / retry-failed.
+2. `src/Frontend/src/pages/AdminPage.tsx` + `/admin` route + nav link:
+   - Scan card: trigger button (+ optional path input), shows returned `scanId`
+   - Progress card: polls `pipeline/status` every 5 s (TanStack Query `refetchInterval`) —
+     status counts, progress bar, completed/hour, stale warning
+   - Failed jobs table: paged, per-row Retry, "Retry all failed"
+3. Existing styling only — no redesign here.
+
+**Verify:** `npm run build`; manual click-through against the stage stack.
+
+### Step 9 — Docs
+
+- `CLAUDE.md`, `README.md`: status, stack/service/port tables, commands, no n8n.
+- `docs/fresh-stage-deploy.md`, `docs/prod-first-run.md`: no init SQL, new env vars,
+  RabbitMQ/Grafana first login, new verification checklist.
+- `docs/telegram-potd-setup.md`: mark superseded.
+
+### Step 10 — Sub-phase 8b: frontend visual redesign
+
+Own branch, only after the stage checklist below passes. Full visual redesign of all pages +
+Admin using the **frontend-design skill** (distinctive, non-templated direction). Zero feature
+or API changes — backend rollback must never entangle with UI churn.
 
 ---
 
-## Phase 4 — AI Sidecar ✅ VALIDATED
+## Stage rollout & verification checklist
 
-**Goal:** Every ingested photo receives object-detection tags and a CLIP embedding.
-
-> **Phase 8 note:** The AI Sidecar's FastAPI HTTP server (`/analyze`, `/health`) is replaced in Phase 8 with a pika RabbitMQ consumer. The model loading code (YOLOv8n + CLIP), inference logic, and origin classification are unchanged. Only `POST /embed/text` is kept as an HTTP endpoint (API calls it for semantic search query embedding). The sidecar is renamed from `main.py` to `worker.py`.
-
-### Deliverables
-
-- Python 3.11 FastAPI service (`src/AiSidecar/`)
-- Models baked into image at build time:
-  - YOLOv8n (`ultralytics` — 6 MB)
-  - CLIP ViT-B/32 (`open_clip` — 151 MB)
-- Endpoints:
-  - `POST /analyze { filePath }` → `{ tags: [{label, confidence}], embedding: [512], originClass, originConfidence }` — combined YOLOv8 + CLIP in a single call
-  - `POST /embed/text { text }` → `{ embedding: [512] }`
-- Confidence threshold: ≥ 0.30 for YOLOv8 tags
-- L2-normalised CLIP embeddings
-- Origin classification: CLIP zero-shot across 6 classes — `photo`, `screenshot`, `document`, `artwork`, `reference`, `people`. `meme` is user-assigned only (never set by AI).
-
----
-
-## Phase 5 — Frontend API + Auth ✅ VALIDATED (2026-05-03)
-
-**Goal:** All REST endpoints needed by the React UI are implemented and guarded by JWT auth.
-
-### Notes from implementation
-
-- `Microsoft.AspNetCore.Authentication.JwtBearer` is NOT in the ASP.NET Core shared framework for the .NET 10 SDK (10.0.100) used here — must be added as an explicit NuGet reference (`10.0.0`). It transitively brings `System.IdentityModel.Tokens.Jwt` and `Microsoft.IdentityModel.Tokens`.
-- `CosineDistance` vector extension method requires `using Pgvector.EntityFrameworkCore;` — not `using Pgvector;` alone.
-- Refresh token stored as a SHA-256 hash in `identity."AspNetUsers"` (new columns via migration `20260501000000_AddRefreshTokens`). Only 2 users exist so a full scan to find the matching hash is acceptable.
-- JWT: HS256, 15 min access token, 30-day sliding refresh token window. Secret key in `appsettings.json` (override via env var in production).
-- SignalR hub at `/hubs/library` — NGINX config already had the WebSocket upgrade rule. `media.added` broadcast fires from `SaveMediaHandler` (n8n calls this after each file processed). `media.deleted` fires from soft-delete and bulk-delete endpoints.
-- Tool endpoints (`/api/tools/*`) and `POST /api/media` are intentionally unauthenticated — they are called by n8n from within the Docker network.
-- Video transcode: on-demand HEVC → H.264 via ffmpeg subprocess, cached in `VideoTranscodes` table and `/video-cache/{id}.mp4`. `VideoCacheDir` config key defaults to `/video-cache` (Docker volume mount).
-- Albums, photo_series, series_media, video_transcodes tables already exist via Phase 1 init SQL — all configured with `ExcludeFromMigrations()`.
-- Snapshot updated: corrected `Api.Data.MediaFileRecord` → `Api.Data.MediaFile` (pre-existing stale name), added `RefreshTokenHash` and `RefreshTokenExpiry` properties to AppUser section.
-- `DELETE /api/media/bulk` accepts a JSON body (unconventional but valid HTTP). Client must set `Content-Type: application/json`.
-
-### Deliverables
-
-- JWT auth middleware (15 min expiry) + refresh token (30-day sliding window) via ASP.NET Identity
-  - `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`
-- Media endpoints (all require auth):
-  - `GET /api/media` — paginated, filter by `from`/`to`/`tag`/`favorite`
-  - `GET /api/media/{id}` — detail with metadata + tags
-  - `GET /api/media/{id}/thumbnail` — `X-Accel-Redirect` to nginx `/thumbs/`
-  - `GET /api/media/{id}/original` — stream original as-is
-  - `GET /api/media/{id}/stream` — on-demand HEVC→H.264 transcode via ffmpeg subprocess; caches to `video_transcodes` + disk
-  - `PATCH /api/media/{id}`, `DELETE /api/media/{id}` (soft delete)
-- Search endpoints:
-  - `GET /api/search?q=` — CLIP semantic (calls AI sidecar `/embed/text`, then pgvector `<=>` cosine)
-  - `GET /api/search/tags?tag=` — tag filter
-- Albums CRUD (`/api/albums/*`)
-- Series endpoints (`/api/series/*`)
-- Admin job endpoints (`/api/admin/jobs`, `/api/admin/jobs/{id}`)
-- Review endpoints:
-  - `GET /api/media/review` — items flagged as meme/screenshot/artwork, sorted by confidence desc
-  - `DELETE /api/media/bulk` — `{ ids: [...] }` hard-deletes files from disk and DB
-- SignalR hub `/hubs/library` — `media.added` and `media.deleted` events
-- NGINX updated: `X-Accel-Redirect` internal location for `/thumbs/`; WebSocket upgrade for `/hubs/`
-
----
-
-## Phase 6 — React Frontend ✅ VALIDATED (2026-05-06)
-
-**Goal:** Both users can browse, search, and manage the library from a browser.
-
-### Deliverables
-
-- React + TypeScript (`src/Frontend/`)
-- Vite build; production output served by `nginx:alpine` container
-- Auth: login screen, JWT stored in memory (refresh token in HttpOnly cookie), silent refresh
-- 7 pages wired to the real API: Dashboard (POTD, OTD strip, library stats), Gallery (paginated grid, year/month nav), On This Day, Geo (Leaflet dark map with pins), Search (semantic), Albums, Videos
-- Lightbox with zoom, keyboard shortcuts, Info/Map tab, visible file path row
-- **Review page** (`/review`): paginated grid (50/page, URL-backed) of AI-flagged items, each with "Meme" / "Real Photo" action buttons. Optimistic card removal.
-- Three new API endpoints added: `/api/media/stats`, `/api/media/on-this-day`, `/api/media/geo`
-- Thumbnail, original, and stream endpoints made public (JWT cannot be sent from `<img>`/`<video>` tags; GUID URLs are unguessable on LAN)
-
----
-
-## Phase 7 — Automation & Notifications
-
-**Goal:** Unattended operation: daily Telegram photo, admin alerts on failures.
-
-> **Superseded by Phase 8.** Telegram notifications (Photo of the Day, error alerts) were dropped with the n8n removal. They can be added later as a dead-letter consumer or scheduled BackgroundService in `media-worker`. Phase 8 replaces n8n entirely, so Workflow 3 and Workflow 4 are deleted.
-
-### Original deliverables (not implemented)
-
-- **Workflow 3 — Photo of the Day** — cron `0 15 * * *`; queries favorites / high-confidence tags; sends thumbnail to Telegram
-- **Workflow 4 — Error Handler** — global n8n error workflow; updates `processing_jobs`; sends Telegram admin alert
-
----
-
-## Phase 7.5 — Post-Phase Improvements ✅ COMPLETE (2026-05-31)
-
-**Goal:** Incremental quality improvements after Phase 7 validation.
-
-### Deliverables
-
-- **Lightbox file path**: Replaced hidden `<abbr title>` tooltip with a visible `.lb-filepath` row (monospace, full path, ellipsis truncation, `folder_open` icon). Always visible above the date in the lightbox info bar.
-- **Meme/Review feature**:
-  - `/review` page and nav link: paginated grid (50/page, URL-backed) of AI-flagged items (`screenshot`, `document`, `artwork`, `reference`), each with "Meme" and "Real Photo" action buttons
-  - `GET /api/media/review` — paginated (`page`, `pageSize`), returns `{ items, total }`, sorted by `origin_confidence DESC`
-  - `PATCH /api/media/{id}/review` — `{ action: "meme"|"real" }`: sets `origin_reviewed = true`; "meme" also sets `origin_class = 'meme'`; uses `ExecuteUpdateAsync` (not `SaveChangesAsync`) to bypass the global `NoTracking` context
-  - Gallery (`GET /api/media`), semantic search, and On This Day all exclude `origin_class = 'meme'`
-  - `origin_reviewed BOOLEAN NOT NULL DEFAULT FALSE` column added to `media_files`
-- **OriginClass rework**: AI sidecar expanded from 3 to 6 classes
-  - `photo` — real camera photograph (landscape, object, scene)
-  - `screenshot` — computer or phone screen capture
-  - `document` — printed paper, forms, passports, ID cards, credit cards, driver's licenses
-  - `artwork` — drawings, paintings, illustrations, digital art
-  - `reference` — informational photos: utility meters, signs, notices, labels
-  - `people` — portraits and group shots (NOT flagged for review — normal photos)
-  - `meme` — user-assigned only, never set by AI
-  - Gallery: color-coded origin badge on each card; filter chip row (All · Photo · People · Screenshot · Artwork · Document · Reference · Meme)
-  - Search: origin type dropdown filter
-  - Lightbox: origin class + confidence % shown in info bar
-  - Both `GET /api/media` and `GET /api/search/semantic` accept `?originClass=` query param
-- **Migration squash**: `AddRefreshTokens` migration folded into `CreateIdentitySchema`. Refresh token columns (`refresh_token_hash`, `refresh_token_expiry`) added directly to `AspNetUsers` CREATE TABLE. Single EF migration now. No manual column patching needed on fresh deployments.
-- **Bug fix — ReviewMediaHandler**: `AppDbContext` sets `QueryTrackingBehavior.NoTracking` globally. Original handler loaded entity + `SaveChangesAsync` — UPDATE was silently discarded. Fixed by switching to `ExecuteUpdateAsync`.
-
----
-
-## Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (2026-06-29)
-
-**Goal:** Replace n8n with a RabbitMQ message broker + MassTransit worker pipeline. Server is torn down and rebuilt fresh — no DB migration needed.
-
-**What changes:**
-- `n8n` container removed; `Dockerfile.n8n` and all n8n workflow JSONs deleted
-- New `src/MediaWorker/` .NET Worker Service owns the ingest pipeline
-- New `src/Contracts/` shared message library (records only, no NuGet dependencies)
-- AI Sidecar: FastAPI HTTP server replaced with pika RabbitMQ consumer; `POST /embed/text` kept as a minimal HTTP endpoint for the API
-- GeoService: gains MassTransit `GeoLookupConsumer` alongside existing `GET /reverse` HTTP endpoint
-- API: adds `IPublishEndpoint` (publish-only, no consumers) + `ScanScheduler` IHostedService; removes tool endpoints
-- New Prometheus + Grafana for pipeline observability
-
-### Step 1 — Create `src/Contracts/` shared message library
-
-`dotnet new classlib -n Contracts -o src/Contracts --framework net10.0`
-
-Create `src/Contracts/Messages/` with these records:
-
-| File | Record |
-|------|--------|
-| `ScanRequested.cs` | `(Path, Source, TriggeredBy, RequestedAt)` |
-| `FileDiscovered.cs` | `(FilePath, Source, DiscoveredAt)` |
-| `MediaReadyForEnrichment.cs` | `(MediaFileId, FilePath, WorkFilePath?, FileHash, Source, MimeType, FileSize, Width, Height, DurationSec?, TakenAt?, Lat?, Lon?, CameraMake?, CameraModel?, ThumbnailPath)` |
-| `AiAnalysisRequested.cs` | `(CorrelationId, FilePath)` |
-| `AiAnalysisCompleted.cs` | `(CorrelationId, Tags[], Embedding[], OriginClass, OriginConfidence)` + `AiTag(Tag, Confidence, Model)` |
-| `GeoLookupRequested.cs` | `(CorrelationId, Lat, Lon)` |
-| `GeoLookupCompleted.cs` | `(CorrelationId, Address?)` |
-| `MediaSaveRequested.cs` | `(MediaFileId, FilePath, FileHash, Source, MimeType, FileSize, Width, Height, DurationSec?, TakenAt?, Lat?, Lon?, Address?, CameraMake?, CameraModel?, ThumbnailPath, Tags[], Embedding[], OriginClass, OriginConfidence)` |
-| `MediaProcessingFailed.cs` | `(FilePath, Stage, ErrorMessage, OccurredAt)` |
-
-`CorrelationId` = `MediaFileId` throughout.
-
-### Step 2 — Create `src/MediaWorker/` (.NET Worker Service)
-
-`dotnet new worker -n MediaWorker -o src/MediaWorker --framework net10.0`
-
-**NuGet packages:**
-```
-MassTransit, MassTransit.RabbitMQ, MassTransit.EntityFrameworkCore
-Npgsql.EntityFrameworkCore.PostgreSQL, pgvector.EntityFrameworkCore
-EFCore.NamingConventions, SixLabors.ImageSharp, prometheus-net
-```
-
-**Service classes** (ported from `src/Api/Features/Tools/`):
-
-| From | To |
-|------|-----|
-| `Hash/HashFileHandler.cs` | `Services/FileHashService.cs` |
-| `Convert/ConvertFileHandler.cs` | `Services/FileConvertService.cs` |
-| `Metadata/ExtractMetadataHandler.cs` | `Services/MetadataService.cs` |
-| `Thumbnail/GenerateThumbnailHandler.cs` | `Services/ThumbnailService.cs` |
-| `Scan/ScanDirectoryHandler.cs` | `Services/ScanService.cs` |
-| `Dedup/DedupHandler.cs` | `Services/DedupService.cs` |
-
-Remove MediatR, change namespace. Each becomes a plain `public class XxxService` with constructor-injected `WorkerDbContext` and `ILogger`.
-
-**`WorkerDbContext`** — same entities as `AppDbContext` but without Identity tables. Shares `homemediahub_db`. Adds `ProcessingState` saga entity. EF migration creates `media_processing_sagas` table. `Program.cs` calls `db.Database.MigrateAsync()` on startup.
-
-**Consumers:**
-- `ScanConsumer` — consumes `ScanRequested`, calls `ScanService.FindUnprocessedAsync`, publishes `FileDiscovered` per file
-- `IngestConsumer` — consumes `FileDiscovered`, runs hash → dedup → convert → metadata → thumbnail → publishes `MediaReadyForEnrichment` (`prefetch_count = 4`)
-- `MediaSaveConsumer` — consumes `MediaSaveRequested`, EF Core inserts into `homemediahub_db`, writes `processing_jobs` row with `status = 'completed'`
-- `DeadLetterConsumer` — consumes dead-letter queue, writes `processing_jobs` row with `status = 'failed'`
-
-**`ProcessingStateMachine`** (MassTransitStateMachine):
-- States: `Initial` → `Enriching` → Finalized (row removed via `SetCompletedWhenFinalized()`)
-- In `Initially`: store enrichment fields, set `GeoCompleted = true` if no GPS, publish `AiAnalysisRequested`, conditionally publish `GeoLookupRequested`, transition to `Enriching`
-- In `Enriching` on `AiAnalysisCompleted`: store AI fields; if `GeoCompleted` → publish `MediaSaveRequested` + Finalize
-- In `Enriching` on `GeoLookupCompleted`: store address; if `AiCompleted` → publish `MediaSaveRequested` + Finalize
-- Tags and embedding stored as JSON strings (`TagsJson`, `EmbeddingJson`) in saga state
-
-**`ProcessingState` fields:** `CorrelationId`, `CurrentState`, `RowVersion`, all enrichment request fields, `AiCompleted`, `OriginClass`, `OriginConfidence`, `TagsJson`, `EmbeddingJson`, `GeoCompleted`, `Address`
-
-**Dockerfile:** SDK + publish → `aspnet:10.0` runtime + `apt-get install libheif-tools libde265-0 perl-image-exiftool ffmpeg`
-
-### Step 3 — Modify `src/Api/`
-
-**Add:**
-- NuGet: `MassTransit`, `MassTransit.RabbitMQ`, `prometheus-net.AspNetCore`
-- `<ProjectReference>` to `Contracts.csproj`
-- MassTransit registration (publish-only, no consumers) in `Program.cs`
-- `app.UseHttpMetrics()` + `app.MapMetrics("/metrics")`
-- `POST /api/admin/scan` endpoint → publishes `ScanRequested`
-- `src/Api/Services/ScanScheduler.cs` (BackgroundService, monthly cron `0 2 1 * *`)
-
-**Remove:**
-- `src/Api/Features/Tools/` — entire folder
-- `src/Api/Endpoints/ToolEndpoints.cs` + its registration in `Program.cs`
-- `POST /api/media` save endpoint + `SaveMedia` feature folder (saving is now done by `MediaSaveConsumer`)
-
-**Keep unchanged:** all frontend-facing endpoints, JWT auth, EF Core query handlers, SignalR
-
-### Step 4 — Modify `src/GeoService/`
-
-**Add:**
-- NuGet: `MassTransit`, `MassTransit.RabbitMQ`, `prometheus-net.AspNetCore`
-- `<ProjectReference>` to `Contracts.csproj`
-- `GeoLookupConsumer : IConsumer<GeoLookupRequested>` — calls existing `ReverseGeocodeHandler` → publishes `GeoLookupCompleted`
-- MassTransit registration + `app.MapMetrics("/metrics")` in `Program.cs`
-
-**Keep unchanged:** `GET /reverse`, `GET /health`, all existing geocoding logic
-
-### Step 5 — Modify `src/AiSidecar/`
-
-**Replace `main.py` with `worker.py`:**
-- Load models once at startup (same code as existing lifespan)
-- pika consumer loop on `ai-analysis-requested` queue (`prefetch_count=1`, durable)
-- On each message: run inference → publish JSON to `ai-analysis-completed`
-- `POST /embed/text` kept as minimal HTTP handler on port 8000 (daemon thread); `GET /health` on same thread
-- Prometheus metrics server on port 8001 (`start_http_server(8001)`)
-
-**`requirements.txt`:** add `pika`, `prometheus-client`; remove `fastapi`, `uvicorn`
-
-**`Dockerfile`:** change CMD from `uvicorn main:app ...` to `python worker.py`
-
-### Step 6 — Update `docker-compose.yml`
-
-**Remove:** `n8n` service block, n8n volume, `n8n` from nginx `depends_on`
-
-**Add services:** `rabbitmq`, `media-worker`, `prometheus`, `grafana`
-
-**Update services:**
-- `api` — add RabbitMQ env vars, add `depends_on: rabbitmq`
-- `geoservice` — add RabbitMQ env vars, add `depends_on: rabbitmq`
-- `ai-sidecar` — add `RABBITMQ_URL` env var, add `depends_on: rabbitmq`
-
-**Add volumes:** `rabbitmq_data`, `prometheus_data`, `grafana_data`
-
-### Step 7 — Create `infra/` config files
-
-**`infra/rabbitmq/enabled_plugins`:**
-```
-[rabbitmq_management,rabbitmq_prometheus].
-```
-
-**`infra/prometheus/prometheus.yml`:**
-```yaml
-global:
-  scrape_interval: 15s
-scrape_configs:
-  - { job_name: api,          static_configs: [{targets: ['api:8080']}],          metrics_path: /metrics }
-  - { job_name: media-worker, static_configs: [{targets: ['media-worker:9090']}],  metrics_path: /metrics }
-  - { job_name: geoservice,   static_configs: [{targets: ['geoservice:8001']}],    metrics_path: /metrics }
-  - { job_name: ai-sidecar,   static_configs: [{targets: ['ai-sidecar:8001']}],    metrics_path: /metrics }
-  - { job_name: rabbitmq,     static_configs: [{targets: ['rabbitmq:15692']}],     metrics_path: /metrics }
-```
-
-**`infra/grafana/provisioning/datasources/prometheus.yml`** — Prometheus data source pointing to `http://prometheus:9090`
-
-**`infra/grafana/provisioning/dashboards/dashboards.yml`** — file provider
-
-**Dashboard JSON files to commit:**
-- `masstransit.json` — Grafana dashboard ID 15467
-- `rabbitmq.json` — Grafana dashboard ID 10991
-- `pipeline.json` — custom (files/hour, queue depths, AI P95, dead-letter count)
-
-### Step 8 — Update env example files
-
-**Add to `.env.stage.example` and `.env.prod.example`:**
-```bash
-RABBITMQ_USER=hmh
-RABBITMQ_PASS=
-GRAFANA_PASSWORD=
-```
-
-**Remove:** `SERVER_IP` (was only used by n8n `WEBHOOK_URL`)
-
-### Step 9 — Delete deprecated files
-
-```
-Dockerfile.n8n
-infra/n8n/w1-process-single-file.json
-infra/n8n/w2-library-scanner.json
-infra/n8n/w4-error-handler.json
-infra/n8n/             (directory)
-```
-
-### Verification checklist
+Fresh rebuild: `docker compose --env-file .env.stage down` → wipe `/opt/homemediahub/stage/data/`
+→ update `.env.stage` (add `RABBITMQ_*`, `GRAFANA_PASSWORD`; drop `SERVER_IP`) → `build` → `up -d`.
 
 | # | Check | Expected |
-|---|-------|----------|
-| 1 | `docker compose --env-file .env.stage up -d` | All services start without errors |
-| 2 | `http://192.168.0.192:15672` (RabbitMQ mgmt) | Exchanges and queues declared by MassTransit on startup |
-| 3 | `POST /api/admin/scan` with JWT | HTTP 202; `ScanRequested` message visible in RabbitMQ mgmt UI |
-| 4 | `docker compose logs -f media-worker` | `FileDiscovered` consumed; `MediaReadyForEnrichment` published per file |
-| 5 | RabbitMQ mgmt → `ai-analysis-requested` queue | Messages consumed by AI sidecar; `ai-analysis-completed` fills |
-| 6 | RabbitMQ mgmt → `geo-lookup-requested` queue | Messages consumed by GeoService |
-| 7 | `GET /api/media` | New records appear with tags, embeddings, and address populated |
-| 8 | `http://192.168.0.192:9090` → Status → Targets | All 5 targets green (UP) |
-| 9 | `http://192.168.0.192:3001` (Grafana) | MassTransit dashboard shows message rates; RabbitMQ dashboard shows queue depths |
-| 10 | Corrupt a test file → trigger scan | File lands in dead-letter queue in RabbitMQ UI; `processing_jobs` row with `status = 'failed'` |
-| 11 | `dotnet test` | Existing unit tests pass (API query handlers are unchanged) |
+|---|---|---|
+| 1 | `docker compose ps` | all services healthy; RabbitMQ mgmt `:15672` shows the queues from architecture.md §4 |
+| 2 | `POST /api/admin/scan` (JWT) | 202 + scanId; jobs move `queued → processing → enriching` |
+| 3 | Gallery during scan | **photos appear before enrichment finishes** (save-early acceptance); tags/address/origin badges fill in afterwards |
+| 4 | `/admin` page | live counts, progress, throughput |
+| 5 | Corrupt test file | `AiAnalysisCompleted success:false` → job `failed/ai`; media row still in gallery; Retry works after fixing the file |
+| 6 | Duplicate file copy | `skipped_duplicate`; re-scan mid-flight creates no duplicate rows |
+| 7 | Semantic search | works end-to-end (`/embed/text` still up) |
+| 8 | HEIC display + video stream endpoints | unchanged (API-side conversion untouched); `/shared-temp` empties for succeeded items |
+| 9 | Prometheus `:9090` targets | all 5 UP; Grafana pipeline dashboard live |
+| 10 | `dotnet test` + `pytest` | green |
+
+Then prod: fresh rebuild with `.env.prod`, trigger full archive scan (Phase 9). Expect
+**multi-day** AI enrichment (CPU-bound, ~2–5 s/image × ~190K files); watch queue depth in
+Grafana — that is the backpressure working as designed.
+
+## Open risks (accepted)
+
+- **Stuck sagas** — no scheduler timeout (needs delayed-message-exchange plugin). Mitigated by
+  the always-publish AI contract + Admin stale surfacing; add saga `Schedule` later if it bites.
+- **MassTransit 8.x on net10** — targets net8; forward-compat expected, verify at first restore.
+  OTel Prometheus exporters are pre-release — pin exact versions.
+- **ivfflat recall** — index created on an empty table; recreate once after the Phase 9 archive load.
+- **190K-message scan burst** — fine for RabbitMQ; ScanConsumer batches job inserts (~1000/SaveChanges).
+- **pika heartbeat** on a pathological multi-minute image — reconnect loop + redelivery covers
+  it; redelivery count isn't tracked (visible in Grafana if it loops).
+- **Immich writing mid-scan** — partial file may hash oddly; unchanged from today, retry now exists.
+- **Two migrators, one DB** — separate history tables; media tables change **only** via Api migrations.
 
 ---
 
 ## Phase 9 — Archive Import
 
-**Goal:** All ~20 years of existing photos catalogued in the database.
+**Goal:** all ~20 years of photos (~190K files, 750 GB) catalogued.
 
-> Previously Phase 8. Moved here because Phase 8 is now the RabbitMQ migration.
-
-### Deliverables
-
-- Run `POST /api/admin/scan` against prod environment (full `/mnt/storage/Photo` tree)
-- Monitor `processing_jobs` table and RabbitMQ dead-letter queues for failures
-- Verify row counts: `SELECT COUNT(*) FROM media_files` ≈ known archive size
-- Confirm semantic search, On This Day, and geo map draw from historical photos
-
-### Notes
-
-- This is a one-time operational step, not a code deliverable
-- Estimated duration: ~50–100 ms/file on i7-6700; 189K files ≈ 5–10 hours (AI is the bottleneck)
-- Scan is idempotent — `IngestConsumer` skips files already in `media_files` via dedup hash check
-- Monitor with Grafana pipeline dashboard (files/hour, queue depths, dead-letter count)
-- If the run is interrupted, simply trigger another scan; only unindexed files will be picked up
-
----
-
-## Dependency Graph
-
-```
-Phase 1 (infra skeleton)
-    └── Phase 2 (.NET tool endpoints + GeoService)
-            └── Phase 3 (n8n pipeline — historical)
-                    └── Phase 4 (AI sidecar)
-                            └── Phase 5 (frontend API + auth)
-                                    └── Phase 6 (React frontend)
-                                            └── Phase 7.5 (post-phase improvements)
-                                                    └── Phase 8 (RabbitMQ + MassTransit migration)
-                                                            └── Phase 9 (archive import)
-
-Note: Phase 7 (Telegram notifications) was superseded by Phase 8.
-      It can be added after Phase 8 as a dead-letter consumer or scheduled BackgroundService.
-```
-
----
-
-## What is NOT in scope
-
-- Face / people recognition
-- Remote access (LAN only)
-- Web browser file upload
-- RAW camera files (CR2, ARW, NEF)
-- Per-user library separation
-- TLS / HTTPS (NGINX is `http`-only for now; add certs later)
-- Telegram notifications (dropped with n8n; can be added as a dead-letter consumer post-Phase 8)
-- Photo of the Day Telegram post (dropped with n8n; can be added as a scheduled BackgroundService)
+Trigger a prod scan after Phase 8 verification. Ingest (hash/convert/thumbnail/save) is
+I/O-bound and finishes in hours; AI enrichment is CPU-bound and takes **days** — the library is
+browsable throughout. Afterwards: recreate the ivfflat index, review the `failed` jobs list,
+spot-check geo addresses and semantic search quality.
