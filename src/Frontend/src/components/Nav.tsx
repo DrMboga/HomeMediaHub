@@ -1,6 +1,17 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
+const LINKS: [string, string, boolean?][] = [
+  ['/', 'Home', true],
+  ['/on-this-day', 'On This Day'],
+  ['/gallery', 'Gallery'],
+  ['/geo', 'Geo'],
+  ['/search', 'Search'],
+  ['/albums', 'Albums'],
+  ['/videos', 'Videos'],
+  ['/review', 'Review'],
+]
+
 export function Nav() {
   const { username, logout } = useAuth()
   const navigate = useNavigate()
@@ -14,36 +25,22 @@ export function Nav() {
     <nav className="nav">
       <NavLink to="/" className="nav-brand">HomeMediaHub</NavLink>
       <div className="nav-links">
-        <NavLink to="/"        end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">home</span>Home
-        </NavLink>
-        <NavLink to="/on-this-day" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">today</span>On This Day
-        </NavLink>
-        <NavLink to="/gallery" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">photo_library</span>Gallery
-        </NavLink>
-        <NavLink to="/geo"     className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">map</span>Geo
-        </NavLink>
-        <NavLink to="/search"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">search</span>Search
-        </NavLink>
-        <NavLink to="/albums"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">collections</span>Albums
-        </NavLink>
-        <NavLink to="/videos"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">videocam</span>Videos
-        </NavLink>
-        <NavLink to="/review"  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-          <span className="mi">rate_review</span>Review
-        </NavLink>
+        {LINKS.map(([to, label, end]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+          >
+            {label}
+          </NavLink>
+        ))}
       </div>
       <div className="nav-user">
-        <div className="nav-avatar" onClick={handleLogout} title="Logout">
+        <div className="nav-avatar" onClick={handleLogout} title="Log out">
           {username?.[0]?.toUpperCase() ?? 'M'}
         </div>
-        {username}
+        <span className="nav-username">{username}</span>
       </div>
     </nav>
   )

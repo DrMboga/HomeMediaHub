@@ -1,3 +1,4 @@
+import { Play } from 'lucide-react'
 import type { MediaListItem } from '../types/api'
 import { thumbnailUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
@@ -11,7 +12,15 @@ function formatDuration(sec: number): string {
 function formatCardDate(takenAt: string | null): string {
   if (!takenAt) return ''
   const d = new Date(takenAt)
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const datePart = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  // Midnight UTC exactly means the time came from a path-year fallback, not real
+  // EXIF — don't show a misleading 00:00 (mirrors the Lightbox rule).
+  const isMidnightUtc = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
+  if (isMidnightUtc) return datePart
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${datePart} · ${hh}:${mm}`
 }
 
 interface Props {
@@ -29,7 +38,7 @@ export function PhotoCard({ item, className = 'gallery-card', durationSec }: Pro
       <div className="photo-card-grad" />
       {(item.isVideo || durationSec != null) && (
         <div className="video-badge">
-          <span className="mi">play_arrow</span>
+          <Play fill="currentColor" strokeWidth={0} />
           {durationSec != null ? formatDuration(durationSec) : ''}
         </div>
       )}

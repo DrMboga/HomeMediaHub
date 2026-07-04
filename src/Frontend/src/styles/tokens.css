@@ -1,0 +1,65 @@
+/* Darkroom Archive — design tokens. Source of truth; see DESIGN.md. */
+
+:root {
+  /* ── Surfaces ─────────────────────────── */
+  --bg:         #0c0a08;   /* page — warm darkroom black */
+  --surface:    #171210;   /* nav, cards, panels, lightbox chrome */
+  --surface-2:  #1a1512;   /* selected / raised surfaces */
+  --surface-3:  #221b16;   /* input, chip hover */
+
+  /* ── Ink (warm ivory + opacity steps) ─── */
+  --ink:        #ece4d4;
+  --ink-70:     rgba(236, 228, 212, 0.70);
+  --ink-55:     rgba(236, 228, 212, 0.55);
+  --ink-45:     rgba(236, 228, 212, 0.45);
+  --ink-42:     rgba(236, 228, 212, 0.42);
+  --ink-30:     rgba(236, 228, 212, 0.30);
+  --ink-28:     rgba(236, 228, 212, 0.28);
+
+  /* ── Accent (the safelight — action only) ─ */
+  --accent:     #D98E2B;
+  --accent-soft: rgba(217, 142, 43, 0.10);
+
+  /* ── Danger (muted brick) ─────────────── */
+  --danger:     #d9736a;
+  --danger-soft: rgba(217, 115, 106, 0.10);
+
+  /* ── Hairlines ────────────────────────── */
+  --line:       rgba(236, 228, 212, 0.10);
+  --line-08:    rgba(236, 228, 212, 0.08);
+  --line-18:    rgba(236, 228, 212, 0.18);
+
+  /* ── Type ─────────────────────────────── */
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-body:    'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono:    'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* mono eyebrow/data helper — dim, wide-tracked caps */
+  --track-eyebrow: 0.22em;
+  --track-data:    0.12em;
+
+  /* ── Legacy aliases (unmigrated pages read these; */
+  /*    remap onto the darkroom palette for instant coherence) */
+  --s1:     var(--surface);
+  --s2:     var(--surface-2);
+  --s3:     var(--surface-3);
+  --s4:     #2a2119;
+  --label:  var(--ink);
+  --label2: var(--ink-55);
+  --label3: var(--ink-42);
+  --primary: var(--accent);
+  --sep:    var(--line);
+  --border: var(--line-18);
+  --shd:    none;
+  --r:      2px;
+  --rsm:    2px;
+}
+
+/* Grid tiles settle in on load; quiet, and off for reduced-motion. */
+@keyframes settle {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}

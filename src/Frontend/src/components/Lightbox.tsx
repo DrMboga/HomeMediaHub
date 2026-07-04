@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { X, Minus, Plus, Crosshair, Trash2, Check } from 'lucide-react'
 import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 
@@ -111,6 +112,7 @@ export function Lightbox() {
   const isVideo = detail?.durationSec != null
   const imgSrc = imgFailed ? thumbnailUrl(mediaId) : displayUrl(mediaId)
   const camera = [detail?.cameraMake, detail?.cameraModel].filter(Boolean).join(' ')
+  const dims = detail?.width && detail?.height ? `${detail.width}×${detail.height}` : ''
   const hasGps = !!(detail?.latitude && detail?.longitude)
 
   return ReactDOM.createPortal(
@@ -134,7 +136,7 @@ export function Lightbox() {
                 <CircleMarker
                   center={[detail!.latitude!, detail!.longitude!]}
                   radius={10}
-                  pathOptions={{ fillColor: '#90caf9', color: 'rgba(144,202,249,.3)', weight: 8, fillOpacity: 1 }}
+                  pathOptions={{ fillColor: '#D98E2B', color: 'rgba(217,142,43,.3)', weight: 8, fillOpacity: 1 }}
                 />
                 <Resizer />
               </MapContainer>
@@ -157,110 +159,68 @@ export function Lightbox() {
             />
           )}
 
-          <button className="lb-close" onClick={close}>
-            <span className="mi">close</span>
+          <button className="lb-close" onClick={close} aria-label="Close">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Info bar */}
+        {/* Info bar — contact-sheet edge markings */}
         <div className="lb-info">
-          <div className="lb-meta-col">
-            {detail?.filePath && (
-              <span className="lb-filepath" title={detail.filePath}>
-                <span className="mi">folder_open</span>
-                {detail.filePath}
-              </span>
-            )}
+          <div className="lb-info-row">
             <div className="lb-meta">
               <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
-              {camera && (
-                <>
-                  <span className="lb-sep">·</span>
-                  <span className="lb-meta-item">
-                    <span className="mi">photo_camera</span>{camera}
-                  </span>
-                </>
-              )}
-              {detail?.address && (
-                <>
-                  <span className="lb-sep">·</span>
-                  <span className="lb-meta-item">
-                    <span className="mi">location_on</span>{detail.address}
-                  </span>
-                </>
-              )}
-              {detail?.originClass && detail.originClass !== 'photo' && (
-                <>
-                  <span className="lb-sep">·</span>
-                  <span className="lb-meta-item">
-                    <span className="mi">category</span>
-                    {detail.originClass}
-                    {detail.originConfidence != null && (
-                      <span className="lb-meta-conf">
-                        {Math.round(detail.originConfidence * 100)}%
-                      </span>
-                    )}
-                  </span>
-                </>
-              )}
+              {camera && (<><span className="lb-dot">·</span><span>{camera}</span></>)}
+              {dims && (<><span className="lb-dot">·</span><span>{dims}</span></>)}
+              {detail?.address && (<><span className="lb-dot">·</span><span className="lb-place">{detail.address}</span></>)}
             </div>
 
-            {detail?.tags && detail.tags.length > 0 && (
-              <div className="lb-tags">
-                {detail.tags.map(t => (
-                  <span key={t.tag} className="lb-tag">{t.tag}</span>
-                ))}
+            <div className="lb-controls">
+              {!isVideo && (
+                <div className="lb-zoom">
+                  <button className="lb-icon-btn" onClick={() => setZoom(z => Math.max(0.5, z - 0.15))} aria-label="Zoom out"><Minus size={13} /></button>
+                  <span className="lb-zoom-pct">{Math.round(zoom * 100)}%</span>
+                  <button className="lb-icon-btn" onClick={() => setZoom(z => Math.min(4, z + 0.15))} aria-label="Zoom in"><Plus size={13} /></button>
+                  <button className="lb-icon-btn" onClick={() => setZoom(1)} title="Reset zoom"><Crosshair size={13} /></button>
+                </div>
+              )}
+
+              <div className="lb-tabs">
+                <button
+                  className={`lb-tab-btn${tab === 'info' ? ' active' : ''}`}
+                  onClick={() => setTab('info')}
+                >INFO</button>
+                {hasGps && (
+                  <button
+                    className={`lb-tab-btn${tab === 'map' ? ' active' : ''}`}
+                    onClick={() => setTab('map')}
+                  >MAP</button>
+                )}
               </div>
-            )}
+
+              {deleteConfirm ? (
+                <div className="lb-del-row">
+                  <span className="lb-del-prompt">Delete?</span>
+                  <button className="lb-icon-btn lb-del-confirm" onClick={() => doDelete()} title="Confirm delete"><Check size={14} /></button>
+                  <button className="lb-icon-btn" onClick={() => setDeleteConfirm(false)} title="Cancel"><X size={14} /></button>
+                </div>
+              ) : (
+                <button className="lb-icon-btn lb-del-btn" onClick={() => setDeleteConfirm(true)} title="Delete (soft)"><Trash2 size={14} /></button>
+              )}
+            </div>
           </div>
 
-          <div className="lb-right">
-            {deleteConfirm ? (
-              <>
-                <span className="lb-del-prompt">Delete this photo?</span>
-                <button className="ib lb-del-confirm" onClick={() => doDelete()} title="Confirm delete">
-                  <span className="mi">delete_forever</span>
-                </button>
-                <button className="ib" onClick={() => setDeleteConfirm(false)} title="Cancel">
-                  <span className="mi">close</span>
-                </button>
-                <div style={{ width: 8 }} />
-              </>
-            ) : (
-              <>
-                <button className="ib" onClick={() => setDeleteConfirm(true)} title="Delete (soft)">
-                  <span className="mi">delete_outline</span>
-                </button>
-                <div style={{ width: 8 }} />
-              </>
+          <div className="lb-info-row lb-info-sub">
+            {detail?.filePath && (
+              <span className="lb-filepath" title={detail.filePath}>{detail.filePath}</span>
             )}
-            {!isVideo && (
-              <>
-                <button className="ib" onClick={() => setZoom(z => Math.max(0.5, z - 0.15))}>
-                  <span className="mi">remove</span>
-                </button>
-                <span className="lb-zoom-pct">{Math.round(zoom * 100)}%</span>
-                <button className="ib" onClick={() => setZoom(z => Math.min(4, z + 0.15))}>
-                  <span className="mi">add</span>
-                </button>
-                <button className="ib" onClick={() => setZoom(1)} title="Reset zoom">
-                  <span className="mi">center_focus_weak</span>
-                </button>
-                <div style={{ width: 8 }} />
-              </>
+            {detail?.originClass && detail.originClass !== 'photo' && (
+              <><span className="lb-dot">·</span><span className="lb-origin">{detail.originClass}
+                {detail.originConfidence != null && ` (${detail.originConfidence.toFixed(2)})`}
+              </span></>
             )}
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                className={`lb-tab-btn${tab === 'info' ? ' active' : ''}`}
-                onClick={() => setTab('info')}
-              >Info</button>
-              {hasGps && (
-                <button
-                  className={`lb-tab-btn${tab === 'map' ? ' active' : ''}`}
-                  onClick={() => setTab('map')}
-                >Map</button>
-              )}
-            </div>
+            {detail?.tags && detail.tags.length > 0 && (
+              <><span className="lb-dot">·</span><span className="lb-taglist">{detail.tags.map(t => t.tag).join(' · ')}</span></>
+            )}
           </div>
         </div>
 

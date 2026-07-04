@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, Images } from 'lucide-react'
 import { getMediaList } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
 
@@ -86,23 +87,30 @@ export function GalleryPage() {
 
   return (
     <div className="page">
-      <div className="gallery-nav">
-        <span className="gallery-title">Gallery</span>
-
-        {!isUndated && (
-          <div className="breadcrumb">
-            <button className="bc-arrow" onClick={() => shiftMonth(-1)}>
-              <span className="mi">chevron_left</span>
-            </button>
-            <span className="bc-month">{MONTHS[month - 1]} {year}</span>
-            <button className="bc-arrow" onClick={() => shiftMonth(1)}>
-              <span className="mi">chevron_right</span>
-            </button>
+      <div className="gallery-head">
+        <div className="gallery-head-left">
+          <div className="eyebrow">
+            {data
+              ? `${data.total.toLocaleString()} ${data.total === 1 ? 'item' : 'items'}`
+              : 'Gallery'}
           </div>
-        )}
+          {isUndated ? (
+            <span className="bc-month">Undated</span>
+          ) : (
+            <div className="month-stepper">
+              <button className="bc-arrow" onClick={() => shiftMonth(-1)} aria-label="Previous month">
+                <ChevronLeft size={18} />
+              </button>
+              <span className="bc-month">{MONTHS[month - 1]} {year}</span>
+              <button className="bc-arrow" onClick={() => shiftMonth(1)} aria-label="Next month">
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          )}
+        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-          <span style={{ fontSize: 11, color: 'var(--label3)' }}>Year:</span>
+        <label className="year-pill-wrap" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="eyebrow" style={{ letterSpacing: '.14em' }}>Year</span>
           <select
             className="year-select"
             value={year}
@@ -111,7 +119,7 @@ export function GalleryPage() {
             {years.map(y => <option key={y} value={y}>{y}</option>)}
             <option value={UNDATED}>Undated</option>
           </select>
-        </div>
+        </label>
       </div>
 
       <div className="origin-filter-row">
@@ -130,7 +138,7 @@ export function GalleryPage() {
 
       {!isFetching && data && data.items.length === 0 && (
         <div className="empty-state">
-          <span className="mi">photo_library</span>
+          <Images size={40} strokeWidth={1.4} />
           <span>{isUndated ? 'No undated photos' : `No photos in ${MONTHS[month - 1]} ${year}`}</span>
         </div>
       )}
@@ -149,7 +157,7 @@ export function GalleryPage() {
               disabled={page === 1}
               onClick={() => setParams({ page: page - 1 })}
             >
-              <span className="mi" style={{ fontSize: 16 }}>chevron_left</span>Previous
+              <ChevronLeft size={14} />Previous
             </button>
             <span className="pager-info">
               Page {page} of {totalPages} · {data.total} photos
@@ -159,7 +167,7 @@ export function GalleryPage() {
               disabled={page >= totalPages}
               onClick={() => setParams({ page: page + 1 })}
             >
-              Next<span className="mi" style={{ fontSize: 16 }}>chevron_right</span>
+              Next<ChevronRight size={14} />
             </button>
           </div>
         </>
