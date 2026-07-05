@@ -186,7 +186,14 @@ present, `has-pending-model-changes` clean.
 6. `src/Api/Dockerfile`: fix the duplicated trailing `COPY`/`ENTRYPOINT` (lines 28-29); add
    `curl` for the compose healthcheck; adapt COPY paths to the `./src` build context
    (Contracts/, Data/, Api/).
-7. New Api.Tests: pipeline-status counts; retry publishes `FileDiscovered(Reprocess:true)`
+7. **Semantic search accuracy** (`Features/Search/SemanticSearch/SemanticSearchHandler.cs`):
+   select cosine distance alongside ids and drop results above a configurable threshold
+   `Search:MaxCosineDistance` (env-overridable; start ~0.8 — CLIP ViT-B/32 text↔image
+   similarity ≳0.2 ≈ distance ≲0.8, tune empirically on stage; too strict hides results).
+   Remove the `TakenAt` re-sort — return results in relevance (ascending-distance) order;
+   frontend needs no change (renders API order). Apply prompt template `"a photo of {query}"`
+   before calling `/embed/text` (in the handler, not the sidecar — keeps `/embed/text` generic).
+8. New Api.Tests: pipeline-status counts; retry publishes `FileDiscovered(Reprocess:true)`
    (NSubstitute `IPublishEndpoint`).
 
 **Verify:** `dotnet test`; Api runs locally with RabbitMQ absent only if MassTransit host is
@@ -293,7 +300,7 @@ Fresh rebuild: `docker compose --env-file .env.stage down` → wipe `/opt/homeme
 | 4 | `/admin` page | live counts, progress, throughput |
 | 5 | Corrupt test file | `AiAnalysisCompleted success:false` → job `failed/ai`; media row still in gallery; Retry works after fixing the file |
 | 6 | Duplicate file copy | `skipped_duplicate`; re-scan mid-flight creates no duplicate rows |
-| 7 | Semantic search | works end-to-end (`/embed/text` still up) |
+| 7 | Semantic search | works end-to-end (`/embed/text` still up); result count varies with query (not always `Limit`); obviously-relevant photos rank first |
 | 8 | HEIC display + video stream endpoints | unchanged (API-side conversion untouched); `/shared-temp` empties for succeeded items |
 | 9 | Prometheus `:9090` targets | all 5 UP; Grafana pipeline dashboard live |
 | 10 | `dotnet test` + `pytest` | green |
@@ -324,4 +331,5 @@ Grafana — that is the backpressure working as designed.
 Trigger a prod scan after Phase 8 verification. Ingest (hash/convert/thumbnail/save) is
 I/O-bound and finishes in hours; AI enrichment is CPU-bound and takes **days** — the library is
 browsable throughout. Afterwards: recreate the ivfflat index, review the `failed` jobs list,
-spot-check geo addresses and semantic search quality.
+spot-check geo addresses and semantic search quality; tune `Search:MaxCosineDistance` against
+the full library.
