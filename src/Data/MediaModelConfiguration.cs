@@ -27,6 +27,12 @@ public static class MediaModelConfiguration
         {
             e.ToTable("media_files", schema: "public", Table<MediaFile>());
             e.HasKey(x => x.Id);
+            e.HasIndex(x => x.FilePath).IsUnique();
+            e.HasIndex(x => x.FileHash).IsUnique();
+            // Gallery lists photos newest-first; the composite backs the default
+            // "not deleted, by date desc" query, the single index the unfiltered date sort.
+            e.HasIndex(x => x.TakenAt).IsDescending();
+            e.HasIndex(x => new { x.IsDeleted, x.TakenAt }).IsDescending(false, true);
             e.HasOne(f => f.Metadata)
              .WithOne()
              .HasForeignKey<MediaMetadata>(m => m.MediaFileId);
@@ -45,6 +51,7 @@ public static class MediaModelConfiguration
         {
             e.ToTable("media_metadata", schema: "public", Table<MediaMetadata>());
             e.HasKey(x => x.MediaFileId);
+            e.HasIndex(x => new { x.Latitude, x.Longitude });  // geo map bounding-box queries
         });
 
         builder.Entity<MediaThumbnail>(e =>
@@ -57,6 +64,7 @@ public static class MediaModelConfiguration
         {
             e.ToTable("media_tags", schema: "public", Table<MediaTag>());
             e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Tag);  // tag search
         });
 
         builder.Entity<MediaEmbedding>(e =>
@@ -71,6 +79,9 @@ public static class MediaModelConfiguration
         {
             e.ToTable("processing_jobs", schema: "public", Table<ProcessingJob>());
             e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => new { x.ScanId, x.Status });
+            e.HasIndex(x => x.StartedAt).IsDescending();  // admin jobs list, newest-first
             e.Property(x => x.StartedAt).HasDefaultValueSql("NOW()");
             e.Property(x => x.RetryCount).HasDefaultValue(0);
         });

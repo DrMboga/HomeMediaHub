@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Step 1 complete** (2026-07-05).
+**Phase 8 in progress — Steps 1–2 complete** (2026-07-05).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -21,21 +21,26 @@ applied later as enrichment updates via a saga). The server will be torn down an
 
 **What exists in the repo today (pre-migration):** n8n workflows (`infra/n8n/`,
 `Dockerfile.n8n`) calling unauthenticated `/api/tools/*` endpoints in the API; AI sidecar as a
-FastAPI HTTP service; media schema created by raw init SQL (`infra/postgres/init/`). All of
-this is **removed/replaced** during Phase 8 — do not extend it.
+FastAPI HTTP service. Both are **removed/replaced** during Phase 8 — do not extend them.
 
 **Done in Phase 8 so far:**
 - **Step 1** — `src/Contracts` (10 message records, zero deps) and `src/Data` (entity POCOs +
   the single `MediaModelConfiguration.ConfigureMediaEntities` fluent mapping) shared libs.
   Entities moved from `Api/Data/` to `Data/Entities/` (namespace `Data.Entities`);
   `ProcessingJob` reworked (dropped `N8nExecutionId`, added `ScanId`/`MediaFileId`);
-  `MediaFile.CreatedAt` mapped. `AppDbContext` still passes `excludeFromMigrations: true`
-  (flips in Step 2). `JobDto.n8nExecutionId` is temporarily bridged to `null` until the Step 4
-  Admin rework removes it. Solution builds; tests green (no new failures).
+  `MediaFile.CreatedAt` mapped. `JobDto.n8nExecutionId` is temporarily bridged to `null` until
+  the Step 4 Admin rework removes it.
+- **Step 2** — EF Core owns the media schema. `AppDbContext` now maps the media tables
+  (`excludeFromMigrations: false`) + `HasPostgresExtension("vector")`; the `AddMediaSchema`
+  migration creates all 11 media tables with unique/perf indexes + raw-SQL partials & ivfflat.
+  Raw init SQL (`infra/postgres/init/`) deleted; compose `postgres` uses
+  `POSTGRES_DB: homemediahub_db`. Verified against a throwaway pg16 pgvector container. The
+  MediaWorker's `WorkerDbContext` (its own `enrichment_sagas` migration) still does not exist —
+  media tables change **only** via Api migrations.
 
-**What does NOT exist yet (do not assume it does):** `src/MediaWorker/`, RabbitMQ/MassTransit
-anywhere, EF-owned media schema (still `excludeFromMigrations` + raw init SQL until Step 2),
-Prometheus/Grafana, admin scan endpoint, frontend `/admin` page.
+**What does NOT exist yet (do not assume it does):** `src/MediaWorker/` (+ `WorkerDbContext`,
+`enrichment_sagas`), RabbitMQ/MassTransit anywhere, Prometheus/Grafana, admin scan endpoint,
+frontend `/admin` page.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

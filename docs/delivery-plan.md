@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Step 1 complete 2026-07-05)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–2 complete 2026-07-05)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -86,7 +86,7 @@ still names the old `Api.Data.*` types as strings — harmless, and regenerated 
 `AddMediaSchema` is scaffolded in Step 2. Pre-existing mtime-dependent `Features/Tools` test
 failures (3) are unrelated and untouched.
 
-### Step 2 — EF Core takes over the media schema
+### Step 2 — EF Core takes over the media schema ✅ Done (2026-07-05)
 
 1. `AppDbContext`: `ConfigureMediaEntities(…, excludeFromMigrations: false)` +
    `modelBuilder.HasPostgresExtension("vector")`.
@@ -102,6 +102,26 @@ failures (3) are unrelated and untouched.
 **Verify:** run a throwaway Postgres 16 pgvector container; point Api at it; startup
 `MigrateAsync()` creates identity + all media tables; `\di` shows the unique + partial + ivfflat
 indexes; Api.Tests green.
+
+**As built:** verified by applying both migrations (`dotnet ef database update`) against a fresh
+`pgvector/pgvector:pg16` container — all 11 media + 7 identity tables created, `vector` extension
+present, `has-pending-model-changes` clean.
+- **Index split** (per the "EF over raw SQL, raw only for partial/ivfflat" rule): uniques
+  (`file_path`, `file_hash`), the `processing_jobs` `(status)`/`(scan_id, status)` indexes, and the
+  preserved query-performance indexes are **model-level `HasIndex`**; the two partials
+  (`processing_jobs(file_path)` active-status unique, `media_files(origin_class) WHERE NOT NULL`)
+  and the ivfflat index are **raw `migrationBuilder.Sql`**.
+- **Performance indexes preserved from the old init SQL** (not in the original Step 2 list, kept to
+  avoid a gallery/search regression): `media_files(taken_at DESC)`,
+  `media_files(is_deleted, taken_at DESC)` (the default gallery query), `media_metadata(lat,lng)`,
+  `media_tags(tag)`, `processing_jobs(started_at DESC)`, and the `origin_class` partial. FK indexes
+  are auto-created by EF; `media_files.created_at` is now mapped.
+- The stale Step-1 `media_files` block (excluded) was stripped from `AppDbContextModelSnapshot`
+  before scaffolding — otherwise EF's diff skips the `media_files` CreateTable. `dotnet-ef` tool
+  bumped 9.0.5 → 10.0.7 to match the packages.
+- `infra/postgres/init/` deleted; compose `postgres` now `POSTGRES_DB: homemediahub_db`, init
+  mount dropped. **Note:** n8n's `n8n_db` (created by the old init script) is no longer
+  provisioned — harmless, as n8n is removed in Step 7 and the stack isn't run mid-migration.
 
 ### Step 3 — `src/MediaWorker` + `src/MediaWorker.Tests`
 

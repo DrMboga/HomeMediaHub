@@ -31,8 +31,8 @@ public class AppDbContext : IdentityDbContext<AppUser>
 
         builder.HasDefaultSchema("identity");
 
-        // Media schema is defined once in the shared Data library. excludeFromMigrations stays
-        // true until Step 2 flips it — EF has not yet taken over the media tables.
-        MediaModelConfiguration.ConfigureMediaEntities(builder, excludeFromMigrations: true);
+        // Api's AppDbContext owns the media schema via EF migrations (Phase 8 Step 2).
+        builder.HasPostgresExtension("vector");
+        MediaModelConfiguration.ConfigureMediaEntities(builder, excludeFromMigrations: false);
     }
 }

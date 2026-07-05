@@ -9,7 +9,9 @@ internal sealed class AppDbContextDesignTimeFactory : IDesignTimeDbContextFactor
     public AppDbContext CreateDbContext(string[] args)
     {
         var opts = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql("Host=localhost;Database=homemediahub_db;Username=postgres;Password=design-time")
+            .UseNpgsql(
+                "Host=localhost;Database=homemediahub_db;Username=postgres;Password=design-time",
+                npgsql => npgsql.UseVector())
             .UseSnakeCaseNamingConvention()
             .Options;
         return new AppDbContext(opts);

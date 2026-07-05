@@ -1,9 +1,10 @@
 # HomeMediaHub — Architecture (Phase 8 Target)
 
 > **Status:** This document describes the **target** architecture of the Phase 8 migration
-> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Step 1 (the `Contracts`
-> and `Data` shared libraries, §3/§8) is done; the running system is still n8n-orchestrated.
-> The step-by-step migration guide lives in [`delivery-plan.md`](delivery-plan.md).
+> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Steps 1–2 are done: the
+> `Contracts`/`Data` shared libraries (§3/§8) and EF Core ownership of the media schema (§9,
+> the `AddMediaSchema` migration + deleted init SQL). The running system is still
+> n8n-orchestrated. The step-by-step migration guide lives in [`delivery-plan.md`](delivery-plan.md).
 
 ## 1. System Context
 
