@@ -1,5 +1,6 @@
 using Api.Data;
 using Api.Features.Tools.Scan;
+using Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace Api.Tests.Features.Tools.Scan;

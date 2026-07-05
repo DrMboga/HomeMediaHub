@@ -1,4 +1,4 @@
-namespace Api.Data;
+namespace Data.Entities;
 
 public sealed class MediaMetadata
 {

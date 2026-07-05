@@ -1,4 +1,5 @@
 using Api.Data;
+using Data.Entities;
 using MediatR;
 
 namespace Api.Features.Tools.RecordFailure;
@@ -17,7 +18,6 @@ public sealed class RecordFailureHandler : IRequestHandler<RecordFailureRequest,
             FilePath       = req.FilePath,
             Source         = req.Source,
             Status         = "failed",
-            N8nExecutionId = req.N8nExecutionId,
             FailedStep     = req.FailedStep,
             ErrorMessage   = req.ErrorMessage,
         };

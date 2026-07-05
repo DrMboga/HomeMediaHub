@@ -1,6 +1,6 @@
 using Pgvector;
 
-namespace Api.Data;
+namespace Data.Entities;
 
 public sealed class MediaEmbedding
 {

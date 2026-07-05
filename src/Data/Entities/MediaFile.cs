@@ -1,4 +1,4 @@
-namespace Api.Data;
+namespace Data.Entities;
 
 public sealed class MediaFile
 {
@@ -18,6 +18,7 @@ public sealed class MediaFile
     public string? OriginClass { get; set; }
     public double? OriginConfidence { get; set; }
     public bool OriginReviewed { get; set; }
+    public DateTime CreatedAt { get; set; }
 
     public MediaMetadata? Metadata { get; set; }
     public MediaThumbnail? Thumbnail { get; set; }

@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 📋 PLANNED (docs complete 2026-07-02, code not started)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Step 1 complete 2026-07-05)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -52,7 +52,7 @@ Every step below must end with the solution compiling and `dotnet test` green.
 
 ---
 
-### Step 1 — `src/Contracts` + `src/Data` (shared libraries)
+### Step 1 — `src/Contracts` + `src/Data` (shared libraries) ✅ Done (2026-07-05)
 
 1. `dotnet new classlib -n Contracts -o src/Contracts --framework net10.0` — zero NuGet deps.
    Add `src/Contracts/Messages/` with the 10 records from architecture.md §3
@@ -76,6 +76,15 @@ Every step below must end with the solution compiling and `dotnet test` green.
    fix namespaces. Add both projects to `HomeMediaHub.slnx`.
 
 **Verify:** `dotnet build` + `dotnet test` (Api.Tests, GeoService.Tests) green. No behavior change.
+
+**As built:** entities live in namespace `Data.Entities`; `MediaModelConfiguration` in `Data`
+(the conditional `ExcludeFromMigrations` uses a generic `ToTable<TEntity>` helper to dodge an
+overload ambiguity). Consumers gained `using Data.Entities;` — most handlers query DbSets with
+inferred element types and needed no change. Two carry-overs cleared later, not now:
+`JobDto.n8nExecutionId` is bridged to `null` (removed in Step 4); the `AppDbContextModelSnapshot`
+still names the old `Api.Data.*` types as strings — harmless, and regenerated when
+`AddMediaSchema` is scaffolded in Step 2. Pre-existing mtime-dependent `Features/Tools` test
+failures (3) are unrelated and untouched.
 
 ### Step 2 — EF Core takes over the media schema
 

@@ -1,4 +1,4 @@
-using Api.Data;
+using Data.Entities;
 
 namespace Api.Features.Media;
 

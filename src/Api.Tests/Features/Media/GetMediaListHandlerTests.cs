@@ -1,5 +1,6 @@
 using Api.Data;
 using Api.Features.Media.GetMediaList;
+using Data.Entities;
 
 namespace Api.Tests.Features.Media;
 

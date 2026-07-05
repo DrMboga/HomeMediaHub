@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 planned — docs complete, code NOT started** (2026-07-02).
+**Phase 8 in progress — Step 1 complete** (2026-07-05).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -24,9 +24,18 @@ applied later as enrichment updates via a saga). The server will be torn down an
 FastAPI HTTP service; media schema created by raw init SQL (`infra/postgres/init/`). All of
 this is **removed/replaced** during Phase 8 — do not extend it.
 
-**What does NOT exist yet (do not assume it does):** `src/MediaWorker/`, `src/Contracts/`,
-`src/Data/`, RabbitMQ/MassTransit anywhere, Prometheus/Grafana, admin scan endpoint,
-frontend `/admin` page.
+**Done in Phase 8 so far:**
+- **Step 1** — `src/Contracts` (10 message records, zero deps) and `src/Data` (entity POCOs +
+  the single `MediaModelConfiguration.ConfigureMediaEntities` fluent mapping) shared libs.
+  Entities moved from `Api/Data/` to `Data/Entities/` (namespace `Data.Entities`);
+  `ProcessingJob` reworked (dropped `N8nExecutionId`, added `ScanId`/`MediaFileId`);
+  `MediaFile.CreatedAt` mapped. `AppDbContext` still passes `excludeFromMigrations: true`
+  (flips in Step 2). `JobDto.n8nExecutionId` is temporarily bridged to `null` until the Step 4
+  Admin rework removes it. Solution builds; tests green (no new failures).
+
+**What does NOT exist yet (do not assume it does):** `src/MediaWorker/`, RabbitMQ/MassTransit
+anywhere, EF-owned media schema (still `excludeFromMigrations` + raw init SQL until Step 2),
+Prometheus/Grafana, admin scan endpoint, frontend `/admin` page.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

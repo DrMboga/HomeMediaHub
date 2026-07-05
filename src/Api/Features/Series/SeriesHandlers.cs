@@ -1,5 +1,6 @@
 using Api.Data;
 using Api.Features.Media;
+using Data.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 

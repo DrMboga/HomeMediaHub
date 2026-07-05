@@ -40,7 +40,7 @@ public sealed class GetJobsHandler : IRequestHandler<GetJobsRequest, IReadOnlyLi
             .Skip((req.Page - 1) * req.PageSize)
             .Take(req.PageSize)
             .Select(j => new JobDto(j.Id, j.FilePath, j.Source, j.Status,
-                j.N8nExecutionId, j.StartedAt, j.CompletedAt,
+                null, j.StartedAt, j.CompletedAt,
                 j.FailedStep, j.ErrorMessage, j.RetryCount))
             .ToListAsync(ct);
     }
@@ -57,7 +57,7 @@ public sealed class GetJobDetailHandler : IRequestHandler<GetJobDetailRequest, J
         if (j is null) return null;
 
         return new JobDto(j.Id, j.FilePath, j.Source, j.Status,
-            j.N8nExecutionId, j.StartedAt, j.CompletedAt,
+            null, j.StartedAt, j.CompletedAt,
             j.FailedStep, j.ErrorMessage, j.RetryCount);
     }
 }

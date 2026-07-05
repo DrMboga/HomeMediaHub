@@ -1,5 +1,6 @@
 using Api.Data;
 using Api.Features.Media;
+using Data.Entities;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,7 +51,7 @@ public sealed class GetMediaListHandler : IRequestHandler<GetMediaListRequest, P
         var total = await q.CountAsync(ct);
         var ordered = req.SortAsc
             ? q.OrderBy(f => f.TakenAt).ThenBy(f => f.Id)
-            : (IOrderedQueryable<Data.MediaFile>)q.OrderByDescending(f => f.TakenAt).ThenByDescending(f => f.Id);
+            : (IOrderedQueryable<MediaFile>)q.OrderByDescending(f => f.TakenAt).ThenByDescending(f => f.Id);
         var items = await ordered
             .Skip((req.Page - 1) * req.PageSize)
             .Take(req.PageSize)
