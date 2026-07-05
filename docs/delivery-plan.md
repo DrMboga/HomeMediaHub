@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–2 complete 2026-07-05)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–3 complete 2026-07-05)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -123,7 +123,7 @@ present, `has-pending-model-changes` clean.
   mount dropped. **Note:** n8n's `n8n_db` (created by the old init script) is no longer
   provisioned — harmless, as n8n is removed in Step 7 and the stack isn't run mid-migration.
 
-### Step 3 — `src/MediaWorker` + `src/MediaWorker.Tests`
+### Step 3 — `src/MediaWorker` + `src/MediaWorker.Tests` ✅ Done (2026-07-05)
 
 1. `dotnet new worker -n MediaWorker -o src/MediaWorker --framework net10.0`. Packages:
    `MassTransit` `[8.*,9.0)`, `MassTransit.RabbitMQ`, `MassTransit.EntityFrameworkCore`,
@@ -165,6 +165,52 @@ present, `has-pending-model-changes` clean.
    - ApplyEnrichmentConsumer: double-consume idempotent; temp file kept when `AiSuccess:false`
 
 **Verify:** `dotnet test` green across the solution.
+
+**As built:** `src/MediaWorker` (Worker Service) + `src/MediaWorker.Tests` created; MassTransit
+resolved to **8.5.10** on net10, OTel Prometheus HttpListener pinned `1.16.0-beta.1`.
+- **Services** ported to plain classes (MediatR stripped), hardening preserved: `FileHashService`,
+  `DedupService`, `FileConvertService`, `MetadataService` (owns the moved `MetadataResult` record),
+  `ThumbnailService`, `ScanService` (now also excludes files with an **active** job, per §2/§7).
+  Added `MediaFileType.Classify` helper (image/heic/video) for the ingest conversion branch.
+- **WorkerDbContext** maps the shared media entities `excludeFromMigrations:true` + owns
+  `enrichment_sagas`; `MigrationsHistoryTable("__ef_migrations_history_worker")`. Made **non-sealed**
+  (like `AppDbContext`) so the test contexts can subclass it. `EnrichmentState.Version` is `uint`
+  `.IsRowVersion()` → Postgres `xmin`; the generated `AddEnrichmentSaga` DDL correctly **omits**
+  the xmin column (system column) and creates only `enrichment_sagas` (media tables excluded);
+  `CREATE EXTENSION IF NOT EXISTS vector` is idempotent (Api creates it first). `has-pending-model
+  -changes` clean. The state row also stores `AnalyzeFilePath/Lat/Lon/HasGps` so a retry re-trigger
+  can re-publish the unfinished leg.
+- **Saga** `EnrichmentStateMachine`: `Initially` fans out AI (+ geo if GPS, else `GeoDone=true`);
+  `During(Enriching)` stores each result and `.If(otherLegDone).ThenAsync(ApplyAndFinalize).Finalize()`;
+  `SetCompletedWhenFinalized()`; AI/geo events `OnMissingInstance(Discard)`; re-trigger republishes
+  only the pending leg. Tags/embedding persisted as JSON across the wait.
+- **Consumers**: `ScanConsumer` (1000-row job batches, publishes `FileDiscovered` after each batch
+  save), `IngestConsumer` (Reprocess short-circuit, hash→dedup→convert→metadata→thumbnail→**save**→
+  `enriching`→`MediaEnrichmentRequested`; `PostgresErrorCodes.UniqueViolation` 23505 → duplicate;
+  ingest exceptions → `MediaProcessingFailed`), `AiResultBridgeConsumer` (one-line re-publish),
+  `ApplyEnrichmentConsumer` (tracked idempotent update — origin/tags-replace/embedding-upsert/address,
+  temp deleted only on AI success), `JobFailureConsumer` (`MediaProcessingFailed` +
+  `Fault<FileDiscovered>`).
+- **`IJobStore`** (`Services/JobStore.cs`) owns every `processing_jobs` lifecycle transition
+  (`MarkProcessing/Enriching/SkippedDuplicate/Completed/Failed`), so the consumers orchestrate without
+  juggling tracked entities or scattering `SaveChanges` (a focused store, deliberately **not** a
+  generic repository — DbContext already is UoW+repo). Tracked-load + `SaveChanges` internally (keeps
+  the EF in-memory harness tests working; single-row PK load is negligible vs ingest I/O). The
+  `ScanConsumer` bulk insert stays inline (one cohesive create→save→publish). Retention of the
+  append-only ledger is deferred to **Step 11**.
+- **Program.cs**: kebab formatter; `AiAnalysisRequested` `SetEntityName`; explicit endpoints with the
+  §4 prefetch/concurrency; raw-JSON `ai-analysis-completed` endpoint; saga endpoint with
+  `UseMessageRetry` + `UseInMemoryOutbox` + EF repository `Optimistic`; OTel `AddMeter("MassTransit")`
+  + Prometheus HttpListener `Host="+" Port=9090` (replaced the deprecated `UriPrefixes`).
+  `Dockerfile` (context `./src`) reuses the Api's exact libheif apt block.
+- **Tests (54, all green)**: the four Tools service tests moved + renamed (two mtime-fallback
+  metadata tests — the pre-existing Step-1 failures — corrected to assert the mtime fallback rather
+  than the impossible `null`); saga harness tests for all six §6 scenarios; Ingest tests
+  (dedup→`skipped_duplicate`, missing-file→`MediaProcessingFailed`, 23505→duplicate via a throwing
+  context, `Reprocess`→enrichment); Apply tests (double-consume idempotent, work file kept on AI
+  failure). Full solution: Api 24 · GeoService 10 · MediaWorker 54 green. The `AddEnrichmentSaga`
+  migration was verified via generated SQL (Docker was unavailable to apply it live; the media-schema
+  container check was done in Step 2).
 
 ### Step 4 — Api rework
 
@@ -284,6 +330,26 @@ reachable — acceptance is in Step 8's compose run.
 Own branch, only after the stage checklist below passes. Full visual redesign of all pages +
 Admin using the **frontend-design skill** (distinctive, non-templated direction). Zero feature
 or API changes — backend rollback must never entangle with UI churn.
+
+### Step 11 — Job retention worker ⏸ Deferred (post-8a, not blocking)
+
+`processing_jobs` is an **append-only ledger** (the n8n execution-list replacement): rows are never
+deleted, including `skipped_duplicate`. This is *not* a per-scan explosion — `ScanService` excludes
+files already in `media_files`/with an active job, so after the initial ~190K import a monthly scan
+only adds jobs for genuinely new files (photo-taking rate, not library size). But the table still
+grows monotonically forever, so eventually it wants pruning. It is **not urgent** — a row is ~200 B
+and every admin query filters by `status` with paging on indexed columns, so even ~1M rows stay fast;
+this is tidiness, not a performance fix.
+
+- A `BackgroundService` (or reuse the Step 4 `ScanScheduler` pattern) on a daily/weekly cadence,
+  config-gated (`Jobs:Retention:Enabled`, off by default on stage).
+- Prune **terminal** jobs only via batched `ExecuteDeleteAsync`: `completed` + `skipped_duplicate`
+  older than ~90 d; `failed` kept longer (~180 d) for retry visibility. **Never** delete
+  `queued`/`processing`/`enriching`.
+- Lives in the MediaWorker (owns the schema-adjacent write path) or the Api — decide when built;
+  either way it's a delete-only op, no migration.
+- Verify: unit test that the cutoff filter selects only terminal, past-cutoff rows and never active
+  ones; a dry-run count logged before the first real prune on prod.
 
 ---
 

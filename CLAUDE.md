@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–2 complete** (2026-07-05).
+**Phase 8 in progress — Steps 1–3 complete** (2026-07-05).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -35,12 +35,20 @@ FastAPI HTTP service. Both are **removed/replaced** during Phase 8 — do not ex
   migration creates all 11 media tables with unique/perf indexes + raw-SQL partials & ivfflat.
   Raw init SQL (`infra/postgres/init/`) deleted; compose `postgres` uses
   `POSTGRES_DB: homemediahub_db`. Verified against a throwaway pg16 pgvector container. The
-  MediaWorker's `WorkerDbContext` (its own `enrichment_sagas` migration) still does not exist —
   media tables change **only** via Api migrations.
+- **Step 3** — `src/MediaWorker` (Worker Service) + `src/MediaWorker.Tests`. Processing services
+  ported from `Api/Features/Tools/*` to `Services/` (MediatR stripped, plain classes); ingest/scan/
+  bridge/apply/failure consumers; `EnrichmentStateMachine` + `WorkerDbContext` (owns
+  `enrichment_sagas` via `AddEnrichmentSaga` in `__ef_migrations_history_worker`; `xmin` optimistic
+  concurrency); MassTransit **8.5.10** bus (kebab formatter, raw-JSON AI endpoint, saga endpoint) +
+  OTel Prometheus `:9090`; `Dockerfile` (context `./src`, libheif apt block). 54 tests green; full
+  solution green (Api 24 · GeoService 10 · MediaWorker 54).
 
-**What does NOT exist yet (do not assume it does):** `src/MediaWorker/` (+ `WorkerDbContext`,
-`enrichment_sagas`), RabbitMQ/MassTransit anywhere, Prometheus/Grafana, admin scan endpoint,
-frontend `/admin` page.
+**What does NOT exist yet (do not assume it does):** MassTransit/RabbitMQ **wiring in the API and
+GeoService** (Steps 4–5), the `rabbitmq`/`media-worker`/`prometheus`/`grafana` **compose services**
+(Step 7 — MediaWorker builds but is not yet in `docker-compose.yml`), the AI sidecar pika worker
+(Step 6), admin scan endpoint (Step 4), frontend `/admin` page (Step 8). The old n8n `/api/tools/*`
+handlers are still present in the API (removed in Step 4).
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

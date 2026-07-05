@@ -1,9 +1,11 @@
 # HomeMediaHub — Architecture (Phase 8 Target)
 
 > **Status:** This document describes the **target** architecture of the Phase 8 migration
-> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Steps 1–2 are done: the
-> `Contracts`/`Data` shared libraries (§3/§8) and EF Core ownership of the media schema (§9,
-> the `AddMediaSchema` migration + deleted init SQL). The running system is still
+> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Steps 1–3 are done: the
+> `Contracts`/`Data` shared libraries (§3/§8), EF Core ownership of the media schema (§9, the
+> `AddMediaSchema` migration + deleted init SQL), and the `MediaWorker` service (§6/§8 — consumers,
+> the enrichment saga, ported processing services, `IJobStore`, MassTransit 8.5 bus). The worker is
+> not yet wired into `docker-compose.yml` (Step 7), so the **running** system is still
 > n8n-orchestrated. The step-by-step migration guide lives in [`delivery-plan.md`](delivery-plan.md).
 
 ## 1. System Context

@@ -4,9 +4,11 @@
     <Project Path="src/Contracts/Contracts.csproj" />
     <Project Path="src/Data/Data.csproj" />
     <Project Path="src/GeoService/GeoService.csproj" />
+    <Project Path="src/MediaWorker/MediaWorker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/Api.Tests/Api.Tests.csproj" />
     <Project Path="src/GeoService.Tests/GeoService.Tests.csproj" />
+    <Project Path="src/MediaWorker.Tests/MediaWorker.Tests.csproj" />
   </Folder>
 </Solution>

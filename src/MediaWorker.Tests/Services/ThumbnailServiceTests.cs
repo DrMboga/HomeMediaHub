@@ -1,20 +1,20 @@
-using Api.Features.Tools.Thumbnail;
+using MediaWorker.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
-namespace Api.Tests.Features.Tools.Thumbnail;
+namespace MediaWorker.Tests.Services;
 
-// The handler writes to /thumbnails/{id}.webp — a Docker volume mount in production.
+// The service writes to /thumbnails/{id}.webp — a Docker volume mount in production.
 // On Windows without write access to that path the tests return early (no-op).
 // On Linux they run fully.
-public sealed class GenerateThumbnailHandlerTests : IDisposable
+public sealed class ThumbnailServiceTests : IDisposable
 {
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"hmh-thumb-{Guid.NewGuid()}");
-    private readonly string _mediaFileId = Guid.NewGuid().ToString();
-    private readonly GenerateThumbnailHandler _handler = new();
+    private readonly Guid _mediaFileId = Guid.NewGuid();
+    private readonly ThumbnailService _service = new();
     private static readonly string ThumbnailsRoot = Path.GetFullPath("/thumbnails");
 
-    public GenerateThumbnailHandlerTests()
+    public ThumbnailServiceTests()
     {
         Directory.CreateDirectory(_tempDir);
         try { Directory.CreateDirectory(ThumbnailsRoot); }
@@ -39,64 +39,63 @@ public sealed class GenerateThumbnailHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Handle_LargeImage_ResizesToMax400px()
+    public async Task Generate_LargeImage_ResizesToMax400px()
     {
         if (!ThumbnailsDirAvailable()) return;
         var sourcePath = await SaveSourceJpegAsync(1200, 900);
 
-        var result = await _handler.Handle(new GenerateThumbnailRequest(sourcePath, _mediaFileId), CancellationToken.None);
+        var path = await _service.GenerateAsync(sourcePath, _mediaFileId, CancellationToken.None);
 
-        using var thumbnail = await Image.LoadAsync(result.ThumbnailPath);
+        using var thumbnail = await Image.LoadAsync(path);
         Assert.True(thumbnail.Width <= 400);
         Assert.True(thumbnail.Height <= 400);
     }
 
     [Fact]
-    public async Task Handle_LandscapeImage_PreservesAspectRatio()
+    public async Task Generate_LandscapeImage_PreservesAspectRatio()
     {
         if (!ThumbnailsDirAvailable()) return;
         var sourcePath = await SaveSourceJpegAsync(800, 400); // 2:1 ratio
 
-        var result = await _handler.Handle(new GenerateThumbnailRequest(sourcePath, _mediaFileId), CancellationToken.None);
+        var path = await _service.GenerateAsync(sourcePath, _mediaFileId, CancellationToken.None);
 
-        using var thumbnail = await Image.LoadAsync(result.ThumbnailPath);
+        using var thumbnail = await Image.LoadAsync(path);
         Assert.Equal(400, thumbnail.Width);
         Assert.Equal(200, thumbnail.Height);
     }
 
     [Fact]
-    public async Task Handle_SmallImage_UpscalesToFit400px()
+    public async Task Generate_SmallImage_UpscalesToFit400px()
     {
-        // ResizeMode.Max scales the longest side to 400, upscaling small images too
         if (!ThumbnailsDirAvailable()) return;
         var sourcePath = await SaveSourceJpegAsync(100, 80); // 5:4 ratio
 
-        var result = await _handler.Handle(new GenerateThumbnailRequest(sourcePath, _mediaFileId), CancellationToken.None);
+        var path = await _service.GenerateAsync(sourcePath, _mediaFileId, CancellationToken.None);
 
-        using var thumbnail = await Image.LoadAsync(result.ThumbnailPath);
+        using var thumbnail = await Image.LoadAsync(path);
         Assert.Equal(400, thumbnail.Width);
         Assert.Equal(320, thumbnail.Height); // 100→400 ×4, 80→320 ×4
     }
 
     [Fact]
-    public async Task Handle_ReturnsExpectedThumbnailPath()
+    public async Task Generate_ReturnsExpectedThumbnailPath()
     {
         if (!ThumbnailsDirAvailable()) return;
         var sourcePath = await SaveSourceJpegAsync(200, 200);
 
-        var result = await _handler.Handle(new GenerateThumbnailRequest(sourcePath, _mediaFileId), CancellationToken.None);
+        var path = await _service.GenerateAsync(sourcePath, _mediaFileId, CancellationToken.None);
 
-        Assert.Equal($"/thumbnails/{_mediaFileId}.webp", result.ThumbnailPath);
+        Assert.Equal($"/thumbnails/{_mediaFileId}.webp", path);
     }
 
     [Fact]
-    public async Task Handle_CreatesWebpFileOnDisk()
+    public async Task Generate_CreatesWebpFileOnDisk()
     {
         if (!ThumbnailsDirAvailable()) return;
         var sourcePath = await SaveSourceJpegAsync(200, 200);
 
-        var result = await _handler.Handle(new GenerateThumbnailRequest(sourcePath, _mediaFileId), CancellationToken.None);
+        var path = await _service.GenerateAsync(sourcePath, _mediaFileId, CancellationToken.None);
 
-        Assert.True(File.Exists(Path.GetFullPath(result.ThumbnailPath)));
+        Assert.True(File.Exists(Path.GetFullPath(path)));
     }
 }
