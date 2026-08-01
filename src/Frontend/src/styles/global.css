@@ -582,3 +582,41 @@ body.lb-open { overflow: hidden; }
   .lb-panel { height: 98vh; }
   .lb-info { padding-top: 6px; padding-bottom: 6px; min-height: 60px; }
 }
+
+/* ── Admin ────────────────────────── */
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.admin-card-body { padding: 6px 18px 18px; display: flex; flex-direction: column; gap: 12px; }
+.admin-scan-result { font-size: 12px; color: var(--label2); font-family: var(--font-mono); }
+
+.progress-bar {
+  height: 6px; border-radius: var(--rsm); background: var(--s3); overflow: hidden;
+}
+.progress-bar-fill { height: 100%; background: var(--accent); transition: width .3s ease; }
+
+.admin-status-counts { display: flex; flex-wrap: wrap; gap: 18px; }
+.admin-status-item { display: flex; flex-direction: column; gap: 2px; }
+
+.admin-stale-warning {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--danger); background: var(--danger-soft);
+  border-radius: var(--rsm); padding: 8px 10px;
+}
+.admin-stale-warning .mi { font-size: 16px; }
+
+.admin-table-wrap { overflow-x: auto; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th {
+  text-align: left; padding: 8px 12px; color: var(--label3);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+  border-bottom: 1px solid var(--sep);
+}
+.admin-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--line-08);
+  color: var(--label2); vertical-align: top;
+}
+.admin-table-path { font-family: var(--font-mono); font-size: 12px; color: var(--label); word-break: break-all; }
+.admin-table-error { color: var(--danger); max-width: 320px; }
+
+@media (max-width: 900px) {
+  .admin-grid { grid-template-columns: 1fr; }
+}

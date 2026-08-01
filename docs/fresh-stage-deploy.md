@@ -1,6 +1,7 @@
 # Fresh Stage Deploy
 
-Run this when you need a clean slate on stage — after schema changes, migration squashes, or AI model updates. Destroys all stage data and re-imports from TestPhoto.
+Run this when you need a clean slate on stage — after schema changes, migration squashes, or AI
+model updates. Destroys all stage data and re-imports from TestPhoto.
 
 ## Prerequisites
 
@@ -28,10 +29,11 @@ cd /opt/homemediahub/app
 docker compose --env-file .env.stage down
 ```
 
-### 4. Wipe the postgres data volume
+### 4. Wipe the postgres and rabbitmq data volumes
 
 ```bash
 sudo rm -rf /opt/homemediahub/stage/data/postgres
+sudo rm -rf /opt/homemediahub/stage/data/rabbitmq
 ```
 
 Optionally wipe the other databases too (only needed if their schema changed):
@@ -45,8 +47,12 @@ Optionally wipe recreatable caches:
 
 ```bash
 sudo rm -rf /opt/homemediahub/stage/thumbnails/*
-sudo rm -rf /opt/homemediahub/stage/display-cache/*
+sudo rm -rf /opt/homemediahub/stage/data/display-cache/*
 ```
+
+Prometheus/Grafana data (`/opt/homemediahub/stage/data/prometheus`,
+`/opt/homemediahub/stage/data/grafana`) can be left alone — dashboards and datasources are
+re-provisioned from `infra/grafana/provisioning/` on every start.
 
 ### 5. Pull the latest code
 
@@ -56,8 +62,10 @@ git pull
 
 ### 6. Rebuild images
 
+Build context for the .NET services is `./src` (Phase 8) — no other invocation works.
+
 ```bash
-docker compose --env-file .env.stage build api ai-sidecar frontend geoservice
+docker compose --env-file .env.stage build api media-worker ai-sidecar geoservice frontend
 ```
 
 ### 7. Start the stack
@@ -70,26 +78,38 @@ What happens automatically on first start:
 
 | Step | Who | What |
 |------|-----|------|
-| DB init | postgres container | `01-init.sh` creates `homemediahub_db` and `n8n_db` |
-| Schema | postgres container | `02-schema.sql` creates all media tables |
-| Migrations | API on startup | `MigrateAsync()` runs `CreateIdentitySchema` — creates Identity tables including refresh token columns |
+| Schema | API on startup | `MigrateAsync()` runs Api's EF migrations — creates Identity **and** all media tables (`AddMediaSchema`), including unique/perf indexes and the raw-SQL partial + ivfflat indexes. There is no init SQL anymore — EF owns the schema. |
+| Saga schema | media-worker on startup | `MigrateAsync()` runs MediaWorker's `AddEnrichmentSaga` migration into its own history table (`__ef_migrations_history_worker`) — must run *after* the Api migration creates the media tables `media-worker` depends on, hence `depends_on: api: service_healthy` in compose. |
 | Users | API on startup | `DbSeeder` creates Mike and Badger accounts |
+| Queues | media-worker/geoservice/ai-sidecar on startup | MassTransit/pika declare all exchanges/queues on `rabbitmq` — nothing to configure manually |
 
-### 8. Run Library Scanner in n8n
+### 8. Trigger a library scan
 
-Open [http://192.168.0.192:5678](http://192.168.0.192:5678), find **W2 Library Scanner**, click **Execute Workflow**.
+Log in at `http://192.168.0.192`, open the **Admin** page, and click **Trigger Scan** — or from
+the CLI:
 
-All TestPhoto items will be ingested and classified with the current AI model.
+```bash
+TOKEN=$(curl -s -X POST http://192.168.0.192/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"mike","password":"<password>"}' | jq -r .accessToken)
+
+curl -X POST http://192.168.0.192/api/admin/scan -H "Authorization: Bearer $TOKEN"
+```
+
+All TestPhoto items will be ingested and classified with the current AI model. Watch progress on
+the Admin page (polls every 5 s) or in the RabbitMQ mgmt UI queue depths.
 
 ---
 
 ## Verify
 
 ```bash
-curl http://localhost:8080/health
-curl http://localhost:8001/health
-curl http://localhost:8000/health
+docker compose --env-file .env.stage ps
+# all services healthy, including rabbitmq, media-worker, prometheus, grafana
 
+curl http://localhost:8080/health
+
+docker compose --env-file .env.stage logs -f --tail=100 media-worker
 docker compose --env-file .env.stage logs -f --tail=100 api
 docker compose --env-file .env.stage logs -f --tail=100 geoservice
 docker compose --env-file .env.stage logs -f --tail=100 ai-sidecar
@@ -98,14 +118,25 @@ docker compose --env-file .env.stage restart nginx
 ```
 
 - Log in at [http://192.168.0.192](http://192.168.0.192) → confirms Identity schema and users are correct
-- Gallery shows photos → confirms media import and thumbnails
-- Review page shows artwork/screenshot/document/reference items → confirms 6-class AI model is active
+- Gallery shows photos **while enrichment is still running** → confirms save-early is working (the
+  save-early acceptance test from the delivery plan)
+- Review page shows artwork/screenshot/document/reference items → confirms the AI model is active
 - Gallery origin filter chips work → confirms `origin_class` column exists
+- Admin page shows live pipeline counts and throughput
+- RabbitMQ mgmt UI ([http://192.168.0.192:15672](http://192.168.0.192:15672), login from
+  `RABBITMQ_USER`/`RABBITMQ_PASS`) shows the expected queues with draining depth
+- Grafana ([http://192.168.0.192:3001](http://192.168.0.192:3001), `admin` /
+  `GRAFANA_PASSWORD`) → **Pipeline** dashboard shows live queue depth, consume rate, and AI P95
 
 ---
 
 ## Notes
 
-- **n8n workflows** are stored in the `n8n_db` volume. Wiping it loses workflow definitions — export them from the n8n UI first if needed, or just wipe `data/postgres` (which shares the host) and leave `data/n8n` alone. The `data/n8n` volume holds execution history; `data/postgres` holds the `n8n_db` database.
-- **`.env` files** do not need to change — leave them as-is.
-- **USB HDD / prod** — this procedure applies to stage only. Never run `rm -rf` on `/opt/homemediahub/data/` (prod) unless you are certain the full photo library is intact on the USB HDD.
+- **`.env.stage`** needs `RABBITMQ_USER`, `RABBITMQ_PASS`, `GRAFANA_PASSWORD` (Phase 8 additions);
+  `SERVER_IP` is no longer used and can be removed if still present from an older copy.
+- **USB HDD / prod** — this procedure applies to stage only. Never run `rm -rf` on
+  `/opt/homemediahub/data/` (prod) unless you are certain the full photo library is intact on the
+  SATA HDD.
+- **Two migrators, one DB** — the Api and MediaWorker each own a separate EF migrations history
+  table. Media tables change **only** via Api migrations; never add a media-table migration to
+  MediaWorker.

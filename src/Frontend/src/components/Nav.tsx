@@ -10,6 +10,7 @@ const LINKS: [string, string, boolean?][] = [
   ['/albums', 'Albums'],
   ['/videos', 'Videos'],
   ['/review', 'Review'],
+  ['/admin', 'Admin'],
 ]
 
 export function Nav() {

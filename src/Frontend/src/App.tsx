@@ -11,6 +11,7 @@ import { SearchPage } from './pages/SearchPage'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { VideosPage } from './pages/VideosPage'
 import { ReviewPage } from './pages/ReviewPage'
+import { AdminPage } from './pages/AdminPage'
 
 function ProtectedLayout() {
   const { isLoggedIn } = useAuth()
@@ -27,6 +28,7 @@ function ProtectedLayout() {
         <Route path="/albums"     element={<AlbumsPage />} />
         <Route path="/videos"     element={<VideosPage />} />
         <Route path="/review"     element={<ReviewPage />} />
+        <Route path="/admin"      element={<AdminPage />} />
         <Route path="*"           element={<Navigate to="/" replace />} />
       </Routes>
       <Lightbox />

@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–7 complete** (2026-08-01).
+**Phase 8 in progress — Steps 1–10 complete, Step 11 deferred** (2026-08-01).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -91,8 +91,36 @@ nginx `/n8n/` location gone) — do not resurrect it.
   `aspnet:10.0-noble` base image (unchanged, set in Steps 3/4) isn't pullable from this network;
   real verification is the stage rollout checklist in `docs/delivery-plan.md`. Dashboard PromQL
   for MassTransit metrics is first-cut, unverified against a live scrape.
+- **Step 8** — Frontend `/admin` page (sub-phase 8a). `src/Frontend/src/api/admin.ts` (scan
+  trigger / pipeline-status / jobs / retry / retry-failed clients); `pages/AdminPage.tsx` — Scan
+  card (optional path, shows returned `scanId`), Pipeline Progress card (polls `pipeline/status`
+  every 5 s, progress bar, per-status counts, `completedLastHour`, stale-job warning), Failed Jobs
+  table (paged, per-row Retry + "Retry All Failed"); route `/admin` + nav link. Reuses existing
+  styling (`.card`, `.btn-primary`, `.pager-btn`, …) per the Step 10 no-redesign-yet rule; a few
+  new admin-specific classes added to `global.css` built from the same design tokens. `npm run
+  build` (tsc + vite) green; manual click-through against live stage **not done** — stage
+  (`192.168.0.192`) unreachable from this sandbox, same limitation as Steps 3/6/7. Exercised
+  locally instead (`vite dev` + Playwright, `admin.ts` temporarily mocked, reverted after) — caught
+  and fixed a real bug: "Retry All Failed" reused `.btn-primary` (`width: 100%`, styled for the
+  login form) and was stretching across the section header; fixed with an inline
+  `width: 'auto'` override.
+- **Step 9** — Docs pass. `README.md` fully rewritten for the Phase 8 stack (no n8n);
+  `docs/fresh-stage-deploy.md`/`docs/prod-first-run.md` reworked (no init SQL, `data/rabbitmq`
+  wipe/create steps, Admin-page/`POST /api/admin/scan` scan trigger replacing the n8n UI step,
+  RabbitMQ mgmt UI + Grafana dashboard verify steps); `docs/telegram-potd-setup.md` marked
+  superseded (kept for reference); `docs/architecture.md`'s stale status banner (said "Steps 1–6,
+  not wired into compose yet") corrected to Steps 1–8 / fully wired / n8n removed.
+- **Step 10** — Marked done **per Mike's direction**, not by building out the originally-scoped
+  "full visual redesign of all pages." The Darkroom Archive foundation + a component pilot
+  (Nav/Gallery/PhotoCard/Lightbox) already landed on `main` in commit `2ba29a3` (2026-07-04,
+  before Phase 8 began). Remaining pages (including the new Admin page) inherit the same palette
+  via `tokens.css`'s legacy-alias remap but haven't had their markup migrated to the pilot's
+  deeper patterns (lucide icons, mono contact-sheet framing). Mike considers the foundation+pilot
+  sufficient; further per-page migration is ad hoc future work, not a blocking Phase 8 item.
 
-**What does NOT exist yet (do not assume it does):** frontend `/admin` page (Step 8).
+**What does NOT exist yet (do not assume it does):** a live stage rollout verifying the checklist
+in `docs/delivery-plan.md` (all sandbox verification so far is build/test-level, not a running
+server); full per-page visual redesign beyond the Step 10 pilot pages.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

@@ -83,3 +83,35 @@ export interface AuthResponse {
   refreshToken: string
   expiresIn: number
 }
+
+export interface JobStatusCounts {
+  queued: number
+  processing: number
+  enriching: number
+  completed: number
+  failed: number
+  skippedDuplicate: number
+}
+
+export interface PipelineStatusDto {
+  scanId: string | null
+  startedAt: string | null
+  counts: JobStatusCounts
+  total: number
+  completedLastHour: number
+  staleCount: number
+}
+
+export interface JobDto {
+  id: string
+  filePath: string
+  source: string
+  status: string
+  scanId: string | null
+  mediaFileId: string | null
+  startedAt: string
+  completedAt: string | null
+  failedStep: string | null
+  errorMessage: string | null
+  retryCount: number
+}

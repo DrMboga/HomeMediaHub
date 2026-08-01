@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–7 complete 2026-08-01)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–10 complete 2026-08-01; Step 11 deferred)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -468,18 +468,90 @@ rabbitmq`; `geoservice`/`ai-sidecar` gained `RABBITMQ_*` env + `depends_on rabbi
 
 **Verify:** `npm run build`; manual click-through against the stage stack.
 
-### Step 9 — Docs
+**As built (2026-08-01):** `src/Frontend/src/api/admin.ts` — `triggerScan`, `getPipelineStatus`,
+`getJobs`, `retryJob`, `retryFailedJobs`, thin wrappers over the Step 4 endpoints via the shared
+`client`. `types/api.ts` gained `JobStatusCounts`/`PipelineStatusDto`/`JobDto` matching the Api
+DTOs exactly (camelCase; System.Text.Json's default). `pages/AdminPage.tsx`: a Scan card (optional
+path input, `POST /admin/scan`, shows the returned `scanId`); a Pipeline Progress card polling
+`GET /admin/pipeline/status` every 5 s via TanStack Query `refetchInterval` (progress bar =
+`(completed+skippedDuplicate)/total`, per-status counts, `completedLastHour`, a stale-job warning
+banner when `staleCount > 0`); a Failed Jobs table (`GET /admin/jobs?status=failed`, per-row Retry,
+"Retry All Failed") — paged via page number only since `GetJobsRequest` returns a plain list with
+no total count, so Next disables when a page returns fewer than `pageSize` rows rather than against
+a total. Route `/admin` + nav link added (`App.tsx`, `Nav.tsx`) — no role check, matching the
+project's no-roles auth model.
+- **Styling**: reused existing primitives verbatim (`.page`, `.card`, `.card-head`/`.card-title`,
+  `.form-field`/`.form-input`, `.btn-primary`, `.pager-btn`/`.pagination`, `.empty-state`,
+  `.loading`) so the page inherits the Darkroom Archive tokens already live in `tokens.css`/
+  `global.css` (per-step note: those tokens landed ahead of the Step 10 component redesign, so
+  legacy class names already render in the new palette). Added a small new block to `global.css`
+  for shapes that didn't exist yet — `.admin-grid`, `.progress-bar`/`.progress-bar-fill`,
+  `.admin-status-counts`, `.admin-stale-warning`, `.admin-table*` — built from the same tokens
+  (`--accent`, `--s3`, `--danger`/`--danger-soft`, `--sep`/`--line-08`), not new colors.
+- **Verify:** `node node_modules/typescript/bin/tsc -b` and `node node_modules/vite/bin/vite.js
+  build` both green (this sandbox's `npm run build` script itself fails to resolve `tsc`/`vite`
+  shims through PowerShell/Git-Bash — a shell PATH quirk unrelated to the code, worked around by
+  invoking the underlying JS entrypoints with `node` directly). `dotnet build` on the full solution
+  still 0 errors (Admin page is frontend-only, no backend contract change). **Manual click-through
+  against the live stage stack was not done** — `192.168.0.192` is not reachable from this
+  sandbox, consistent with Steps 3/6/7's noted network limitation; real verification is checklist
+  item 4 in the stage rollout table. As a substitute, the page was exercised locally: `vite dev`
+  + Playwright, with `admin.ts` temporarily swapped for static mock data (queued/processing/
+  enriching/completed/failed/duplicate counts, three mock failed jobs) and `localStorage` seeded
+  to bypass the login gate, then reverted immediately after. That walkthrough caught a real layout
+  bug — the "Retry All Failed" button reused `.btn-primary`, which is `width: 100%` (styled for
+  the login form's full-width button), so it stretched across the `Failed Jobs` section header and
+  wrapped the title onto two lines. Fixed with `style={{ width: 'auto', marginTop: 0 }}` on that
+  button (`AdminPage.tsx`) — a permanent fix, unlike the mock data.
+
+### Step 9 — Docs ✅ Done (2026-08-01)
 
 - `CLAUDE.md`, `README.md`: status, stack/service/port tables, commands, no n8n.
 - `docs/fresh-stage-deploy.md`, `docs/prod-first-run.md`: no init SQL, new env vars,
   RabbitMQ/Grafana first login, new verification checklist.
 - `docs/telegram-potd-setup.md`: mark superseded.
 
-### Step 10 — Sub-phase 8b: frontend visual redesign
+**As built:** `README.md` fully rewritten for the Phase 8 stack — What-it-does, Hardware, Stack,
+Services/Ports, Processing Pipeline (ASCII diagram + invariants), Environments, Quick Start,
+AI Pipeline, Authentication, Samba Share, Documentation links, Design Decisions, Out of Scope —
+mirroring `CLAUDE.md`'s already-accurate tables rather than duplicating divergent copies; all n8n
+content (Workflows table, `n8n_db`, `:5678`, n8n-owns-orchestration decision) removed. `CLAUDE.md`
+itself needed no correction (its n8n mentions are historical/context, not stale operational info).
+`docs/fresh-stage-deploy.md` and `docs/prod-first-run.md` rewritten: wipe steps now cover
+`data/rabbitmq` (and, for prod, list `data/rabbitmq`/`data/prometheus`/`data/grafana` among the
+directories to pre-create); rebuild steps add `media-worker`; the "what happens on first start"
+table replaced (no init SQL — Api's `MigrateAsync()` owns Identity **and** media tables via
+`AddMediaSchema`; MediaWorker's `MigrateAsync()` owns `enrichment_sagas` in its own history table
+and waits on Api via `depends_on: service_healthy`); the n8n UI "Library Scanner" trigger step
+replaced with the Admin page / `POST /api/admin/scan` (JWT) curl example; verify sections gained
+RabbitMQ mgmt UI and Grafana dashboard checks with their env-var-sourced logins. `prod-first-run.md`
+also gained a post-scan ivfflat `REINDEX` step (previously only noted as an "open risk" in this
+document, not an actual instruction). `docs/telegram-potd-setup.md` gained a superseded banner
+(n8n Workflows 3/4 removed; content kept for historical reference only, per the delivery plan's
+"mark superseded" instruction rather than deletion). `docs/architecture.md`'s status banner
+(stale since Step 6 — said "Steps 1–6 done" and "not wired into docker-compose.yml yet") updated
+to Steps 1–8, all five services in compose, n8n fully removed — not itself in the Step 9 task
+list but directly contradicted the current repo state, so corrected under the same
+"verify docs against code" principle.
+
+### Step 10 — Sub-phase 8b: frontend visual redesign ✅ Marked done (2026-08-01, per Mike's direction)
 
 Own branch, only after the stage checklist below passes. Full visual redesign of all pages +
 Admin using the **frontend-design skill** (distinctive, non-templated direction). Zero feature
 or API changes — backend rollback must never entangle with UI churn.
+
+**As built:** the "Darkroom Archive" direction (warm near-black surfaces, ivory text, single amber
+accent, serif display + mono metadata) landed on `main` in commit `2ba29a3` (2026-07-04, *before*
+Phase 8 started) — `src/Frontend/src/styles/tokens.css` foundation + a component-level pilot on
+Nav, Gallery, PhotoCard, and Lightbox (real markup/icon changes, not just re-themed legacy
+classes). The remaining pages (Dashboard, OnThisDay, Geo, Search, Albums, Videos, Review, and the
+new Admin page built in Step 8) render in the same palette via the `tokens.css` legacy-alias remap
+(`--s1`/`--card`/`--btn-primary`/etc. point at the new tokens) but have **not** had their
+component markup migrated to the newer pilot patterns (lucide icons, mono contact-sheet framing,
+etc.) — visually coherent (same colors, type, accent), but not the deeper per-page redesign the
+original Step 10 scope described. Mike has decided the foundation + pilot is sufficient to close
+this step; further per-page component migration is now ad hoc future work, not a blocking delivery
+item. No code changed as part of closing this step — documentation only.
 
 ### Step 11 — Job retention worker ⏸ Deferred (post-8a, not blocking)
 
