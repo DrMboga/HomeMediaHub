@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–4 complete** (2026-08-01).
+**Phase 8 in progress — Steps 1–5 complete** (2026-08-01).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -55,10 +55,18 @@ files in Step 7) — do not extend them.
   template, cosine-distance cutoff (`Search:MaxCosineDistance`, default 0.8), no more `TakenAt`
   re-sort after the vector query. Dockerfile's duplicate COPY/ENTRYPOINT fixed. Full solution:
   Api 31 · GeoService 10 · MediaWorker 60, all green.
+- **Step 5** — GeoService gained a `GeoLookupConsumer : IConsumer<GeoLookupRequested>` that calls
+  the existing `ReverseGeocodeHandler` (cache + Nominatim, unchanged) via `IMediator` and publishes
+  `GeoLookupCompleted`; any exception is caught and published as `Success:false` (mirrors the AI
+  sidecar's always-publish contract). `geo-lookup` receive endpoint at prefetch/concurrency 1
+  (Nominatim's hard 1 req/s limit). `GET /reverse`, `/health`, and the Nominatim throttle are
+  untouched. OTel Prometheus metrics on `/metrics`. Dockerfile reworked for the `./src` build
+  context (Contracts + GeoService, no libheif — GeoService does no media processing). Full
+  solution: Api 31 · GeoService 12 · MediaWorker 60, all green.
 
-**What does NOT exist yet (do not assume it does):** MassTransit/RabbitMQ **wiring in GeoService**
-(Step 5), the `rabbitmq`/`media-worker`/`prometheus`/`grafana` **compose services** (Step 7 —
-MediaWorker and the reworked Api build but neither is wired into `docker-compose.yml` yet), the AI
+**What does NOT exist yet (do not assume it does):** the `rabbitmq`/`media-worker`/`prometheus`/
+`grafana` **compose services** and GeoService's `./src` build context wiring (Step 7 — Api,
+MediaWorker, and GeoService all build but none is wired into `docker-compose.yml` yet), the AI
 sidecar pika worker (Step 6), frontend `/admin` page (Step 8). The old n8n workflows
 (`infra/n8n/`, `Dockerfile.n8n`) are untouched until Step 7.
 

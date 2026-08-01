@@ -298,6 +298,31 @@ had already moved to MediaWorker.Tests in Step 3). `N8nWebhookUrl` dropped from 
 
 **Verify:** `dotnet test`.
 
+**As built (2026-08-01):** `GeoService.csproj` gained a `ProjectReference` to `Contracts` +
+`MassTransit`/`MassTransit.RabbitMQ` `[8.*,9.0)` + the same pre-release-pinned OTel packages as
+Api (`OpenTelemetry.Extensions.Hosting` 1.16.0, `OpenTelemetry.Instrumentation.AspNetCore` 1.14.0,
+`OpenTelemetry.Exporter.Prometheus.AspNetCore` 1.16.0-beta.1).
+- `Features/GeoLookup/GeoLookupConsumer.cs : IConsumer<GeoLookupRequested>` sends
+  `ReverseGeocodeRequest` via the existing `IMediator`/`ReverseGeocodeHandler` (untouched — cache
+  lookup + Nominatim fallback logic unchanged) and publishes `GeoLookupCompleted`; any exception
+  is caught and published as `Success:false, Error:ex.Message` (mirrors the AI sidecar's
+  always-publish contract — the saga must never stall on a geocoding failure).
+- `Program.cs`: publish+consume MassTransit bus (host/user/pass from `RabbitMq:*` config with
+  `RABBITMQ_*` env fallback, same dual-lookup as Api/MediaWorker), `geo-lookup` receive endpoint
+  at `PrefetchCount = 1` / `ConcurrentMessageLimit = 1` (Nominatim's hard 1 req/s limit — cache
+  hits dominate after warm-up). OTel `AddAspNetCoreInstrumentation()` + `AddMeter("MassTransit")` +
+  `AddPrometheusExporter()`; `MapPrometheusScrapingEndpoint("/metrics")` added alongside the
+  existing `/health` and `/reverse`.
+- `Dockerfile` reworked for the `./src` build context (`COPY Contracts/` + `GeoService/`,
+  `dotnet restore/publish "GeoService/GeoService.csproj"`) — same shape as the MediaWorker
+  Dockerfile from Step 3, minus the libheif apt block (GeoService does no media processing).
+- **GeoService.Tests**: `Features/GeoLookup/GeoLookupConsumerTests.cs` — success (mocked
+  `IMediator` returns an address → `GeoLookupCompleted{Success:true}`) and failure (mocked
+  `IMediator` throws → `Success:false, Error}`) shapes, via an NSubstitute `ConsumeContext` with a
+  captured `Publish` call (same pattern as MediaWorker's `ApplyEnrichmentConsumerTests` — no
+  MassTransit test harness needed since the consumer has one dependency to mock). Full solution:
+  **Api 31 · GeoService 12 · MediaWorker 60**, all green.
+
 ### Step 6 — AiSidecar pika worker
 
 1. Split `main.py` → `inference.py` (model load, inference lock, analyze + text-embed —

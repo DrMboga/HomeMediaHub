@@ -1,7 +1,10 @@
 using GeoService.Data;
 using GeoService.Endpoints;
+using GeoService.Features.GeoLookup;
 using GeoService.Services;
+using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -37,6 +40,44 @@ try
     builder.Services.AddMediatR(cfg =>
         cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 
+    var rabbitHost = builder.Configuration["RabbitMq:Host"]
+        ?? builder.Configuration["RABBITMQ_HOST"] ?? "rabbitmq";
+    var rabbitUser = builder.Configuration["RabbitMq:User"]
+        ?? builder.Configuration["RABBITMQ_USER"] ?? "guest";
+    var rabbitPass = builder.Configuration["RabbitMq:Pass"]
+        ?? builder.Configuration["RABBITMQ_PASS"] ?? "guest";
+
+    builder.Services.AddMassTransit(x =>
+    {
+        x.SetKebabCaseEndpointNameFormatter();
+
+        x.AddConsumer<GeoLookupConsumer>();
+
+        x.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(rabbitHost, "/", h =>
+            {
+                h.Username(rabbitUser);
+                h.Password(rabbitPass);
+            });
+
+            // Nominatim's hard 1 req/s limit; cache hits dominate after warm-up.
+            cfg.ReceiveEndpoint("geo-lookup", e =>
+            {
+                e.PrefetchCount = 1;
+                e.ConcurrentMessageLimit = 1;
+                e.ConfigureConsumer<GeoLookupConsumer>(context);
+            });
+        });
+    });
+
+    // MassTransit v8 emits instrumentation as OTel Meters.
+    builder.Services.AddOpenTelemetry()
+        .WithMetrics(m => m
+            .AddAspNetCoreInstrumentation()
+            .AddMeter("MassTransit")
+            .AddPrometheusExporter());
+
     var app = builder.Build();
 
     app.UseExceptionHandler(e => e.Run(async ctx =>
@@ -61,6 +102,7 @@ try
             : Results.Json(new { status = "unhealthy", phase = 2 }, statusCode: 503);
     });
     app.MapGeoEndpoints();
+    app.MapPrometheusScrapingEndpoint("/metrics");
 
     app.Run();
 }
