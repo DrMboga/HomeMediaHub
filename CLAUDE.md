@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–5 complete** (2026-08-01).
+**Phase 8 in progress — Steps 1–6 complete** (2026-08-01).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -21,8 +21,7 @@ applied later as enrichment updates via a saga). The server will be torn down an
 
 **What exists in the repo today (pre-migration):** n8n workflows (`infra/n8n/`,
 `Dockerfile.n8n`) — now orphaned, since the `/api/tools/*` endpoints they called were deleted in
-Step 4; AI sidecar as a FastAPI HTTP service. Both are **removed/replaced** during Phase 8 (n8n's
-files in Step 7) — do not extend them.
+Step 4. n8n is **removed** in Step 7 — do not extend it.
 
 **Done in Phase 8 so far:**
 - **Step 1** — `src/Contracts` (10 message records, zero deps) and `src/Data` (entity POCOs +
@@ -63,12 +62,27 @@ files in Step 7) — do not extend them.
   untouched. OTel Prometheus metrics on `/metrics`. Dockerfile reworked for the `./src` build
   context (Contracts + GeoService, no libheif — GeoService does no media processing). Full
   solution: Api 31 · GeoService 12 · MediaWorker 60, all green.
+- **Step 6** — `src/AiSidecar` reworked from a pure FastAPI HTTP service to a pika worker.
+  `main.py` split into `inference.py` (model globals, idempotent `load_models()`, `embed_text()`,
+  `analyze()` — logic unchanged from the old `/analyze` handler), `app.py` (FastAPI `lifespan` +
+  `GET /health` + `POST /embed/text` only — `/analyze` is gone), `worker.py` (entrypoint:
+  `load_models()` → Prometheus `start_http_server(8001)` → uvicorn on a daemon thread → pika
+  `BlockingConnection` consume loop on the main thread, 5 s reconnect-on-error). The pika loop
+  declares both fanout exchanges (`ai-analysis-requested`/`ai-analysis-completed`) + queue
+  `ai-analysis` at `prefetch_count=1`; any `analyze()` exception becomes
+  `{success:false, error:...}` and is **always** ACKed (never nacked — poison-image safety, per
+  architecture.md §3/§5). `torch.set_num_threads(4)` + `OMP_NUM_THREADS=4`. `requirements.txt`
+  gained `pika`/`prometheus-client`; new dev-only `requirements-dev.txt` adds `pytest`.
+  `tests/test_worker.py` (5 tests, pure-helper coverage: envelope parsing, result-shape building,
+  success/error `handle_message` paths — no model loading). Container build not verified in this
+  sandbox (no Docker); import/test correctness verified via a venv with stub `torch`/`PIL`/
+  `ultralytics`/`open_clip` modules.
 
 **What does NOT exist yet (do not assume it does):** the `rabbitmq`/`media-worker`/`prometheus`/
-`grafana` **compose services** and GeoService's `./src` build context wiring (Step 7 — Api,
-MediaWorker, and GeoService all build but none is wired into `docker-compose.yml` yet), the AI
-sidecar pika worker (Step 6), frontend `/admin` page (Step 8). The old n8n workflows
-(`infra/n8n/`, `Dockerfile.n8n`) are untouched until Step 7.
+`grafana` **compose services** and GeoService's/AiSidecar's `./src` build context wiring (Step 7 —
+Api, MediaWorker, GeoService, and AiSidecar all build but none is wired into
+`docker-compose.yml` yet), frontend `/admin` page (Step 8). The old n8n workflows (`infra/n8n/`,
+`Dockerfile.n8n`) are untouched until Step 7.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

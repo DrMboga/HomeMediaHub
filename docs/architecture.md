@@ -1,14 +1,16 @@
 # HomeMediaHub — Architecture (Phase 8 Target)
 
 > **Status:** This document describes the **target** architecture of the Phase 8 migration
-> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Steps 1–4 are done: the
+> (n8n → RabbitMQ + MassTransit). Implementation is **in progress** — Steps 1–6 are done: the
 > `Contracts`/`Data` shared libraries (§3/§8), EF Core ownership of the media schema (§9, the
 > `AddMediaSchema` migration + deleted init SQL), the `MediaWorker` service (§6/§8 — consumers,
-> the enrichment saga, ported processing services, `IJobStore`, MassTransit 8.5 bus), and the Api
+> the enrichment saga, ported processing services, `IJobStore`, MassTransit 8.5 bus), the Api
 > rework (§10 — `/api/tools/*` and `POST /api/media` removed, publish-only MassTransit bus, Admin
-> endpoints on `processing_jobs`, `ScanScheduler`, OTel metrics, semantic search accuracy fix).
-> Neither service is wired into `docker-compose.yml` yet (Step 7), so the **running** system is
-> still n8n-orchestrated. The step-by-step migration guide lives in [`delivery-plan.md`](delivery-plan.md).
+> endpoints on `processing_jobs`, `ScanScheduler`, OTel metrics, semantic search accuracy fix), the
+> GeoService `GeoLookupConsumer` (§4/§5 pattern mirrored for geo), and the AiSidecar pika worker
+> (§5 — `worker.py`/`app.py`/`inference.py`, raw-JSON publish, always-ACK). None of the four
+> services is wired into `docker-compose.yml` yet (Step 7), so the **running** system is still
+> n8n-orchestrated. The step-by-step migration guide lives in [`delivery-plan.md`](delivery-plan.md).
 
 ## 1. System Context
 

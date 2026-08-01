@@ -344,6 +344,47 @@ Api (`OpenTelemetry.Extensions.Hosting` 1.16.0, `OpenTelemetry.Instrumentation.A
 
 **Verify:** `pytest`; container builds.
 
+**As built (2026-08-01):** `main.py` deleted; split into `inference.py` (model globals + idempotent
+`load_models()` — guarded on `_yolo is not None` since both `worker.py`'s `main()` and `app.py`'s
+FastAPI `lifespan` call it, `embed_text()`, `analyze()`/`_run_inference()` — logic byte-for-byte
+unchanged from the old `/analyze` handler, now returning plain dicts instead of Pydantic models),
+`app.py` (FastAPI `lifespan` → `inference.load_models()`; `GET /health`; `POST /embed/text` only —
+the old `POST /analyze` HTTP route is gone, replaced by the pika consumer), `worker.py` (entrypoint:
+`inference.load_models()` synchronously first, then `prometheus_client.start_http_server(8001)`,
+then uvicorn on a daemon thread, then the pika `BlockingConnection` loop on the main thread with a
+5 s reconnect-on-error outer loop).
+- `torch.set_num_threads(4)` lives inside `load_models()` (not module-level) so it's set exactly
+  once, on first load, regardless of which entrypoint triggers it.
+- **Pure helpers in `worker.py`** (no pika/model dependency): `parse_request(body)` unwraps
+  MassTransit's envelope (`json.loads(body)["message"]`); `build_result(...)` builds the
+  camelCase dict matching `AiAnalysisCompleted` exactly (`tags`/`embedding` default to `[]`,
+  `originClass`/`originConfidence`/`error` default to `None`); `handle_message(body, analyze=inference.analyze)`
+  takes `analyze` as an injectable parameter — the **error path never raises**, it catches any
+  exception from `analyze()` and returns `success:false, error:str(e)`. `_on_message` (the actual
+  pika callback) calls `handle_message`, `basic_publish`es the plain-JSON result to
+  `ai-analysis-completed` (`content_type=application/json`, `delivery_mode=2`), then **always**
+  `basic_ack`s — never nacks on inference failure (poison-image safety, matches architecture.md §3/§5).
+- Declares both fanout exchanges (`ai-analysis-requested` durable, `ai-analysis-completed` durable),
+  declares + binds queue `ai-analysis`, `basic_qos(prefetch_count=1)`, per architecture.md §4.
+- Metrics: `ai_messages_total{status="ok|error"}` `Counter` + `ai_inference_seconds` `Histogram`
+  (wraps the `analyze()` call via `.time()`), both from `prometheus_client`, exposed on `:8001`.
+- `requirements.txt` gained `pika==1.4.2`, `prometheus-client==0.21.0`; kept `fastapi`/`uvicorn`.
+  New `requirements-dev.txt` (`-r requirements.txt` + `pytest==8.3.3`) — pytest is dev-only, not
+  baked into the runtime image. `Dockerfile`: `ENV OMP_NUM_THREADS=4`, `EXPOSE 8000 8001`,
+  `CMD ["python", "worker.py"]`; apt/model-predownload layers untouched.
+- **Tests** (`tests/test_worker.py`, 5 tests): `parse_request` envelope unwrap; `build_result`
+  success shape + failure-defaults shape; `handle_message` success path (injected fake `analyze`);
+  `handle_message` error path (injected `analyze` that raises — asserts the result is `success:false`
+  with empty `tags`/`embedding` and the exception message surfaced, and that no exception escapes).
+  Verified locally (this sandbox has no Python-3.11 env with torch/ultralytics/open_clip): a venv
+  with the real lightweight deps (`pika`, `prometheus-client`, `fastapi`, `pydantic`, `uvicorn`,
+  `pytest`) plus no-op stub modules for `torch`/`PIL`/`ultralytics`/`open_clip` on `PYTHONPATH` —
+  `inference.py`'s module-level imports need *something* importable, but the tests never call
+  `load_models()`/`analyze()` for real, so the stubs are never exercised beyond import. All 5 pass;
+  `app.py`/`worker.py` both import cleanly and `app.app.routes` shows exactly `/health` +
+  `/embed/text` (plus FastAPI's auto docs routes). Container build not attempted in this sandbox
+  (no Docker); real verification is `docker compose build ai-sidecar` in Step 7's stage rollout.
+
 ### Step 7 — Compose, infra, nginx, env
 
 1. `docker-compose.yml`:
