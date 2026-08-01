@@ -4,10 +4,13 @@ using Api.Endpoints;
 using Api.Features.Auth;
 using Api.Models;
 using Api.Services;
+using Contracts.Messages;
+using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Metrics;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -93,6 +96,41 @@ try
     builder.Services.AddMediatR(cfg =>
         cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 
+    var rabbitHost = builder.Configuration["RabbitMq:Host"]
+        ?? builder.Configuration["RABBITMQ_HOST"] ?? "rabbitmq";
+    var rabbitUser = builder.Configuration["RabbitMq:User"]
+        ?? builder.Configuration["RABBITMQ_USER"] ?? "guest";
+    var rabbitPass = builder.Configuration["RabbitMq:Pass"]
+        ?? builder.Configuration["RABBITMQ_PASS"] ?? "guest";
+
+    // Publish-only bus: the Api has no consumers, only publishes ScanRequested (admin/scheduler)
+    // and FileDiscovered(Reprocess: true) (retry). SetEntityName kept consistent with MediaWorker
+    // in case a future publisher of AiAnalysisRequested is added here.
+    builder.Services.AddMassTransit(x =>
+    {
+        x.SetKebabCaseEndpointNameFormatter();
+
+        x.UsingRabbitMq((context, cfg) =>
+        {
+            cfg.Host(rabbitHost, "/", h =>
+            {
+                h.Username(rabbitUser);
+                h.Password(rabbitPass);
+            });
+
+            cfg.Message<AiAnalysisRequested>(m => m.SetEntityName("ai-analysis-requested"));
+        });
+    });
+
+    builder.Services.AddHostedService<ScanScheduler>();
+
+    // MassTransit v8 emits instrumentation as OTel Meters.
+    builder.Services.AddOpenTelemetry()
+        .WithMetrics(m => m
+            .AddAspNetCoreInstrumentation()
+            .AddMeter("MassTransit")
+            .AddPrometheusExporter());
+
     var app = builder.Build();
 
     app.UseExceptionHandler(e => e.Run(async ctx =>
@@ -105,6 +143,8 @@ try
 
     app.UseAuthentication();
     app.UseAuthorization();
+
+    app.MapPrometheusScrapingEndpoint("/metrics");
 
     await using (var scope = app.Services.CreateAsyncScope())
     {
@@ -122,7 +162,6 @@ try
     });
 
     app.MapAuthEndpoints();
-    app.MapToolEndpoints();
     app.MapMediaEndpoints();
     app.MapSearchEndpoints();
     app.MapAlbumsEndpoints();

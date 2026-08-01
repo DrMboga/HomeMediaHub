@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–3 complete** (2026-07-05).
+**Phase 8 in progress — Steps 1–4 complete** (2026-08-01).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -20,16 +20,16 @@ applied later as enrichment updates via a saga). The server will be torn down an
   verification, plus history of Phases 1–7.5.
 
 **What exists in the repo today (pre-migration):** n8n workflows (`infra/n8n/`,
-`Dockerfile.n8n`) calling unauthenticated `/api/tools/*` endpoints in the API; AI sidecar as a
-FastAPI HTTP service. Both are **removed/replaced** during Phase 8 — do not extend them.
+`Dockerfile.n8n`) — now orphaned, since the `/api/tools/*` endpoints they called were deleted in
+Step 4; AI sidecar as a FastAPI HTTP service. Both are **removed/replaced** during Phase 8 (n8n's
+files in Step 7) — do not extend them.
 
 **Done in Phase 8 so far:**
 - **Step 1** — `src/Contracts` (10 message records, zero deps) and `src/Data` (entity POCOs +
   the single `MediaModelConfiguration.ConfigureMediaEntities` fluent mapping) shared libs.
   Entities moved from `Api/Data/` to `Data/Entities/` (namespace `Data.Entities`);
   `ProcessingJob` reworked (dropped `N8nExecutionId`, added `ScanId`/`MediaFileId`);
-  `MediaFile.CreatedAt` mapped. `JobDto.n8nExecutionId` is temporarily bridged to `null` until
-  the Step 4 Admin rework removes it.
+  `MediaFile.CreatedAt` mapped.
 - **Step 2** — EF Core owns the media schema. `AppDbContext` now maps the media tables
   (`excludeFromMigrations: false`) + `HasPostgresExtension("vector")`; the `AddMediaSchema`
   migration creates all 11 media tables with unique/perf indexes + raw-SQL partials & ivfflat.
@@ -43,12 +43,24 @@ FastAPI HTTP service. Both are **removed/replaced** during Phase 8 — do not ex
   concurrency); MassTransit **8.5.10** bus (kebab formatter, raw-JSON AI endpoint, saga endpoint) +
   OTel Prometheus `:9090`; `Dockerfile` (context `./src`, libheif apt block). 54 tests green; full
   solution green (Api 24 · GeoService 10 · MediaWorker 54).
+- **Step 4** — Api rework. `Features/Tools/`, `Endpoints/ToolEndpoints.cs`, `Features/Media/SaveMedia/`,
+  and `POST /api/media` deleted — the worker writes media rows directly via EF Core now. Api gained a
+  **publish-only** MassTransit bus (`AddMassTransit` + `UsingRabbitMq`, no consumers) used by
+  `POST /api/admin/scan` (publishes `ScanRequested`) and job retry (publishes
+  `FileDiscovered(Reprocess: true)`). Admin endpoints reworked: `GET /api/admin/pipeline/status`
+  (counts scoped to the latest scan; `completedLastHour`/`staleCount` computed globally), `JobDto`
+  gains `scanId`/`mediaFileId` (drops `n8nExecutionId`), `POST /api/admin/jobs/retry-failed` (bulk).
+  `ScanScheduler` `BackgroundService` added (monthly, off by default via `Scan:Enabled`). OTel
+  Prometheus metrics on `/metrics`. Semantic search accuracy fixed: `"a photo of {query}"` prompt
+  template, cosine-distance cutoff (`Search:MaxCosineDistance`, default 0.8), no more `TakenAt`
+  re-sort after the vector query. Dockerfile's duplicate COPY/ENTRYPOINT fixed. Full solution:
+  Api 31 · GeoService 10 · MediaWorker 60, all green.
 
-**What does NOT exist yet (do not assume it does):** MassTransit/RabbitMQ **wiring in the API and
-GeoService** (Steps 4–5), the `rabbitmq`/`media-worker`/`prometheus`/`grafana` **compose services**
-(Step 7 — MediaWorker builds but is not yet in `docker-compose.yml`), the AI sidecar pika worker
-(Step 6), admin scan endpoint (Step 4), frontend `/admin` page (Step 8). The old n8n `/api/tools/*`
-handlers are still present in the API (removed in Step 4).
+**What does NOT exist yet (do not assume it does):** MassTransit/RabbitMQ **wiring in GeoService**
+(Step 5), the `rabbitmq`/`media-worker`/`prometheus`/`grafana` **compose services** (Step 7 —
+MediaWorker and the reworked Api build but neither is wired into `docker-compose.yml` yet), the AI
+sidecar pika worker (Step 6), frontend `/admin` page (Step 8). The old n8n workflows
+(`infra/n8n/`, `Dockerfile.n8n`) are untouched until Step 7.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

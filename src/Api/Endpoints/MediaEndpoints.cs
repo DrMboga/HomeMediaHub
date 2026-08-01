@@ -10,7 +10,6 @@ using Api.Features.Media.GetReviewQueue;
 using Api.Features.Media.ReviewMedia;
 using Api.Features.Media.GetStats;
 using Api.Features.Media.OnThisDay;
-using Api.Features.Media.SaveMedia;
 using Api.Features.Media.StreamMedia;
 using Api.Features.Media.UpdateMedia;
 using MediatR;
@@ -24,13 +23,6 @@ public static class MediaEndpoints
 {
     public static void MapMediaEndpoints(this WebApplication app)
     {
-        // ── n8n tool endpoint (no auth) ──────────────────────────────────
-        app.MapPost("/api/media", async (SaveMediaRequest req, IMediator m, CancellationToken ct) =>
-        {
-            var result = await m.Send(req, ct);
-            return Results.Created($"/api/media/{result.Id}", result);
-        });
-
         // Thumbnail / original / stream — no auth required.
         // <img> and <video> tags cannot send Authorization headers.
         // GUIDs are unguessable and the app is LAN-only, so auth here adds nothing.

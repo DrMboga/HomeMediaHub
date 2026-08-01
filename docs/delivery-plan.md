@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–3 complete 2026-07-05)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–4 complete 2026-08-01)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -244,6 +244,46 @@ resolved to **8.5.10** on net10, OTel Prometheus HttpListener pinned `1.16.0-bet
 
 **Verify:** `dotnet test`; Api runs locally with RabbitMQ absent only if MassTransit host is
 reachable — acceptance is in Step 8's compose run.
+
+**As built:** `src/Api/Features/Tools/`, `Endpoints/ToolEndpoints.cs`, `Features/Media/SaveMedia/`,
+and the `POST /api/media` mapping are deleted; no Api.Tests referenced them (the four Tools tests
+had already moved to MediaWorker.Tests in Step 3). `N8nWebhookUrl` dropped from `appsettings.json`.
+- **MassTransit publish-only**: `AddMassTransit` + `UsingRabbitMq` in `Program.cs`, host/user/pass
+  read from `RabbitMq:Host/User/Pass` config with `RABBITMQ_HOST/USER/PASS` env fallback (same
+  dual-lookup as MediaWorker). `SetEntityName` for `AiAnalysisRequested` is configured even though
+  the Api never publishes it today — kept for topology consistency if a future Api-side publisher
+  of that message type appears. No consumers, no saga.
+- **Admin endpoints** rewritten in `Endpoints/AdminEndpoints.cs` + `Features/Admin/AdminHandlers.cs`:
+  `POST /api/admin/scan {path?}` (`TriggerScanHandler` publishes `ScanRequested`, default path from
+  `Scan:DefaultPath`); `GET /api/admin/pipeline/status` (`GetPipelineStatusHandler` — status counts
+  scoped to the **latest scan_id**; `completedLastHour`/`staleCount` computed **globally** across all
+  scans, since they're throughput/health signals rather than per-scan progress); `JobDto` gains
+  `ScanId`/`MediaFileId`, drops `N8nExecutionId`; `POST /api/admin/jobs/retry-failed` added (bulk).
+- **`RetryJobHandler`/`RetryFailedJobsHandler` rewrite**: reset via `AsTracking()` + `SaveChangesAsync`
+  rather than `ExecuteUpdateAsync` as originally planned — **EF Core's InMemory provider does not
+  support `ExecuteUpdate`/`ExecuteDelete`** (throws `InvalidOperationException` at query compile
+  time), which would make the handlers untestable against `TestDbContextFactory`. Same net effect
+  (queued, `retry_count++`, timestamps/error cleared), then publish `FileDiscovered(Reprocess: true)`
+  per job via `IPublishEndpoint`.
+- **`ScanScheduler`** (`Services/ScanScheduler.cs`): `BackgroundService`, computes the next
+  1st-of-month 02:00 UTC occurrence and loops; no-ops entirely if `Scan:Enabled` is false (the
+  stage/dev default) rather than scheduling and skipping, so it's inert by construction.
+- **OTel metrics**: `AddOpenTelemetry().WithMetrics(...)` with `AddAspNetCoreInstrumentation()` +
+  `AddMeter("MassTransit")` + `AddPrometheusExporter()`; `MapPrometheusScrapingEndpoint("/metrics")`.
+  Packages pinned to match what NuGet actually resolved (`OpenTelemetry.Instrumentation.AspNetCore`
+  **1.14.0**, not the originally-planned 1.13.1, which doesn't exist).
+- **Dockerfile** rewritten on the MediaWorker's already-correct template: duplicate trailing
+  `COPY`/`ENTRYPOINT` removed, `curl` added to the apt block (compose healthcheck), COPY paths
+  adapted for the `./src` build context (`Contracts/`, `Data/`, `Api/`).
+- **Semantic search**: prompt template `"a photo of {query}"` applied in the handler before calling
+  `/embed/text`; cosine distance selected alongside each id and filtered by `Search:MaxCosineDistance`
+  (config, default **0.8**) before `Take(Limit)`; the old `TakenAt` re-sort after the vector query
+  removed — results now stay in ascending-distance (relevance) order end to end.
+- **New Api.Tests** (`Features/Admin/`): `GetPipelineStatusHandlerTests` (no-jobs zero state,
+  counts scoped to the latest scan, `completedLastHour` and `staleCount` computed across scans);
+  `RetryJobHandlerTests` (failed→queued + `FileDiscovered(Reprocess:true)` publish via NSubstitute
+  `IPublishEndpoint`, non-failed job rejected, unknown job rejected). Full solution:
+  **Api 31 · GeoService 10 · MediaWorker 60**, all green.
 
 ### Step 5 — GeoService consumer
 
