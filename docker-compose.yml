@@ -71,48 +71,41 @@ services:
       redis:
         condition: service_started
 
-  # ── n8n (custom image: base + ffmpeg + libheif-tools) ─────────────────────
-  n8n:
-    build:
-      context: .
-      dockerfile: Dockerfile.n8n
+  # ── RabbitMQ 4 (message broker — pipeline orchestration) ──────────────────
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
     restart: unless-stopped
     environment:
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: n8n_db
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
-      N8N_HOST: ${SERVER_IP}
-      N8N_PORT: 5678
-      N8N_PROTOCOL: http
-      N8N_PATH: /n8n/
-      WEBHOOK_URL: http://${SERVER_IP}/n8n/
-      EXECUTIONS_DATA_SAVE_ON_ERROR: all
-      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
-      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: true
-      N8N_SECURE_COOKIE: "false"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
     volumes:
-      - ${DATA_DIR}/n8n:/home/node/.n8n
-      - ${PHOTO_DIR}:/photo:ro
-      - ${WORK_DIR}:/shared-temp
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ${DATA_DIR}/rabbitmq:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "15672:15672"
+      - "127.0.0.1:15692:15692"
     networks:
       - homemediahub
-    depends_on:
-      postgres:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── .NET 10 API ───────────────────────────────────────────────────────────
   api:
     build:
-      context: src/Api
-      dockerfile: Dockerfile
+      context: ./src
+      dockerfile: Api/Dockerfile
     restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Keepalive=30;Connection Idle Lifetime=300"
       Seed__MikePassword: ${MIKE_PASSWORD}
       Seed__BadgerPassword: ${BADGER_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Production
     volumes:
@@ -125,8 +118,16 @@ services:
       - "127.0.0.1:8080:8080"
     networks:
       - homemediahub
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   # ── GeoService PostgreSQL (geoservice_db — address cache) ───────────────
@@ -152,11 +153,14 @@ services:
   # ── GeoService (.NET 10 — reverse geocoding cache) ────────────────────────
   geoservice:
     build:
-      context: src/GeoService
-      dockerfile: Dockerfile
+      context: ./src
+      dockerfile: GeoService/Dockerfile
     restart: unless-stopped
     environment:
       ConnectionStrings__GeoDb: "Host=geoservice-postgres;Port=5432;Database=geoservice_db;Username=geoservice;Password=${GEOSERVICE_DB_PASSWORD};Keepalive=30;Connection Idle Lifetime=300"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
       ASPNETCORE_URLS: http://+:8001
       ASPNETCORE_ENVIRONMENT: Production
     ports:
@@ -166,6 +170,8 @@ services:
     depends_on:
       geoservice-postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   # ── Python AI sidecar (YOLOv8n + CLIP — baked in at build) ───────────────
   ai-sidecar:
@@ -173,6 +179,10 @@ services:
       context: src/AiSidecar
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
     volumes:
       - ${PHOTO_DIR}:/photo:ro
       - ${WORK_DIR}:/shared-temp:ro
@@ -186,6 +196,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ── .NET 10 MediaWorker (ingest consumers, enrichment saga, file processing) ─
+  media-worker:
+    build:
+      context: ./src
+      dockerfile: MediaWorker/Dockerfile
+    restart: unless-stopped
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=homemediahub_db;Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Keepalive=30;Connection Idle Lifetime=300"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
+      DOTNET_ENVIRONMENT: Production
+    volumes:
+      - ${PHOTO_DIR}:/photo:ro
+      - ${THUMBNAILS_DIR}:/thumbnails
+      - ${WORK_DIR}:/shared-temp
+    networks:
+      - homemediahub
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   # ── React frontend (Phase 6: production Vite build) ─────────────────────
   frontend:
@@ -210,8 +249,41 @@ services:
     depends_on:
       - frontend
       - api
-      - n8n
       - immich-server
+
+  # ── Prometheus (scrapes api/media-worker/geoservice/ai-sidecar/rabbitmq) ──
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${DATA_DIR}/prometheus:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - homemediahub
+    depends_on:
+      - api
+      - media-worker
+      - geoservice
+      - ai-sidecar
+
+  # ── Grafana (pipeline dashboard) ───────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${DATA_DIR}/grafana:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - homemediahub
+    depends_on:
+      - prometheus
 
 networks:
   homemediahub:

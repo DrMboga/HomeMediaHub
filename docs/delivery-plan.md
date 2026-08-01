@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–4 complete 2026-08-01)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–7 complete 2026-08-01)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -411,6 +411,50 @@ then uvicorn on a daemon thread, then the pika `BlockingConnection` loop on the 
 7. **Delete:** `Dockerfile.n8n`, `infra/n8n/` (all three workflow JSONs).
 
 **Verify:** `docker compose --env-file .env.stage config` validates; full stage build succeeds.
+
+**As built (2026-08-01):** `docker-compose.yml` — `n8n` service, its nginx `depends_on` entry, and
+all `SERVER_IP` usage removed; `api`/`geoservice` build contexts switched to `./src` with
+`dockerfile: Api/Dockerfile` / `GeoService/Dockerfile`; new `media-worker` service (`./src` +
+`MediaWorker/Dockerfile`, `/photo:ro` + `/thumbnails` + `/shared-temp` mounts, no host port —
+metrics scraped over the docker network — `depends_on` postgres/rabbitmq/**api** all
+`service_healthy`); `rabbitmq:4-management-alpine` (`enabled_plugins` + `${DATA_DIR}/rabbitmq`
+mount, `5672`/`15692` loopback-only, `15672` LAN, `rabbitmq-diagnostics -q ping` healthcheck);
+`api` gained a `curl -f localhost:8080/health` healthcheck + `RABBITMQ_*` env + `depends_on
+rabbitmq`; `geoservice`/`ai-sidecar` gained `RABBITMQ_*` env + `depends_on rabbitmq`; `prometheus`
+(`127.0.0.1:9090`, config + `${DATA_DIR}/prometheus`) and `grafana` (`3001:3000`,
+`GF_SECURITY_ADMIN_PASSWORD`, provisioning + dashboards mounts, `${DATA_DIR}/grafana`) added.
+- `infra/rabbitmq/enabled_plugins`, `infra/prometheus/prometheus.yml` (15 s scrape of the 5
+  targets), `infra/grafana/provisioning/{datasources,dashboards}/` (Prometheus datasource pinned
+  `uid: prometheus` so the dashboard JSON can reference it directly) + `infra/grafana/dashboards/
+  pipeline.json` (8 panels: queue depth, error-queue depth, MassTransit consume rate/faults/P95
+  duration, AI inference P95, jobs/hour proxied via `media-apply-enrichment` consume count, AI
+  messages by status) all created new.
+- `nginx.conf`: `/n8n/` location + `n8n` upstream removed; `/api/`, `/immich/`, `/thumbs/`, and the
+  frontend catch-all untouched.
+- Env examples (`.env.example`, `.env.stage.example`, `.env.prod.example`): `SERVER_IP` dropped
+  (grep confirmed no other file referenced it); `RABBITMQ_USER`/`RABBITMQ_PASS`/`GRAFANA_PASSWORD`
+  added. `Dockerfile.n8n` + `infra/n8n/*.json` (all 3 workflows) deleted via `git rm`.
+- **MassTransit metric names**: the dashboard's PromQL uses the dotted OTel instrument names from
+  MassTransit's `ConfigureDefaultInstrumentationOptions` (`messaging.masstransit.consume`,
+  `.consume.errors`, `.consume.duration`, confirmed from source — dots become underscores through
+  the Prometheus exporter); the exact histogram unit suffix (`_seconds_bucket` assumed, per OTel
+  convention) is **not yet confirmed against a live scrape** — first-cut, to be corrected once
+  Prometheus is actually scraping on stage (checklist item 9), same as `Search:MaxCosineDistance`
+  was tuned empirically in Step 4.
+- **Verify:** `docker compose --env-file .env.stage.example config` validates cleanly (all 14
+  services present, no `n8n`, no port collisions). Full build was attempted in this sandbox
+  (Docker Desktop present but stopped; started successfully). `geoservice` — proving the `./src`
+  context + `Contracts`/`GeoService` COPY-path rework — **built successfully end-to-end**
+  (`docker compose build geoservice`, exit 0) after one transient NuGet-restore hiccup on the
+  first attempt (`Microsoft.CodeAnalysis.Analyzers` not found post-restore — reproduced, then
+  resolved itself; isolated repro outside compose confirmed the package resolves fine from this
+  network, so it was a one-off buildx/bake cache quirk, not a config defect). **`api` and
+  `media-worker` could not be built in this sandbox**: both `FROM mcr.microsoft.com/dotnet/aspnet:
+  10.0-noble` (set in Steps 3/4, unchanged here) fail to resolve — `docker pull` of that exact tag
+  reproducibly returns `EOF` from this network, while `dotnet/aspnet:10.0` (non-noble) and
+  `dotnet/sdk:10.0` resolve fine — a registry/CDN-path issue specific to that tag in this sandbox,
+  not caused by the Step 7 context change. Consistent with Steps 3/6's prior note that container
+  builds aren't verifiable in this sandbox; real verification is the stage rollout checklist below.
 
 ### Step 8 — Frontend Admin page (sub-phase 8a)
 

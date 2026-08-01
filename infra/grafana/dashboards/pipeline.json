@@ -1,0 +1,115 @@
+{
+  "title": "HomeMediaHub Pipeline",
+  "uid": "hmh-pipeline",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Queue depth (messages ready)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rabbitmq_queue_messages_ready{queue=~\"media-scan|media-ingest|media-enrichment-saga|ai-analysis|ai-analysis-completed|geo-lookup|media-apply-enrichment|media-job-status\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error queue depth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rabbitmq_queue_messages_ready{queue=~\".*_error\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "MassTransit consume rate by endpoint",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(messaging_masstransit_consume_total[5m])) by (messaging_masstransit_destination)",
+          "legendFormat": "{{messaging_masstransit_destination}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "MassTransit consume faults",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(messaging_masstransit_consume_errors_total[5m])) by (messaging_masstransit_destination)",
+          "legendFormat": "{{messaging_masstransit_destination}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "MassTransit consume duration (P95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(messaging_masstransit_consume_duration_seconds_bucket[5m])) by (le, messaging_masstransit_destination))",
+          "legendFormat": "{{messaging_masstransit_destination}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "AI inference duration (P95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(ai_inference_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Jobs completed / hour (via apply-enrichment consumes)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(messaging_masstransit_consume_total{messaging_masstransit_destination=\"media-apply-enrichment\"}[1h]))",
+          "legendFormat": "completed/hour"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "AI messages by status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(ai_messages_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    }
+  ]
+}

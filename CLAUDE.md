@@ -6,7 +6,7 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 
 ## Current Status
 
-**Phase 8 in progress — Steps 1–6 complete** (2026-08-01).
+**Phase 8 in progress — Steps 1–7 complete** (2026-08-01).
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -19,9 +19,8 @@ applied later as enrichment updates via a saga). The server will be torn down an
 - `docs/delivery-plan.md` — the **step-by-step implementation plan** (Steps 1–10) with per-step
   verification, plus history of Phases 1–7.5.
 
-**What exists in the repo today (pre-migration):** n8n workflows (`infra/n8n/`,
-`Dockerfile.n8n`) — now orphaned, since the `/api/tools/*` endpoints they called were deleted in
-Step 4. n8n is **removed** in Step 7 — do not extend it.
+n8n is fully **removed** as of Step 7 (`infra/n8n/`, `Dockerfile.n8n` deleted, compose service and
+nginx `/n8n/` location gone) — do not resurrect it.
 
 **Done in Phase 8 so far:**
 - **Step 1** — `src/Contracts` (10 message records, zero deps) and `src/Data` (entity POCOs +
@@ -77,12 +76,23 @@ Step 4. n8n is **removed** in Step 7 — do not extend it.
   success/error `handle_message` paths — no model loading). Container build not verified in this
   sandbox (no Docker); import/test correctness verified via a venv with stub `torch`/`PIL`/
   `ultralytics`/`open_clip` modules.
+- **Step 7** — `docker-compose.yml`: `n8n` removed; `api`/`geoservice` build contexts switched to
+  `./src`; new `media-worker` service (`./src` + `MediaWorker/Dockerfile`, `/photo:ro` +
+  `/thumbnails` + `/shared-temp`, `depends_on` postgres/rabbitmq/**api** healthy); new `rabbitmq`
+  (`rabbitmq:4-management-alpine`, mgmt UI on LAN `:15672`, AMQP + metrics loopback-only,
+  `enabled_plugins` = management + prometheus); `api`/`geoservice`/`ai-sidecar` gained
+  `RABBITMQ_*` env + `depends_on rabbitmq`; `api` gained a `/health` curl healthcheck; new
+  `prometheus` (loopback `:9090`, scrapes all 5 services) and `grafana` (LAN `:3001`, provisioned
+  Prometheus datasource + a first-cut `pipeline.json` dashboard). `nginx.conf`'s `/n8n/` location
+  removed. Env examples gained `RABBITMQ_USER`/`RABBITMQ_PASS`/`GRAFANA_PASSWORD`, dropped
+  `SERVER_IP`. `Dockerfile.n8n` + `infra/n8n/` deleted.
+  `docker compose config` validates cleanly; `geoservice` built successfully end-to-end proving
+  the `./src` context rework. `api`/`media-worker` could not be built in this sandbox — their
+  `aspnet:10.0-noble` base image (unchanged, set in Steps 3/4) isn't pullable from this network;
+  real verification is the stage rollout checklist in `docs/delivery-plan.md`. Dashboard PromQL
+  for MassTransit metrics is first-cut, unverified against a live scrape.
 
-**What does NOT exist yet (do not assume it does):** the `rabbitmq`/`media-worker`/`prometheus`/
-`grafana` **compose services** and GeoService's/AiSidecar's `./src` build context wiring (Step 7 —
-Api, MediaWorker, GeoService, and AiSidecar all build but none is wired into
-`docker-compose.yml` yet), frontend `/admin` page (Step 8). The old n8n workflows (`infra/n8n/`,
-`Dockerfile.n8n`) are untouched until Step 7.
+**What does NOT exist yet (do not assume it does):** frontend `/admin` page (Step 8).
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.
