@@ -3,6 +3,11 @@
 Run this when you need a clean slate on stage — after schema changes, migration squashes, or AI
 model updates. Destroys all stage data and re-imports from TestPhoto.
 
+These steps were executed end to end on **2026-08-02** for the first Phase 8 stage rollout and
+the scan completed with geo + AI enrichment applied. The three problems that run hit are fixed
+in code or captured as steps below; see "First stage rollout" in
+[`delivery-plan.md`](delivery-plan.md).
+
 ## Prerequisites
 
 - Code changes committed and pushed to the server (see step 1)

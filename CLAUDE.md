@@ -7,6 +7,10 @@ Precision 3620 (Ubuntu Server 24.04) as a Docker Compose stack. LAN-only.
 ## Current Status
 
 **Phase 8 in progress — Steps 1–10 complete, Step 11 deferred** (2026-08-01).
+**First stage rollout ran green on 2026-08-02**: the pipeline ingested the whole TestPhoto
+library and enrichment applied both geo addresses and AI labels. The stack is no longer
+sandbox-only — see "First stage rollout" in `docs/delivery-plan.md` for what was and wasn't
+exercised, and the three bugs it flushed out.
 
 Phase 8 replaces n8n with a RabbitMQ 4 + MassTransit 8.x message-driven pipeline
 (**save-early**: media rows written at ingest so the gallery is browsable immediately; AI + geo
@@ -118,9 +122,10 @@ nginx `/n8n/` location gone) — do not resurrect it.
   deeper patterns (lucide icons, mono contact-sheet framing). Mike considers the foundation+pilot
   sufficient; further per-page migration is ad hoc future work, not a blocking Phase 8 item.
 
-**What does NOT exist yet (do not assume it does):** a live stage rollout verifying the checklist
-in `docs/delivery-plan.md` (all sandbox verification so far is build/test-level, not a running
-server); full per-page visual redesign beyond the Step 10 pilot pages.
+**What does NOT exist yet (do not assume it does):** a prod rollout / full-archive scan (Phase 9);
+the failure-path and observability checks from the stage checklist (corrupt file, duplicate,
+semantic search, Prometheus targets + Grafana dashboard) — the 2026-08-02 rollout covered the
+happy path only; full per-page visual redesign beyond the Step 10 pilot pages.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

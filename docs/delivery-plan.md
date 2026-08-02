@@ -29,7 +29,7 @@ Durable lessons from those phases (still apply):
 
 ---
 
-# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–10 complete 2026-08-01; Step 11 deferred)
+# Phase 8 — RabbitMQ + MassTransit Migration 🚧 IN PROGRESS (Steps 1–10 complete 2026-08-01; first stage rollout green 2026-08-02; Step 11 deferred)
 
 **Goal:** Replace n8n with RabbitMQ 4 + MassTransit 8.x. **Save-early pipeline**: media rows are
 written at ingest (gallery immediately browsable), AI + geo results applied later as enrichment
@@ -592,6 +592,40 @@ Fresh rebuild: `docker compose --env-file .env.stage down` → wipe `/opt/homeme
 | 8 | HEIC display + video stream endpoints | unchanged (API-side conversion untouched); `/shared-temp` empties for succeeded items |
 | 9 | Prometheus `:9090` targets | all 5 UP; Grafana pipeline dashboard live |
 | 10 | `dotnet test` + `pytest` | green |
+
+### First stage rollout — 2026-08-02 ✅ happy path
+
+The stack was brought up manually on stage for the first time. After the three fixes below, a
+`POST /api/admin/scan` from the Admin page ingested the entire TestPhoto library and the saga
+applied **both** enrichment legs — geo addresses and AI labels — end to end. That closes the
+core acceptance question of Phase 8: the message-driven pipeline works on real hardware.
+
+**Passed:** 1 (all services up), 2 (scan → jobs progressing), 4 (Admin page), 10 (`dotnet test`
+green: Api 31 · GeoService 12 · MediaWorker 60), plus the geo + AI enrichment path end to end.
+
+**Not yet exercised:** 3 (save-early ordering observed live), 5 (corrupt file → `failed/ai` +
+retry), 6 (duplicate → `skipped_duplicate`), 7 (semantic search), 8 (HEIC display + video
+stream), 9 (Prometheus targets UP + Grafana dashboard — the dashboard PromQL is still
+first-cut and unverified against a live scrape). Do these before the prod run.
+
+**Bugs it flushed out** (all fixed, all invisible to build/test-level verification — the reason
+the checklist exists):
+
+1. **media-worker crash-looped on startup.** `AddPrometheusHttpListener(o => o.Host = "+")` —
+   OTel 1.16 feeds `Host` into `UriBuilder.Uri`, which rejects `+` and `*` as hostnames. A
+   concrete host is not a workaround either: `HttpListener` then matches only requests whose
+   `Host` header equals it, which would 404 Prometheus scraping `media-worker:9090`. Fixed with
+   the obsolete-but-wildcard-capable `UriPrefixes = ["http://+:9090/"]`.
+2. **prometheus + grafana crash-looped on permission denied.** Both images run as non-root
+   (65534 and 472) and cannot write the `root:root` bind mounts left by the runbooks'
+   `sudo mkdir`. The `chown` step is now in `fresh-stage-deploy.md` and `prod-first-run.md`.
+3. **`POST /api/admin/scan` 500'd with `ACCESS_REFUSED`.** `Api/appsettings.json` ships a
+   `RabbitMq` section defaulting `User`/`Pass` to `guest`, and all three .NET services read the
+   config key *before* the env var — so the `RABBITMQ_*` values compose passes in were dead
+   code and the Api connected as `guest`, which the broker refuses off-loopback. Only the Api
+   had the section, so the worker and geoservice were unaffected and the fault stayed hidden
+   until the first publish (the publish-only bus connects lazily). Precedence is now env →
+   appsettings → literal, with blank treated as absent.
 
 Then prod: fresh rebuild with `.env.prod`, trigger full archive scan (Phase 9). Expect
 **multi-day** AI enrichment (CPU-bound, ~2–5 s/image × ~190K files); watch queue depth in

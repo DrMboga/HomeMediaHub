@@ -10,9 +10,11 @@
 > GeoService `GeoLookupConsumer` (§4/§5 pattern mirrored for geo), the AiSidecar pika worker
 > (§5 — `worker.py`/`app.py`/`inference.py`, raw-JSON publish, always-ACK), all five services wired
 > into `docker-compose.yml` + RabbitMQ/Prometheus/Grafana added (Step 7), and the frontend Admin
-> page (Step 8, §10 — scan trigger, pipeline progress, failed-job retry). n8n is fully removed. Not
-> yet done: a live stage rollout verifying the checklist in `delivery-plan.md`, and docs cleanup
-> (Step 9, in progress). The step-by-step migration guide lives in
+> page (Step 8, §10 — scan trigger, pipeline progress, failed-job retry). n8n is fully removed.
+> The first stage rollout ran green on **2026-08-02** — a scan ingested the full TestPhoto library
+> and the saga applied geo addresses and AI labels, so this document now describes running
+> software, not just a target. Not yet done: the checklist's failure-path and observability items,
+> and the prod/full-archive run (Phase 9). The step-by-step migration guide lives in
 > [`delivery-plan.md`](delivery-plan.md).
 
 ## 1. System Context
