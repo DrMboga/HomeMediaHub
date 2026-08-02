@@ -55,6 +55,17 @@ sudo mkdir -p /opt/homemediahub/data/grafana
 sudo mkdir -p /tmp/homemediahub-prod
 ```
 
+Prometheus and Grafana run as non-root inside their images and cannot write a `root:root`
+bind mount (`open /prometheus/queries.active: permission denied`, and Grafana fails the same
+way on `/var/lib/grafana`). Hand those two directories over:
+
+```bash
+sudo chown -R 65534:65534 /opt/homemediahub/data/prometheus   # nobody
+sudo chown -R 472:472     /opt/homemediahub/data/grafana      # grafana
+```
+
+The Postgres and RabbitMQ images chown their own data dirs at startup — only these two need it.
+
 ---
 
 ## 3. Stop stage

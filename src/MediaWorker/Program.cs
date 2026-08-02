@@ -145,8 +145,14 @@ try
             .AddMeter("MassTransit")
             .AddPrometheusHttpListener(o =>
             {
-                o.Host = "+";       // all interfaces — scraped by Prometheus on the docker network
-                o.Port = 9090;
+                // Must listen on all interfaces AND accept any Host header — Prometheus scrapes
+                // http://media-worker:9090/metrics over the docker network. Host/Port can't express
+                // that: the exporter feeds Host into UriBuilder.Uri, which rejects "+"/"*", and a
+                // concrete host (e.g. "0.0.0.0") makes HttpListener match only that Host header.
+                // UriPrefixes is obsolete but is the only wildcard-capable option.
+#pragma warning disable CS0618 // Type or member is obsolete
+                o.UriPrefixes = ["http://+:9090/"];
+#pragma warning restore CS0618
             }));
 
     var host = builder.Build();

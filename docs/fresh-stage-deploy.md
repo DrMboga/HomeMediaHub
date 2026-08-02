@@ -54,6 +54,15 @@ Prometheus/Grafana data (`/opt/homemediahub/stage/data/prometheus`,
 `/opt/homemediahub/stage/data/grafana`) can be left alone — dashboards and datasources are
 re-provisioned from `infra/grafana/provisioning/` on every start.
 
+Both containers run as non-root, though, so if those directories were created with `sudo mkdir`
+they are `root:root` and both services will crash-loop on permission denied
+(`open /prometheus/queries.active: permission denied`). Fix once:
+
+```bash
+sudo chown -R 65534:65534 /opt/homemediahub/stage/data/prometheus   # nobody
+sudo chown -R 472:472     /opt/homemediahub/stage/data/grafana      # grafana
+```
+
 ### 5. Pull the latest code
 
 ```bash
