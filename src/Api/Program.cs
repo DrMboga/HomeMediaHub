@@ -96,12 +96,20 @@ try
     builder.Services.AddMediatR(cfg =>
         cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 
-    var rabbitHost = builder.Configuration["RabbitMq:Host"]
-        ?? builder.Configuration["RABBITMQ_HOST"] ?? "rabbitmq";
-    var rabbitUser = builder.Configuration["RabbitMq:User"]
-        ?? builder.Configuration["RABBITMQ_USER"] ?? "guest";
-    var rabbitPass = builder.Configuration["RabbitMq:Pass"]
-        ?? builder.Configuration["RABBITMQ_PASS"] ?? "guest";
+    // The RABBITMQ_* env vars compose passes in must win over the appsettings RabbitMq section,
+    // which is only a local-dev default. Reading the config key first made the env vars dead:
+    // appsettings always supplied "guest", and guest is refused off-loopback by the broker.
+    var rabbitHost = RabbitSetting("RABBITMQ_HOST", "RabbitMq:Host", "rabbitmq");
+    var rabbitUser = RabbitSetting("RABBITMQ_USER", "RabbitMq:User", "guest");
+    var rabbitPass = RabbitSetting("RABBITMQ_PASS", "RabbitMq:Pass", "guest");
+
+    string RabbitSetting(string envKey, string configKey, string fallback)
+    {
+        // Blank counts as absent: compose sets the variable to "" when it's missing from .env.
+        var value = builder.Configuration[envKey];
+        if (string.IsNullOrWhiteSpace(value)) value = builder.Configuration[configKey];
+        return string.IsNullOrWhiteSpace(value) ? fallback : value;
+    }
 
     // Publish-only bus: the Api has no consumers, only publishes ScanRequested (admin/scheduler)
     // and FileDiscovered(Reprocess: true) (retry). SetEntityName kept consistent with MediaWorker
