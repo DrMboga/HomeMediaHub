@@ -42,6 +42,11 @@ export function PhotoCard({ item, className = 'gallery-card', durationSec }: Pro
           {durationSec != null ? formatDuration(durationSec) : ''}
         </div>
       )}
+      {item.distance != null && (
+        <span className="distance-badge" title="Cosine distance to the query — lower is closer">
+          {item.distance.toFixed(3)}
+        </span>
+      )}
       {item.originClass && item.originClass !== 'photo' && (
         <span className={`origin-badge origin-badge--${item.originClass}`}>
           {item.originClass}

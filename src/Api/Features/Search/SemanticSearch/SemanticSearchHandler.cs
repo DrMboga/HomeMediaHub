@@ -69,7 +69,7 @@ public sealed class SemanticSearchHandler : IRequestHandler<SemanticSearchReques
 
         // Preserve relevance order (ascending distance) — the frontend renders API order as-is.
         return ranked
-            .Select(r => files[r.Id].ToListItemDto())
+            .Select(r => files[r.Id].ToListItemDto() with { Distance = Math.Round(r.Distance, 4) })
             .ToList();
     }
 

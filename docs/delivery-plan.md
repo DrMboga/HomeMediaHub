@@ -631,13 +631,64 @@ Then prod: fresh rebuild with `.env.prod`, trigger full archive scan (Phase 9). 
 **multi-day** AI enrichment (CPU-bound, ~2–5 s/image × ~190K files); watch queue depth in
 Grafana — that is the backpressure working as designed.
 
+### Semantic search validation — 2026-08-07 ⚠️ item 7, quality shortfall
+
+Checklist item 7 was exercised against the 276-file stage library. Search **works** — the top
+1–2 hits for "Bells on the tower", "Bridge" and "Car" were the right photos — but every query
+returned exactly the 50-result limit, with obvious junk from about rank 3 onward.
+
+**Measured, not guessed** (query vector from the sidecar's `/embed/text`, distances read
+straight out of psql):
+
+- CLIP ViT-B/32 text↔image cosine distance spans only **~0.68–0.80 across the whole corpus** —
+  the modality gap. `Search:MaxCosineDistance: 0.8` sits above every row and filtered nothing.
+- **No query-independent cutoff can work.** "Bridge" has 2 true positives and its first false
+  positive is **0.003** away, so it needs a margin < 0.013. "Sea" is still returning genuine
+  results 0.043 out. Z-scoring doesn't rescue it — Sea's σ is legitimately larger because half
+  the library contains sky and water. Tuning the constant is the wrong *shape* of fix.
+- **ivfflat was exonerated** — indexed and `enable_indexscan = off` top-20 came back
+  byte-identical. The empty-table build is still worth redoing at prod scale (see Open risks),
+  but it was not causing the bad results here.
+- **Mean-centering the image embeddings was tested and rejected.** It is a 1.5× affine rescale
+  (z-score of the best match unchanged: 3.48 → 3.49 for Bridge), and its one ranking change
+  swapped a false positive for a different false positive.
+
+**Fixed:**
+
+1. **EXIF orientation was never applied.** `Image.open().convert("RGB")` does not honour the
+   Orientation tag and neither does ultralytics' loader, so any photo storing its rotation as
+   metadata reached *both* CLIP and YOLO on its side — and the centre crop landed in the wrong
+   place. Now `ImageOps.exif_transpose()`, with YOLO fed the oriented PIL image instead of the
+   path. (HEIC was already safe: `heif-convert` writes rotated pixels and the exiftool copy
+   skips `--Orientation`.)
+2. **The stock preprocess discarded the frame edges** — resize-shortest-side + `CenterCrop(224)`
+   drops ~12% per side on 4:3 and ~30% total on 16:9, so an edge subject never reached the
+   model. New `AI_CLIP_VIEWS` env (`center`/`full`/`both`, default `both`) averages the centre
+   crop with the whole frame squashed to the square input. Note this buys **coverage, not
+   detail**: ViT-B/32's 224×224 input is fixed by its patch grid and positional embeddings, so
+   no amount of extra compute raises resolution.
+3. **Relevance is now visible instead of implied.** `MediaListItemDto.Distance` is populated for
+   semantic search only and rendered as a mono badge on the card; default limit 50 → 15. Showing
+   50 results when 2 are right is what read as "broken".
+
+**Deferred** (Mike's call, in priority order): background-vocabulary softmax scoring — embed ~50
+generic prompts and score the query's relative probability per image, which is the principled fix
+for both the cutoff *and* CLIP hubness (a handful of photos rank top-5 for both "Bridge" and
+"Car"); hybrid search over the YOLO tags, which are stored but never read by the search handler;
+and a stronger model (ViT-L/14 or SigLIP) — it would genuinely widen that 0.003 separation, but
+turns the 190K-file prod pass from days into weeks on the i7-6700.
+
+Re-import of stage is required for 1 and 2 to take effect (embeddings must be regenerated).
+
 ## Open risks (accepted)
 
 - **Stuck sagas** — no scheduler timeout (needs delayed-message-exchange plugin). Mitigated by
   the always-publish AI contract + Admin stale surfacing; add saga `Schedule` later if it bites.
 - **MassTransit 8.x on net10** — targets net8; forward-compat expected, verify at first restore.
   OTel Prometheus exporters are pre-release — pin exact versions.
-- **ivfflat recall** — index created on an empty table; recreate once after the Phase 9 archive load.
+- **ivfflat recall** — index created on an empty table; recreate once after the Phase 9 archive
+  load. Verified *not* to be distorting results at stage scale (2026-08-07), but 276 rows is no
+  evidence about 190K.
 - **190K-message scan burst** — fine for RabbitMQ; ScanConsumer batches job inserts (~1000/SaveChanges).
 - **pika heartbeat** on a pathological multi-minute image — reconnect loop + redelivery covers
   it; redelivery count isn't tracked (visible in Grafana if it loops).
@@ -653,5 +704,6 @@ Grafana — that is the backpressure working as designed.
 Trigger a prod scan after Phase 8 verification. Ingest (hash/convert/thumbnail/save) is
 I/O-bound and finishes in hours; AI enrichment is CPU-bound and takes **days** — the library is
 browsable throughout. Afterwards: recreate the ivfflat index, review the `failed` jobs list,
-spot-check geo addresses and semantic search quality; tune `Search:MaxCosineDistance` against
-the full library.
+spot-check geo addresses and semantic search quality. Do **not** expect `Search:MaxCosineDistance`
+to be tunable into good results — the 2026-08-07 validation showed no single constant separates a
+narrow query from a broad one. Revisit the deferred background-vocabulary scoring instead.

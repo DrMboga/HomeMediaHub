@@ -23,7 +23,9 @@ public static class SearchEndpoints
             if (string.IsNullOrWhiteSpace(q))
                 return Results.BadRequest(new { error = "q is required" });
 
-            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 50, from, to, originClass), ct);
+            // 15 by default: the old 50 filled the page with near-noise on narrow queries
+            // (only ~2 real matches for "bridge", but 50 rows still cleared the cutoff).
+            var items = await m.Send(new SemanticSearchRequest(q, limit > 0 ? limit : 15, from, to, originClass), ct);
             return Results.Ok(items);
         });
 

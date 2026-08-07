@@ -1,8 +1,9 @@
+import os
 import threading
 from pathlib import Path
 
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from ultralytics import YOLO
 import open_clip
 
@@ -24,6 +25,15 @@ _ORIGIN_LABELS = [
 ]
 _ORIGIN_CLASSES = ["photo", "screenshot", "document", "artwork", "reference", "people"]
 _YOLO_CONFIDENCE_THRESHOLD = 0.30
+
+# ViT-B/32's input is fixed at 224x224 by its patch grid and learned positional
+# embeddings, so the only lever is how much of the frame reaches it — not detail.
+_CLIP_INPUT = 224
+# "center" = stock CLIP preprocess (resize shortest side, then centre-crop, which
+# silently discards ~12% per side on 4:3 and ~30% total on 16:9 — a subject near the
+# edge never reaches the model). "full" = whole frame squashed to the square input.
+# "both" = mean of the two views, renormalised. Costs one extra image encode.
+_CLIP_VIEWS = os.environ.get("AI_CLIP_VIEWS", "both").lower()
 
 # Serialise all inference — PyTorch CPU inference is not thread-safe under
 # concurrent load; the FastAPI /embed/text handler and the pika message loop
@@ -70,24 +80,50 @@ def analyze(file_path: str) -> dict:
     if not path.exists():
         raise InferenceError(f"File not found: {file_path}")
 
-    # Open and immediately close the file handle; convert() returns a new object
+    # Open and immediately close the file handle; exif_transpose() returns a new object.
     try:
-        img = Image.open(path)
-        pil_image = img.convert("RGB")
-        img.close()
+        with Image.open(path) as img:
+            # PIL does not honour the EXIF Orientation tag. Without this, a portrait
+            # photo that stores its rotation as metadata rather than in the pixels
+            # reaches CLIP and YOLO lying on its side — and the centre crop lands in
+            # the wrong place too. (The HEIC path is already upright: heif-convert
+            # writes rotated pixels and the exiftool copy skips --Orientation.)
+            pil_image = ImageOps.exif_transpose(img).convert("RGB")
     except Exception as e:
         raise InferenceError(f"Cannot open image: {e}") from e
 
     try:
         with _inference_lock:
-            return _run_inference(path, pil_image)
+            return _run_inference(pil_image)
     except Exception as e:
         raise InferenceError(f"Inference error: {e}") from e
 
 
-def _run_inference(path: Path, pil_image: Image.Image) -> dict:
+def _encode_image(pil_image: Image.Image) -> torch.Tensor:
+    """Unit-norm CLIP embedding of one image, per the _CLIP_VIEWS strategy."""
+    views = []
+    if _CLIP_VIEWS in ("center", "both"):
+        views.append(_clip_preprocess(pil_image))
+    if _CLIP_VIEWS in ("full", "both"):
+        # Pre-squashed to the square input so preprocess's Resize/CenterCrop become
+        # no-ops — this reuses its official ToTensor/Normalize rather than rebuilding it.
+        views.append(_clip_preprocess(pil_image.resize((_CLIP_INPUT, _CLIP_INPUT), Image.BICUBIC)))
+    if not views:
+        raise InferenceError(f"Invalid AI_CLIP_VIEWS: {_CLIP_VIEWS!r} (expected center|full|both)")
+
+    features = _clip_model.encode_image(torch.stack(views))
+    features = features / features.norm(dim=-1, keepdim=True)
+    # Mean of unit vectors, renormalised — the pooled view has to stay on the unit
+    # sphere the text queries are compared against.
+    pooled = features.mean(dim=0)
+    return pooled / pooled.norm()
+
+
+def _run_inference(pil_image: Image.Image) -> dict:
     # ── YOLOv8n object detection ─────────────────────────────────────────────
-    yolo_results = _yolo(str(path), verbose=False)[0]
+    # Fed the already-oriented PIL image, not the path — ultralytics' own loader
+    # ignores EXIF orientation, and this avoids a second decode of the same file.
+    yolo_results = _yolo(pil_image, verbose=False)[0]
     seen: dict[str, float] = {}
     for box in yolo_results.boxes:
         label = _yolo.names[int(box.cls[0])]
@@ -101,18 +137,16 @@ def _run_inference(path: Path, pil_image: Image.Image) -> dict:
     ]
 
     # ── CLIP ViT-B/32 — embedding + origin classification ────────────────────
-    image_tensor = _clip_preprocess(pil_image).unsqueeze(0)
     with torch.no_grad():
-        image_features = _clip_model.encode_image(image_tensor)
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        image_features = _encode_image(pil_image)          # 1-D, unit norm
         probs = (100.0 * image_features @ _text_features.T).softmax(dim=-1)
 
-    embedding: list[float] = image_features.squeeze(0).tolist()
-    origin_idx = int(probs.argmax(dim=-1).item())
+    embedding: list[float] = image_features.tolist()
+    origin_idx = int(probs.argmax().item())
 
     return {
         "tags": tags,
         "embedding": embedding,
         "originClass": _ORIGIN_CLASSES[origin_idx],
-        "originConfidence": float(probs[0][origin_idx]),
+        "originConfidence": float(probs[origin_idx]),
     }

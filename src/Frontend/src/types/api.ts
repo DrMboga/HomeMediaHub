@@ -8,6 +8,8 @@ export interface MediaListItem {
   originClass: string | null
   originConfidence: number | null
   address: string | null
+  /** Cosine distance to the query vector — semantic search only, absent elsewhere. Lower is closer. */
+  distance?: number | null
 }
 
 export interface TagDto {
