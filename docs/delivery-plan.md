@@ -680,6 +680,83 @@ turns the 190K-file prod pass from days into weeks on the i7-6700.
 
 Re-import of stage is required for 1 and 2 to take effect (embeddings must be regenerated).
 
+**Result after the re-import** (same day). Absolute distances are not comparable across the
+re-import — the embeddings changed, so the whole scale can shift. Rank quality and the shape of
+the result head are:
+
+| query | before | after |
+|-------|--------|-------|
+| Bridge | 0.7168 / 0.7268 both bridges, then **0.7297 treetops** — false positive 0.003 behind | 0.719 / 0.723 both bridges, then **0.731 treetops** — 0.008 behind |
+| Car | 0.7341 car / 0.7346 **wooden building** / 0.7381 | **0.721 car / 0.742 car** / 0.744 trees — #1 sits 0.021 clear |
+| Bells on the tower | bells photo #1 | **0.692**, then 0.726 — a 0.034 gap, best result of any query tested |
+
+The Bridge false-positive margin roughly tripled and Car's top two are now both actually cars.
+Real but modest, as expected.
+
+**"Bells" alone still returns nothing relevant — and that is a query-side problem, not an
+embedding one.** The same bells photo scores 0.692 for "Bells on the tower" but is absent from
+the top 15 for "Bells", which instead returns portraits of people. A bare plural appears to
+collide with the name/"belle" sense in CLIP's training distribution (the tokenizer lowercases, so
+capitalisation is not the factor); context disambiguates it. Mechanism is inference, behaviour is
+reproducible.
+
+**The distance badge now answers the original "how well does this match?" question — read the
+shape of the head, not the number:**
+
+- sharp cliff after #1 (0.692 → 0.726) = found it
+- small cluster then a step (0.719 / 0.723 → 0.731) = found two
+- flat and starting high (0.735 / 0.740 / 0.744 / 0.747…) = **found nothing**
+
+That is a relative, query-independent signal, unlike the absolute cutoff that provably cannot work.
+
+**Untried, cheapest next lever: prompt ensembling.** Average the text embeddings of several
+templates instead of the single `"a photo of {query}"` at `SemanticSearchHandler.cs:31`. It is the
+standard fix for exactly the "Bells" ambiguity, it is **text-side only so no re-import is needed**,
+and it is instantly revertible. With one bells photo in 276 there is no guarantee it surfaces.
+
+### YOLO tags — audit as of 2026-08-07 (nothing here has changed yet)
+
+Asked what the tags are for; the answer from the code:
+
+- **Produced** — `inference.py` `_run_inference()`: YOLOv8n, COCO's fixed **80 classes**,
+  confidence ≥ 0.30, deduped to the highest confidence per label per image.
+- **Stored** — `ApplyEnrichmentConsumer.cs:67-73`, delete-then-insert into `media_tags`
+  (idempotent replace, so re-enrichment does not duplicate).
+- **Shown** — exactly one place: `Lightbox.tsx:221`, joined with `·`. Read-only.
+- **Queryable** — `GET /api/search/tags` → `TagSearchHandler`: exact single-tag match, newest
+  first, limit 100, **not paged**.
+- **Unreachable from the UI** — `tagSearch()` exists at `src/Frontend/src/api/search.ts:17` and
+  no page imports it. Dead client function; the search box only ever calls `semanticSearch`.
+
+So tags are computed on every photo, stored, displayed passively, and backed by a working API that
+nothing calls.
+
+**Why combining them with CLIP is attractive:** the two have opposite failure modes. CLIP handles
+any phrasing but is fuzzy on everything — a 0.1-wide score band plus hub images that rank top-5
+for unrelated queries. YOLO knows only 80 things but is near-binary within them. "Car" is the
+textbook case: ranks 1–2 are real cars, then 0.744/0.747/0.748 are the tree photos that also
+pollute "Bridge" — and `car` is a COCO class, so a tag lookup drops them deterministically with no
+threshold tuning. **The limit is sharp:** COCO has no *bridge*, *bell*, *tower*, *sea*, *forest* or
+*mountain*, so of the four queries tested this fixes **"Car" only**. It also needs a query→class
+alias table for plurals and synonyms.
+
+**Unrun — server was powered down before this could be answered.** Start here next session, since
+it decides both whether the hybrid is worth building and how the Tags page below should look (a
+5-tag chip row and a 60-tag one are different designs):
+
+```sql
+SELECT tag, count(*) AS photos, round(avg(confidence)::numeric,2) AS avg_conf
+FROM media_tags GROUP BY tag ORDER BY photos DESC;
+
+SELECT count(*) AS untagged
+FROM media_files f
+WHERE NOT f.is_deleted
+  AND NOT EXISTS (SELECT 1 FROM media_tags t WHERE t.media_file_id = f.id);
+```
+
+YOLO on landscape and family photos may produce very few tags. If most of the 276 files come back
+untagged, both the Tags page and the hybrid are worth far less than they look on paper.
+
 ## Open risks (accepted)
 
 - **Stuck sagas** — no scheduler timeout (needs delayed-message-exchange plugin). Mitigated by
@@ -707,3 +784,51 @@ browsable throughout. Afterwards: recreate the ivfflat index, review the `failed
 spot-check geo addresses and semantic search quality. Do **not** expect `Search:MaxCosineDistance`
 to be tunable into good results — the 2026-08-07 validation showed no single constant separates a
 narrow query from a broad one. Revisit the deferred background-vocabulary scoring instead.
+
+---
+
+## Phase 10 — Tags page
+
+**Goal:** make the YOLO tags reachable. Today they are computed on every photo, stored, and shown
+only as passive text in the lightbox — see the audit under the 2026-08-07 validation above.
+
+A new `/tags` page showing every tag in the database as a **chip**, and a paginated grid of the
+photos carrying the selected tags. Selecting several chips filters with **AND** — a photo must
+carry *all* selected tags to appear.
+
+Independent of Phase 9; can be built before or after the archive import.
+
+**Step 0 — run the tag-distribution query first** (recorded above). The chip list's size drives
+the layout, and a mostly-untagged library would mean rethinking the whole feature rather than
+building it.
+
+**API** (`src/Api`)
+
+- `GET /api/tags` → `[{ tag, count }]` ordered by count desc — distinct tags over non-deleted media.
+- `GET /api/tags/media?tags=car&tags=person&page=1&pageSize=50` → `PagedResult<MediaListItemDto>`
+  (the record already exists in `MediaDtos.cs`), ordered `TakenAt` desc to match Gallery.
+- AND translation: group `media_tags` by `media_file_id` where `tag IN (@tags)`, then
+  `HAVING COUNT(DISTINCT tag) = @tagCount`. Use `COUNT(DISTINCT …)` deliberately —
+  `media_tags` has only a non-unique index on `Tag` (`MediaModelConfiguration.cs:67`), no unique
+  `(media_file_id, tag)`. The sidecar dedupes labels per image and apply-enrichment replaces
+  rather than appends, so duplicates should not occur, but `DISTINCT` removes the assumption for free.
+- Retire the dead path as part of this: `GET /api/search/tags` + `TagSearchHandler` +
+  `tagSearch()` in `search.ts` are unused and would otherwise leave two competing tag routes.
+
+**Frontend** (`src/Frontend`)
+
+- `src/api/tags.ts`; `pages/TagsPage.tsx`; route `/tags` + nav link.
+- Chip row: every tag with its count, toggle to select, multi-select, "Clear all". Selected state
+  must be visually unmistakable — AND filtering is confusing when you cannot see what is active.
+- Show the active filter in words ("car AND person") so the logic is self-evident.
+- Grid reuses `PhotoCard` + `.gallery-grid`; pager reuses `.pager-btn`. No `distance` badge here —
+  that field stays null outside semantic search.
+- **The empty state matters more than usual.** AND across three or more COCO classes will very
+  often return zero photos; the page must say so clearly and offer to drop a chip, not look broken.
+
+**Decision to make before building:** whether the tag list and grid exclude `OriginClass == "meme"`
+the way semantic search does (`SemanticSearchHandler.cs:45`), or show everything the way Gallery
+does. Not obvious either way — worth a call rather than a silent default.
+
+**Not in scope here:** the CLIP + tag hybrid *ranking* described in the audit. That changes the
+semantic search box; this phase only adds browse-by-tag. They share the data, not the code path.
