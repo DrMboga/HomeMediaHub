@@ -162,7 +162,7 @@ public sealed class MetadataService
     private static DateTime? ParseDateTime(string? value) =>
         DateTime.TryParseExact(value, "yyyy:MM:dd HH:mm:ss",
             CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
-            ? dt : null;
+            ? dt.ToUniversalTime() : null;
 
     // ExifTool dates: "yyyy:MM:dd HH:mm:ss" or "yyyy:MM:dd HH:mm:ss+HH:mm"
     private static DateTime? ParseExiftoolDate(JsonElement exif, string tag)
