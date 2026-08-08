@@ -916,15 +916,26 @@ retries every 10 s for up to 30 attempts behind a "Preparing video…" status, t
 Retry. This is the piece that makes the "transcode survives client disconnect" decision above
 actually pay off.
 
-**Videos already transcoded before this fix have no audio and must be re-generated** — delete the
-cached MP4s and the `video_transcodes` rows:
+**Verified working on stage 2026-08-08** — `IMG_0750.MOV` (155 MB) probes `h264` + `aac`, so it
+remuxes with `-c:v copy -c:a copy` and plays on first open with sound.
 
-```sql
-TRUNCATE public.video_transcodes;
-```
+**Videos transcoded before this fix have no audio and must be regenerated.** Clear *both* the
+files and the DB rows — `StreamMediaHandler` checks `File.Exists(outputPath)` **before** it reads
+`video_transcodes`, so an orphaned MP4 on disk is still served even after the table is truncated:
+
 ```bash
-rm -f /opt/homemediahub/stage/data/video-cache/*.mp4
+set -a; . ./.env.stage; set +a
+rm -f "$VIDEO_CACHE_DIR"/*.mp4
+docker compose --env-file .env.stage exec -T postgres psql -U postgres -d homemediahub_db \
+  -c "TRUNCATE public.video_transcodes;"
 ```
+
+**Path gotcha that wasted a round trip:** the cache dirs are **not** under the data root.
+Stage's are a *sibling* of `data/` (`/opt/homemediahub/stage/video-cache`), and prod's are on the
+HDD entirely (`/mnt/storage/video-cache`). A delete aimed at `.../stage/data/video-cache/` silently
+matches nothing and leaves the stale, audio-less file in place — which then looks exactly like the
+fix not working. Always read the paths from `VIDEO_CACHE_DIR` / `DISPLAY_CACHE_DIR` /
+`THUMBNAILS_DIR` in the env file. CLAUDE.md's Environments section has been corrected to say so.
 
 **Still true after all that:** a long HEVC re-encode cannot complete inside one request. It will
 now finish in the background and be cached, so the *second* attempt plays — but the first still

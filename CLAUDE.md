@@ -229,8 +229,19 @@ Two isolated environments from one `docker-compose.yml`; only one runs at a time
 | **prod** | `docker compose --env-file .env.prod up -d` | `/mnt/storage/Photo` (SATA HDD) | `/opt/homemediahub/data/` |
 
 Data roots hold bind-mounted volumes: `postgres/`, `immich-postgres/`, `geoservice-postgres/`,
-`rabbitmq/`, `prometheus/`, `grafana/`. Recreatable caches: `thumbnails/`, `video-cache/`,
-`display-cache/`. Shared temp for conversions: `/tmp/homemediahub-{stage|prod}/` → `/shared-temp`.
+`rabbitmq/`, `prometheus/`, `grafana/`.
+
+**The recreatable caches are NOT under the data root** — they sit beside the photo library, on
+whichever disk holds it (prod's are on the HDD because 190K thumbnails are large):
+
+| Cache dirs | stage | prod |
+|------------|-------|------|
+| `thumbnails/` · `video-cache/` · `display-cache/` | `/opt/homemediahub/stage/` | `/mnt/storage/` |
+
+Exact paths come from `THUMBNAILS_DIR` / `VIDEO_CACHE_DIR` / `DISPLAY_CACHE_DIR` in the env file —
+read them from there rather than assuming, and note stage's are a *sibling* of `data/`, not a child.
+
+Shared temp for conversions: `/tmp/homemediahub-{stage|prod}/` → `/shared-temp`.
 Env vars incl. `RABBITMQ_USER`, `RABBITMQ_PASS`, `GRAFANA_PASSWORD` (Phase 8); `SERVER_IP` removed.
 
 ## Common Commands
@@ -255,6 +266,14 @@ curl http://192.168.0.192/api/admin/pipeline/status -H "Authorization: Bearer $T
 
 # one-off psql
 docker compose --env-file .env.stage exec postgres psql -U postgres -d homemediahub_db
+
+# clear a recreatable cache (paths come from the env file — never guess them)
+set -a; . ./.env.stage; set +a          # or .env.prod
+rm -f "$VIDEO_CACHE_DIR"/*.mp4          # forces re-transcode on next play
+rm -f "$DISPLAY_CACHE_DIR"/*.jpg        # forces HEIC re-conversion
+# video-cache is also indexed in the DB; clear both or the stale row wins
+docker compose --env-file .env.stage exec -T postgres psql -U postgres -d homemediahub_db \
+  -c "TRUNCATE public.video_transcodes;"
 
 # EF migrations (note the worker's separate history table)
 dotnet ef migrations add <Name> --project src/Api
