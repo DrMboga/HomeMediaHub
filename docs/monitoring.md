@@ -168,10 +168,18 @@ Labels: `messaging_masstransit_destination` (the queue), `messaging_masstransit_
 **Fault counters are registered lazily** — `consume_fault_ea_total` does not exist until something
 actually faults. An empty faults panel on a healthy stack is correct, not a broken query.
 
-**Per-queue RabbitMQ metrics come from a separate scrape job.** `rabbitmq_prometheus` defaults to
-`return_per_object_metrics = false`, so the plain `/metrics` endpoint aggregates and carries no
-`queue` label at all. `prometheus.yml` therefore has a second job, `rabbitmq-queues`, hitting
-`/metrics/detailed?family=queue_coarse_metrics`.
+**Per-queue RabbitMQ metrics come from a separate scrape job, under a different name.**
+`rabbitmq_prometheus` defaults to `return_per_object_metrics = false`, so the plain `/metrics`
+endpoint aggregates and carries no `queue` label at all. `prometheus.yml` therefore has a second
+job, `rabbitmq-queues`, hitting `/metrics/detailed?family=queue_coarse_metrics` — and **that
+endpoint prefixes its metric names with `rabbitmq_detailed_`**:
+
+```
+rabbitmq_detailed_queue_messages_ready   # per-queue, has the `queue` label — use this
+rabbitmq_queue_messages_ready            # aggregated, NO queue label — looks right, matches nothing
+```
+
+Both names exist simultaneously, which is what makes this trap so easy to fall into twice.
 
 ```bash
 # are all targets up?
@@ -185,7 +193,7 @@ curl -s localhost:9090/api/v1/label/__name__/values | jq -r '.data[] | select(te
 curl -s 'localhost:9090/api/v1/series?match[]=messaging_masstransit_consume_ea_total' | jq '.data[0]'
 
 # per-queue depth right now
-curl -s 'localhost:9090/api/v1/query?query=rabbitmq_queue_messages_ready' \
+curl -s 'localhost:9090/api/v1/query?query=rabbitmq_detailed_queue_messages_ready' \
   | jq -r '.data.result[] | "\(.metric.queue) \(.value[1])"'
 ```
 

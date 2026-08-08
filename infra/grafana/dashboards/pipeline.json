@@ -10,13 +10,13 @@
     {
       "id": 1,
       "title": "Queue depth (messages ready)",
-      "description": "Fed by the rabbitmq-queues scrape job (/metrics/detailed?family=queue_coarse_metrics). The plain /metrics endpoint aggregates and carries no `queue` label.",
+      "description": "Fed by the rabbitmq-queues scrape job (/metrics/detailed?family=queue_coarse_metrics), which prefixes its metric names with rabbitmq_detailed_. The plain /metrics endpoint publishes rabbitmq_queue_messages_ready aggregated, with no `queue` label — both names exist, only the detailed one is per-queue.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rabbitmq_queue_messages_ready{queue=~\"media-scan|media-ingest|media-enrichment-saga|ai-analysis|ai-analysis-completed|geo-lookup|media-apply-enrichment|media-job-status\"}",
+          "expr": "rabbitmq_detailed_queue_messages_ready{queue=~\"media-scan|media-ingest|media-enrichment-saga|ai-analysis|ai-analysis-completed|geo-lookup|media-apply-enrichment|media-job-status\"}",
           "legendFormat": "{{queue}}"
         }
       ]
@@ -24,12 +24,13 @@
     {
       "id": 2,
       "title": "Error queue depth",
+      "description": "Empty until MassTransit dead-letters something — *_error queues are created lazily. Note this will NOT catch file-level processing failures: IngestConsumer catches them and publishes MediaProcessingFailed, so the consume succeeds and nothing is dead-lettered. Those land in processing_jobs as `failed` and are visible only on the Admin page.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rabbitmq_queue_messages_ready{queue=~\".*_error\"}",
+          "expr": "rabbitmq_detailed_queue_messages_ready{queue=~\".*_error\"}",
           "legendFormat": "{{queue}}"
         }
       ]
