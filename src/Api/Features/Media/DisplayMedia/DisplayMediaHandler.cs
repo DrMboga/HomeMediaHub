@@ -1,4 +1,5 @@
 using Api.Data;
+using Api.Infrastructure;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,6 +11,9 @@ public record DisplayMediaResult(string FilePath, string ContentType);
 
 public sealed class DisplayMediaHandler : IRequestHandler<DisplayMediaRequest, DisplayMediaResult?>
 {
+    // A single HEIC decode is fast; this is an upper bound against a wedged child, not a budget.
+    private static readonly TimeSpan ConvertTimeout = TimeSpan.FromMinutes(2);
+
     private readonly AppDbContext _db;
     private readonly ILogger<DisplayMediaHandler> _logger;
 
@@ -39,29 +43,32 @@ public sealed class DisplayMediaHandler : IRequestHandler<DisplayMediaRequest, D
         if (File.Exists(cachePath))
             return new DisplayMediaResult(cachePath, "image/jpeg");
 
-        // Convert on demand
+        // Convert on demand. Runs through ProcessRunner for the drained pipes and the
+        // kill-on-timeout that this handler previously lacked — the same shape of bug that
+        // hung large video transcodes, latent here only because heif-convert is quiet.
         Directory.CreateDirectory(req.DisplayCacheDir);
 
-        var psi = new System.Diagnostics.ProcessStartInfo("heif-convert")
-        {
-            RedirectStandardError = true,
-            UseShellExecute       = false,
-        };
+        // Convert to a unique temp file and move on success: the path is served straight off
+        // disk on the next request, so a partial JPEG must never be left at the cache path.
+        var tempPath = Path.Combine(req.DisplayCacheDir, $"{req.Id}.{Guid.NewGuid():N}.part.jpg");
+
+        var psi = new System.Diagnostics.ProcessStartInfo("heif-convert");
         psi.ArgumentList.Add("-q");
         psi.ArgumentList.Add("90");
         psi.ArgumentList.Add(f.FilePath);
-        psi.ArgumentList.Add(cachePath);
+        psi.ArgumentList.Add(tempPath);
 
-        using var proc = System.Diagnostics.Process.Start(psi)!;
-        await proc.WaitForExitAsync(ct);
+        var result = await ProcessRunner.RunAsync(psi, ConvertTimeout);
 
-        if (proc.ExitCode != 0 || !File.Exists(cachePath))
+        if (!result.Succeeded || !File.Exists(tempPath))
         {
-            var err = await proc.StandardError.ReadToEndAsync(ct);
-            _logger.LogError("heif-convert failed for {MediaId}: {Error}", req.Id, err);
+            _logger.LogError("heif-convert failed for {MediaId} (timedOut={TimedOut}, exit={ExitCode}): {Error}",
+                req.Id, result.TimedOut, result.ExitCode, result.StandardError);
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best effort */ }
             return null;
         }
 
+        File.Move(tempPath, cachePath, overwrite: true);
         return new DisplayMediaResult(cachePath, "image/jpeg");
     }
 }

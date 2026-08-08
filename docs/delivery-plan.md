@@ -779,7 +779,7 @@ untagged, both the Tags page and the hybrid are worth far less than they look on
 Five items from Mike's UI pass. Causes below are **read off the code**, not guessed; effort is
 sized against that. Do these before the prod archive import — items 2 and 5 get worse at scale.
 
-**Status: 1–4 fixed 2026-08-08 (frontend rebuild needed, no re-import). 5 still open.**
+**Status: all five fixed 2026-08-08. No re-import needed for any of them.**
 
 ### 1. Photo of the Day renders the thumbnail, not the photo — ✅ fixed
 
@@ -856,7 +856,7 @@ and saved `original.txt`. The value must be `true`/`false`.
 `VideosPage.tsx:15` passes `sortAsc: true`. `GetMediaListHandler.cs:19` already defaults
 `SortAsc = false` (newest first, matching Gallery). Drop the argument.
 
-### 5. Large videos never play — ⬜ open; the real work, three separate faults
+### 5. Large videos never play — ✅ fixed; three separate faults
 
 `IMG_0750.MOV` (155 MB) spins, then stops with no video. `StreamMediaHandler.cs:44-54` has three
 independent problems, any one of which is fatal:
@@ -875,23 +875,37 @@ independent problems, any one of which is fatal:
    CPU-only i7-6700 takes minutes. nginx sets no `proxy_read_timeout` for `/api/`, so the 60 s
    default cuts the connection regardless of what the backend does.
 
-**Fix, in order of value:**
+**`ffprobe` on `IMG_0750.MOV` returned `h264`** — confirming the remux path applies to it.
 
-- **Remux instead of re-encode when possible.** iPhone `.MOV` is usually H.264/AAC already in a
-  QuickTime container — `ffprobe` the codec and, when it is H.264, use
-  `-c copy -movflags +faststart`, which is near-instant instead of minutes. This alone probably
-  makes Mike's file play. HEVC still needs a real encode.
-- Drain both pipes asynchronously, or stop redirecting what is never read.
-- Add an explicit timeout with `Kill(entireProcessTree: true)`; apply the same to
-  `DisplayMediaHandler`.
-- Write to a temp path and move atomically on success, so a partial file is never served or cached.
-- Single-flight per media id so concurrent requests share one transcode.
-- Raise `proxy_read_timeout` on the `/api/` location for the cases that still need a real encode.
+**Fix applied:**
 
-**Still unsolved after all that:** a long HEVC re-encode cannot fit in one request. If that turns
-out to be common in the library, transcoding has to move to a background job with a polling
-endpoint — a design change, deliberately out of scope here until the remux fast path shows how
-many files actually need it.
+- **Remux instead of re-encode when the streams are already playable.** `ffprobe` reports the
+  video and audio codecs; H.264 video gets `-c:v copy`, AAC audio `-c:a copy`, anything else the
+  full encode. An iPhone `.MOV` is H.264/AAC in a QuickTime wrapper, so this is a stream copy —
+  seconds, against minutes for a 155 MB libx264 pass. Note audio is decided separately, so a
+  PCM-audio camera file still gets the fast video path with only the audio re-encoded.
+- **New `src/Api/Infrastructure/ProcessRunner.cs`** — drains both pipes concurrently *before*
+  awaiting exit, and enforces a timeout with `Kill(entireProcessTree: true)`. Used by both the
+  stream and display handlers so the pattern exists once rather than three times.
+- **`ProcessRunner` deliberately takes no `CancellationToken`.** These runs populate a cache, so a
+  browser giving up at nginx's timeout must not throw away work — the transcode finishes, caches,
+  and the next click is instant. Previously a disconnect orphaned ffmpeg *and* discarded the work,
+  so a slow video could never finish no matter how many times it was clicked.
+- Temp file + `File.Move` on success, so a partial `.mp4`/`.jpg` is never served or cached.
+- `-nostdin` (ffmpeg blocks on stdin otherwise) and `-loglevel error`.
+- Single-flight `SemaphoreSlim` per media id; concurrent requests share one transcode.
+- `proxy_read_timeout`/`proxy_send_timeout` raised to 300s on nginx's `/api/` location.
+- Timeout configurable via `Video:TranscodeTimeoutMinutes` (default 30).
+
+`ffprobe` ships with the `ffmpeg` package already installed in `src/Api/Dockerfile`, so the image
+is unchanged.
+
+**Still true after all that:** a long HEVC re-encode cannot complete inside one request. It will
+now finish in the background and be cached, so the *second* attempt plays — but the first still
+fails from the browser's point of view. If the library turns out to hold many HEVC videos, that
+wants a background job with a polling endpoint. Deliberately not built yet: the remux path may
+well cover almost everything, and that is cheap to find out by watching for `re-encode` in the
+`ffmpeg {Mode} for {MediaId} took {Elapsed}` log line.
 
 ---
 
