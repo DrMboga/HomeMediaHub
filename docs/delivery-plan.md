@@ -841,10 +841,15 @@ only; not worth a schema change today, but it will resurface looking like a fres
 `GET /api/media/{id}/original` already exists (`MediaEndpoints.cs:42`) and is public by design.
 
 **Fix:** add a download control to the Lightbox pointing at it. Do it properly rather than a bare
-`<a download>`: the endpoint's `Results.File(...)` at `:52` sets no `fileDownloadName`, so the
-saved file would be named `original`. Add an opt-in `?download=1` that supplies
+`<a download>`: the endpoint's `Results.File(...)` set no `fileDownloadName`, so the saved file
+would be named `original`. Added an opt-in `?download=true` that supplies
 `Path.GetFileName(f.FilePath)` as the download name, leaving the default inline behaviour intact
 for `<img>`/`<video>` consumers.
+
+**Gotcha that cost a round trip:** the first attempt emitted `?download=1`, which fails —
+`bool.TryParse` rejects `"1"`, and minimal APIs answer an unparseable query value with **400**
+rather than falling back to the parameter default. Chrome surfaced that as "Site wasn't available"
+and saved `original.txt`. The value must be `true`/`false`.
 
 ### 4. Videos page sorted oldest-first — ✅ fixed
 

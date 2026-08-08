@@ -49,10 +49,11 @@ public static class MediaEndpoints
             if (f is null || !File.Exists(f.FilePath))
                 return Results.NotFound();
 
-            // ?download=1 attaches the real filename (Content-Disposition: attachment) for the
+            // ?download=true attaches the real filename (Content-Disposition: attachment) for the
             // Lightbox's download control. Without it the response stays inline, which is what
             // <img>/<video> src consumers need — and a bare <a download> would otherwise save
-            // the file as "original".
+            // the file as "original". Note the value must be "true"/"false": bool.TryParse
+            // rejects "1", and minimal APIs answer an unparseable query value with a 400.
             return download
                 ? Results.File(f.FilePath, f.MimeType, Path.GetFileName(f.FilePath), enableRangeProcessing: true)
                 : Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);

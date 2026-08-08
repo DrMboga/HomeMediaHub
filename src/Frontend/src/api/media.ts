@@ -14,8 +14,10 @@ export function thumbnailUrl(id: string) {
   return `/api/media/${id}/thumbnail`
 }
 
+// "true", not "1" — the endpoint binds a bool, and .NET's bool.TryParse rejects "1",
+// which minimal APIs turn into a 400 rather than falling back to the default.
 export function originalUrl(id: string, download = false) {
-  return `/api/media/${id}/original${download ? '?download=1' : ''}`
+  return `/api/media/${id}/original${download ? '?download=true' : ''}`
 }
 
 export function displayUrl(id: string) {
