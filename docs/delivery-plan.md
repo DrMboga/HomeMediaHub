@@ -798,13 +798,59 @@ carry *all* selected tags to appear.
 
 Independent of Phase 9; can be built before or after the archive import.
 
-**Step 0 — run the tag-distribution query first** (recorded above). The chip list's size drives
-the layout, and a mostly-untagged library would mean rethinking the whole feature rather than
-building it.
+### Measured tag distribution — 2026-08-08 (step 0, done)
+
+Run against stage's 276 files. **Read every number below as a 276-photo sample, not a verdict:
+prod is ~190K files, roughly 690×.**
+
+- **46 distinct tags, with a brutal long tail.** `person` 99 photos (36% of the library), then a
+  cliff — `book` 20, `car` 17, `boat` 9, nothing else above 8. **32 of the 46 tags cover ≤ 3
+  photos**, 16 of them just one.
+- **Confidence is low across that tail.** The sidecar threshold is 0.30 and much of the tail sits
+  barely above it (`bird` 0.31, `backpack` 0.31, `horse` 0.32, `sandwich` 0.33, `airplane` 0.34).
+  Real signal by contrast: `person` 0.78, `car` 0.71, `vase` 0.71, `remote` 0.72. `book` at 20
+  photos / 0.54 is suspect — rectangular objects get called books.
+- **Coverage: 111 of 276 photos (40%) carry no tags at all.**
+- **Tags per photo:** 0 → 111 · 1 → 108 · 2 → 35 · 3 → 14 · 4 → 5 · 5 → 2 · 8 → 1.
+  Only **57 photos (21%) have 2+ tags**; 22 (8%) have 3+.
+- **Co-occurrence: 98 non-empty pairs out of a possible 1035 — 90% of two-chip selections return
+  zero.** Of the 98 that work, only **13 return ≥ 3 photos**, and `person` is in 9 of those 13.
+  The best pair in the library is `bottle`+`person` at 7 photos.
+
+Sanity check passed at the same time: `media_files` 276 / live 276 / `media_embeddings` 276. The
+earlier 273-vs-276 was three soft-deleted rows; the fresh import has no orphans.
+
+**What this changes.** AND filtering is not inherently broken — it is starved by sample size. At
+prod scale (if TestPhoto is representative; it spans 2007–2026 and looks like a genuine
+cross-section, but it *is* a curated subset) `person` becomes ~68K photos and `bottle`+`person`
+~4,800 rather than 7. So judge the design at prod scale, but build in the two things that hold at
+**both** scales:
+
+1. **Facet narrowing is mandatory, not optional.** Once a chip is selected, grey out chips that do
+   not co-occur with the current selection — one extra query, and AND can never dead-end. Correct
+   UX at 190K; at stage scale it is the only thing preventing a page that returns nothing 90% of
+   the time.
+2. **The chip floor must be relative, not a constant.** "≥ 4 photos" yields 14 chips today and all
+   46 after the archive import, which defeats the point. Use top-N by count or a percentage of the
+   library so it survives the scale jump.
+
+**Explicitly rejected for v1: a confidence floor on results.** Filtering `media_tags.confidence >=
+0.5` was considered and dropped — it would thin an already-starved dataset, and the junk tail is
+better handled by the chip floor, which costs nothing in results. Revisit after the prod import.
+
+**Pagination will rarely engage.** It matters only for single-chip `person` (99 today, ~68K later);
+every multi-chip selection fits one screen at stage scale. Keep it, but do not design around it
+being the common path.
+
+Also note `person` (99) overlaps heavily with the existing `people` origin-class filter, so it may
+earn less as a chip than its count suggests.
 
 **API** (`src/Api`)
 
-- `GET /api/tags` → `[{ tag, count }]` ordered by count desc — distinct tags over non-deleted media.
+- `GET /api/tags?selected=car&selected=person` → `[{ tag, count }]` ordered by count desc. With no
+  `selected`, the full vocabulary over non-deleted media. With `selected`, the counts are those
+  *remaining* alongside the current selection — one endpoint serves both the initial chip row and
+  the facet narrowing, and a zero/absent count is what greys a chip out.
 - `GET /api/tags/media?tags=car&tags=person&page=1&pageSize=50` → `PagedResult<MediaListItemDto>`
   (the record already exists in `MediaDtos.cs`), ordered `TakenAt` desc to match Gallery.
 - AND translation: group `media_tags` by `media_file_id` where `tag IN (@tags)`, then
@@ -818,13 +864,17 @@ building it.
 **Frontend** (`src/Frontend`)
 
 - `src/api/tags.ts`; `pages/TagsPage.tsx`; route `/tags` + nav link.
-- Chip row: every tag with its count, toggle to select, multi-select, "Clear all". Selected state
-  must be visually unmistakable — AND filtering is confusing when you cannot see what is active.
+- Chip row: tags above the relative floor, each with its count, toggle to select, multi-select,
+  "Clear all", plus a "show all" toggle for the long tail. **Three visual states, not two**:
+  unselected, selected, and *disabled* (would yield zero given the current selection). Selected
+  and disabled must both be unmistakable — AND filtering is baffling when you can neither see
+  what is active nor tell which chips are dead ends.
 - Show the active filter in words ("car AND person") so the logic is self-evident.
 - Grid reuses `PhotoCard` + `.gallery-grid`; pager reuses `.pager-btn`. No `distance` badge here —
   that field stays null outside semantic search.
-- **The empty state matters more than usual.** AND across three or more COCO classes will very
-  often return zero photos; the page must say so clearly and offer to drop a chip, not look broken.
+- **The empty state still matters** even with facet narrowing — it is the safety net for races and
+  for filter combinations the narrowing query does not cover. It must say so clearly and offer to
+  drop a chip, not look broken.
 
 **Decision to make before building:** whether the tag list and grid exclude `OriginClass == "meme"`
 the way semantic search does (`SemanticSearchHandler.cs:45`), or show everything the way Gallery
