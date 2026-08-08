@@ -10,6 +10,7 @@
     {
       "id": 1,
       "title": "Queue depth (messages ready)",
+      "description": "Fed by the rabbitmq-queues scrape job (/metrics/detailed?family=queue_coarse_metrics). The plain /metrics endpoint aggregates and carries no `queue` label.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -41,7 +42,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(rate(messaging_masstransit_consume_total[5m])) by (messaging_masstransit_destination)",
+          "expr": "sum(rate(messaging_masstransit_consume_ea_total[5m])) by (messaging_masstransit_destination)",
           "legendFormat": "{{messaging_masstransit_destination}}"
         }
       ]
@@ -49,12 +50,13 @@
     {
       "id": 4,
       "title": "MassTransit consume faults",
+      "description": "Empty until the first consume fault — MassTransit registers fault counters lazily, so the series does not exist on a stack that has never failed. Verify against the corrupt-file check (stage checklist item 5).",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(rate(messaging_masstransit_consume_errors_total[5m])) by (messaging_masstransit_destination)",
+          "expr": "sum(rate(messaging_masstransit_consume_fault_ea_total[5m])) by (messaging_masstransit_destination)",
           "legendFormat": "{{messaging_masstransit_destination}}"
         }
       ]
@@ -65,9 +67,10 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(messaging_masstransit_consume_duration_seconds_bucket[5m])) by (le, messaging_masstransit_destination))",
+          "expr": "histogram_quantile(0.95, sum(rate(messaging_masstransit_consume_duration_milliseconds_bucket[5m])) by (le, messaging_masstransit_destination))",
           "legendFormat": "{{messaging_masstransit_destination}}"
         }
       ]
@@ -78,6 +81,7 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(ai_inference_seconds_bucket[5m])) by (le))",
@@ -93,7 +97,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(increase(messaging_masstransit_consume_total{messaging_masstransit_destination=\"media-apply-enrichment\"}[1h]))",
+          "expr": "sum(increase(messaging_masstransit_consume_ea_total{messaging_masstransit_destination=\"media-apply-enrichment\"}[1h]))",
           "legendFormat": "completed/hour"
         }
       ]

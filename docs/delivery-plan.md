@@ -603,10 +603,58 @@ core acceptance question of Phase 8: the message-driven pipeline works on real h
 **Passed:** 1 (all services up), 2 (scan → jobs progressing), 4 (Admin page), 10 (`dotnet test`
 green: Api 31 · GeoService 12 · MediaWorker 60), plus the geo + AI enrichment path end to end.
 
-**Not yet exercised:** 3 (save-early ordering observed live), 5 (corrupt file → `failed/ai` +
-retry), 6 (duplicate → `skipped_duplicate`), 7 (semantic search), 8 (HEIC display + video
-stream), 9 (Prometheus targets UP + Grafana dashboard — the dashboard PromQL is still
-first-cut and unverified against a live scrape). Do these before the prod run.
+**Not yet exercised** *(as of 2026-08-02; see the dated sections below for what has since been
+closed)*: 3 (save-early ordering observed live), 5 (corrupt file → `failed/ai` + retry),
+6 (duplicate → `skipped_duplicate`), 7 (semantic search), 8 (HEIC display + video stream),
+9 (Prometheus targets UP + Grafana dashboard — the dashboard PromQL is still first-cut and
+unverified against a live scrape). Do these before the prod run.
+
+**Now closed:** 7 (semantic search — validated 2026-08-07/08), 8 (HEIC display + video stream —
+both fixed and verified 2026-08-08), 9 (observability — see below).
+**Still open: 3, 5, 6.**
+
+### Observability verified — 2026-08-08 ⚠️ six of eight panels were broken
+
+Checklist item 9. Prometheus scraping was fine — all five targets (`api`, `media-worker`,
+`geoservice`, `ai-sidecar`, `rabbitmq`) report `up` with no errors. The dashboard was not.
+
+The PromQL had been written in a sandbox with no live stack, and the guesses were wrong in two
+systematic ways. Querying Prometheus for what actually exists
+(`/api/v1/label/__name__/values`) found them in minutes.
+
+**1. The OTel Prometheus exporter appends each instrument's unit to the metric name.** MassTransit
+counts in `ea` (each) and times in milliseconds, so every MassTransit panel missed:
+
+| Dashboard had | Actually exists |
+|---------------|-----------------|
+| `messaging_masstransit_consume_total` | `messaging_masstransit_consume_ea_total` |
+| `messaging_masstransit_consume_duration_seconds_bucket` | `messaging_masstransit_consume_duration_**milliseconds**_bucket` |
+| `messaging_masstransit_consume_errors_total` | `messaging_masstransit_consume_fault_ea_total` |
+
+The `_seconds` → `_milliseconds` slip was worse than a missing series: the panel would have
+rendered milliseconds labelled as seconds, so a 200 ms consume read as 200 s. Both duration panels
+now pin `unit` explicitly instead of relying on a Grafana default.
+
+The `messaging_masstransit_destination` label guess was **correct** — only the names were wrong.
+
+**2. `rabbitmq_prometheus` aggregates by default.** `prometheus.return_per_object_metrics`
+defaults to `false` and no `rabbitmq.conf` is mounted (compose mounts only `enabled_plugins`), so
+`/metrics` publishes `rabbitmq_queue_messages_ready` with **no `queue` label at all** —
+`/api/v1/label/queue/values` came back empty. Both queue-depth panels matched nothing.
+
+Fixed with a second scrape job against `/metrics/detailed?family=queue_coarse_metrics`, scoped to
+that one family rather than flipping `return_per_object_metrics` globally (which would also
+per-object every connection and channel). The dashboard's queue-name regex was already correct —
+it matches all eight real endpoints.
+
+**Still unverified: the faults panel.** `messaging_masstransit_consume_fault_ea_total` does not
+exist yet because nothing on this stack has ever faulted — MassTransit registers fault counters
+lazily. **Checklist item 5 (corrupt file) is the test that confirms it.** If that produces a
+`failed` job and the panel stays flat, the name is wrong and needs another look.
+
+This is precisely the failure the 2026-08-02 entry predicted when it flagged the PromQL as
+unverified. Starting the prod import on the old dashboard would have meant watching six empty
+panels for three days with no way to tell a working pipeline from a wedged one.
 
 **Bugs it flushed out** (all fixed, all invisible to build/test-level verification — the reason
 the checklist exists):
