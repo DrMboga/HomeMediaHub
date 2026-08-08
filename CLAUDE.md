@@ -122,10 +122,22 @@ nginx `/n8n/` location gone) — do not resurrect it.
   deeper patterns (lucide icons, mono contact-sheet framing). Mike considers the foundation+pilot
   sufficient; further per-page migration is ad hoc future work, not a blocking Phase 8 item.
 
-**What does NOT exist yet (do not assume it does):** a prod rollout / full-archive scan (Phase 9);
-the failure-path and observability checks from the stage checklist (corrupt file, duplicate,
-semantic search, Prometheus targets + Grafana dashboard) — the 2026-08-02 rollout covered the
-happy path only; full per-page visual redesign beyond the Step 10 pilot pages.
+**The stage validation checklist is complete as of 2026-08-08** — all ten items exercised on real
+hardware, including save-early ordering observed live, corrupt-file → `failed` + retry,
+duplicate → `skipped_duplicate`, semantic search, HEIC display + video streaming, and Prometheus
+targets + Grafana. See "Stage validation complete" and the dated sections in
+`docs/delivery-plan.md` for what each one flushed out. **Watch an import with
+`docs/monitoring.md`.**
+
+**What does NOT exist yet (do not assume it does):** a prod rollout / full-archive scan (Phase 9,
+now scheduled *after* the Tags page); the Tags page itself (Phase 10 — specced, not built); full
+per-page visual redesign beyond the Step 10 pilot pages.
+
+**Known blind spot:** file-level processing failures never reach Grafana. `IngestConsumer` catches
+them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit records a
+successful consume — the "consume faults" and "error queue depth" panels stay flat even while
+files fail. `processing_jobs` + the Admin page are the only surfaces that show them. A
+failed-jobs gauge is proposed but unbuilt.
 
 Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.

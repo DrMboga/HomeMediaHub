@@ -609,9 +609,42 @@ closed)*: 3 (save-early ordering observed live), 5 (corrupt file → `failed/ai`
 9 (Prometheus targets UP + Grafana dashboard — the dashboard PromQL is still first-cut and
 unverified against a live scrape). Do these before the prod run.
 
-**Now closed:** 7 (semantic search — validated 2026-08-07/08), 8 (HEIC display + video stream —
-both fixed and verified 2026-08-08), 9 (observability — see below).
-**Still open: 3, 5, 6.**
+**All now closed.** 7 (semantic search — validated 2026-08-07/08), 8 (HEIC display + video stream
+— fixed and verified 2026-08-08), 9 (observability — see below), 3/5/6 (see "Stage validation
+complete" below). **The checklist is done; Phase 8 is fully verified on real hardware.**
+
+### Stage validation complete — 2026-08-08 ✅ items 3, 5, 6
+
+Run against a clean re-import (DB truncated, caches cleared, RabbitMQ data wiped) with two seeded
+test files. 276 completed · 1 failed · 1 duplicate.
+
+- **Item 3 — save-early ordering, observed live.** Media appeared in the gallery *without* tags or
+  geo, which filled in afterwards. This is the central design claim of Phase 8 and it is now
+  confirmed on real hardware rather than inferred from the code.
+- **Item 5 — corrupt file.** A truncated `.jpg` landed in `failed` at the `ingest` stage with a
+  usefully specific error ("Image cannot be loaded. Available decoders: …"), and was retryable
+  from the Admin page.
+- **Item 6 — duplicate.** A copied file landed in `skipped_duplicate` and is counted separately
+  from failures, so it does not pollute the failed-jobs list.
+
+**Unexpected finding — file failures are invisible to Grafana.** `IngestConsumer.cs:120-130`
+catches the exception and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit
+records a **successful consume**. Nothing faults, nothing dead-letters. That is correct design —
+it is what puts the failure in `processing_jobs` as `failed` and keeps it retryable instead of
+dead-lettering it — but it means both the "consume faults" and "error queue depth" panels stay
+flat *even when files are failing*. The corrupt-file test proved it: the job failed and no panel
+moved.
+
+**Consequence for Phase 9:** over a multi-day import, Grafana will show a healthy pipeline while
+files fail. The Admin page is the only surface that shows them. Closing this needs a small
+observable gauge in the Api reporting `processing_jobs` counts by status on the existing
+`/metrics` endpoint, plus a panel — roughly an hour, and it would replace the faults panel with
+something that actually fires. **Not built; decide before the prod run.**
+
+**Also incidentally confirmed: the pipeline is deterministic.** The tag distribution after a full
+wipe and re-import came back byte-identical to the previous run — all 46 tags, same counts, same
+confidences to two decimals, same 111 untagged. Same inputs, same models, same output. Worth
+knowing before a run that cannot easily be repeated.
 
 ### Observability verified — 2026-08-08 ⚠️ six of eight panels were broken
 
@@ -647,10 +680,22 @@ that one family rather than flipping `return_per_object_metrics` globally (which
 per-object every connection and channel). The dashboard's queue-name regex was already correct —
 it matches all eight real endpoints.
 
-**Still unverified: the faults panel.** `messaging_masstransit_consume_fault_ea_total` does not
-exist yet because nothing on this stack has ever faulted — MassTransit registers fault counters
-lazily. **Checklist item 5 (corrupt file) is the test that confirms it.** If that produces a
-`failed` job and the panel stays flat, the name is wrong and needs another look.
+**3. `/metrics/detailed` prefixes its metric names.** Found after the scrape job was already
+healthy and the `queue` label already carried all eight queues — the panels still matched nothing
+because the per-queue metric is `rabbitmq_detailed_queue_messages_ready`. Both names exist at once,
+and the plausible-looking one is the wrong one:
+
+```
+rabbitmq_detailed_queue_messages_ready   # per-queue, has the `queue` label — use this
+rabbitmq_queue_messages_ready            # aggregated, no `queue` label — matches nothing
+```
+
+**Final state: 7 of 8 panels live.** "Consume faults" stays flat by design (see "Stage validation
+complete" below — `IngestConsumer` swallows file-level errors, so nothing ever faults), and
+"Error queue depth" stays empty until something genuinely dead-letters. The faults-panel metric
+name `messaging_masstransit_consume_fault_ea_total` therefore remains **an untested guess** — item
+5 could not exercise it, and there is no way to trigger a real fault short of breaking Postgres
+mid-scan.
 
 This is precisely the failure the 2026-08-02 entry predicted when it flagged the PromQL as
 unverified. Starting the prod import on the old dashboard would have meant watching six empty
@@ -678,6 +723,9 @@ the checklist exists):
 Then prod: fresh rebuild with `.env.prod`, trigger full archive scan (Phase 9). Expect
 **multi-day** AI enrichment (CPU-bound, ~2–5 s/image × ~190K files); watch queue depth in
 Grafana — that is the backpressure working as designed.
+
+*(Superseded on 2026-08-08: the Tags page — Phase 10 — is scheduled ahead of the archive import.
+See the note on that section.)*
 
 ### Semantic search validation — 2026-08-07 ⚠️ item 7, quality shortfall
 
@@ -994,20 +1042,13 @@ well cover almost everything, and that is cheap to find out by watching for `re-
 
 ---
 
-## Phase 9 — Archive Import
-
-**Goal:** all ~20 years of photos (~190K files, 750 GB) catalogued.
-
-Trigger a prod scan after Phase 8 verification. Ingest (hash/convert/thumbnail/save) is
-I/O-bound and finishes in hours; AI enrichment is CPU-bound and takes **days** — the library is
-browsable throughout. Afterwards: recreate the ivfflat index, review the `failed` jobs list,
-spot-check geo addresses and semantic search quality. Do **not** expect `Search:MaxCosineDistance`
-to be tunable into good results — the 2026-08-07 validation showed no single constant separates a
-narrow query from a broad one. Revisit the deferred background-vocabulary scoring instead.
-
----
-
 ## Phase 10 — Tags page
+
+> **Runs before Phase 9.** The phase numbers are historical labels, not execution order — Mike's
+> call on 2026-08-08 was to build the Tags page before committing to the multi-day archive import.
+> Stage is fully validated and cheap to iterate on; prod is a days-long run that makes any
+> frontend work awkward (the two environments share ports, so developing during the import means
+> developing against prod).
 
 **Goal:** make the YOLO tags reachable. Today they are computed on every photo, stored, and shown
 only as passive text in the lightbox — see the audit under the 2026-08-07 validation above.
@@ -1016,7 +1057,9 @@ A new `/tags` page showing every tag in the database as a **chip**, and a pagina
 photos carrying the selected tags. Selecting several chips filters with **AND** — a photo must
 carry *all* selected tags to appear.
 
-Independent of Phase 9; can be built before or after the archive import.
+Independent of Phase 9 technically — it shares the tag data, not the pipeline — but scheduled
+**before** it. Note the spec below was calibrated on stage's 276 files; re-read the scale caveats
+before assuming the design holds at 190K.
 
 ### Measured tag distribution — 2026-08-08 (step 0, done)
 
@@ -1102,3 +1145,29 @@ does. Not obvious either way — worth a call rather than a silent default.
 
 **Not in scope here:** the CLIP + tag hybrid *ranking* described in the audit. That changes the
 semantic search box; this phase only adds browse-by-tag. They share the data, not the code path.
+
+---
+
+## Phase 9 — Archive Import
+
+> **Runs after Phase 10.** See the note there.
+
+**Goal:** all ~20 years of photos (~190K files, 750 GB) catalogued.
+
+**Prerequisite met:** the full stage validation checklist passed on 2026-08-08 — see
+"Stage validation complete" above. Items 1–10 are all exercised.
+
+Trigger a prod scan after Phase 8 verification. Ingest (hash/convert/thumbnail/save) is
+I/O-bound and finishes in hours; AI enrichment is CPU-bound and takes **days** — the library is
+browsable throughout. Afterwards: recreate the ivfflat index, review the `failed` jobs list,
+spot-check geo addresses and semantic search quality. Do **not** expect `Search:MaxCosineDistance`
+to be tunable into good results — the 2026-08-07 validation showed no single constant separates a
+narrow query from a broad one. Revisit the deferred background-vocabulary scoring instead.
+
+**Watch it with `docs/monitoring.md`** — which tool answers which question, what healthy queue
+depth looks like, and the metric-name cookbook. Note the known blind spot recorded there: file
+failures never reach Grafana, so the Admin page is the only place they surface.
+
+**Re-run the tag distribution afterwards.** Phase 10's design rests on stage's 276-file sample;
+prod is ~690× that, and the plan's extrapolation assumes TestPhoto is representative. Worth
+confirming rather than trusting.
