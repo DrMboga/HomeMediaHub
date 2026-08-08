@@ -774,6 +774,110 @@ untagged, both the Tags page and the hybrid are worth far less than they look on
 
 ---
 
+## Stage validation backlog — 2026-08-08
+
+Five items from Mike's UI pass. Causes below are **read off the code**, not guessed; effort is
+sized against that. Do these before the prod archive import — items 2 and 5 get worse at scale.
+
+### 1. Photo of the Day renders the thumbnail, not the photo — *trivial*
+
+`DashboardPage.tsx:116` uses `thumbnailUrl(potd.id)` inside the large `.potd-img` card, so a
+WebP thumbnail is being upscaled to hero size and looks pixellated.
+
+**Fix:** switch to `displayUrl(potd.id)` (`api/media.ts:22`) — not `originalUrl`, because the
+display endpoint already handles on-demand HEIC conversion, which `original` does not. Check
+`.potd-img`'s `object-fit` still behaves with a full-resolution source.
+
+### 2. `taken_at` is two hours late — *small, and NOT where it was looked for*
+
+Mike's examples: `IMG_3127.JPG` EXIF 2007-07-14 **10:17**, library shows **12:17**;
+`IMG_0817.HEIC` EXIF 2025-05-02 **17:00**, library shows **19:00**. Both exactly +2 — his browser
+offset, not a coincidence.
+
+**Cause — the parser is not the culprit, which is why commit `ca68b3b` did not help.** EXIF
+`DateTimeOriginal` is naive wall-clock with no zone. `MetadataService.cs:165` calls
+`dt.ToUniversalTime()` on a `Kind=Unspecified` value, and .NET treats Unspecified as *local*; the
+HEIC path at `:173-176` parses a zone-less string into `DateTimeOffset` and takes `.UtcDateTime`,
+which assumes the machine offset the same way. **In the container TZ is UTC, so both are no-ops** —
+the wall-clock value is stored verbatim and is correct. The shift happens at *display*:
+`PhotoCard.tsx:21-22` reads `d.getHours()`, i.e. the browser's local zone, adding +2.
+
+**Verify before fixing** (one query — decides which side to change):
+
+```sql
+SELECT file_path, taken_at FROM media_files WHERE file_path LIKE '%IMG_3127%';
+```
+
+`10:17` ⇒ storage is right, fix is frontend-only, **no re-import**. `08:17` ⇒ the container has a
+non-UTC TZ and the backend converted; then the parser fix is needed too and dates must be re-derived.
+
+**Fix (assuming 10:17):** render `taken_at` as UTC everywhere — `timeZone: 'UTC'` in
+`toLocaleDateString` options and `getUTC*` getters, in `PhotoCard.formatCardDate`,
+`DashboardPage.formatFullDate`, the Lightbox, and the On This Day / Gallery groupings. Harden the
+backend regardless: replace `ToUniversalTime()` with `DateTime.SpecifyKind(dt, DateTimeKind.Utc)`
+so the intent is explicit and setting a container TZ can never silently corrupt dates. That also
+fixes the unit test currently left failing (`MetadataServiceTests.Extract_DateTimeOriginalExif_
+ReturnsTakenAt`, which expects the unconverted wall-clock value).
+
+**Known wrinkle, not blocking:** the mtime fallback (`MetadataService.cs:184`,
+`LastWriteTimeUtc`) is a *true UTC instant*, unlike EXIF's wall-clock, so one column carries two
+semantics. Photos with no EXIF date will be off by the offset under a UTC-render rule. Affects
+only undated files; note it and move on.
+
+### 3. Download original from the Lightbox — *small*
+
+`GET /api/media/{id}/original` already exists (`MediaEndpoints.cs:42`) and is public by design.
+
+**Fix:** add a download control to the Lightbox pointing at it. Do it properly rather than a bare
+`<a download>`: the endpoint's `Results.File(...)` at `:52` sets no `fileDownloadName`, so the
+saved file would be named `original`. Add an opt-in `?download=1` that supplies
+`Path.GetFileName(f.FilePath)` as the download name, leaving the default inline behaviour intact
+for `<img>`/`<video>` consumers.
+
+### 4. Videos page sorted oldest-first — *one line*
+
+`VideosPage.tsx:15` passes `sortAsc: true`. `GetMediaListHandler.cs:19` already defaults
+`SortAsc = false` (newest first, matching Gallery). Drop the argument.
+
+### 5. Large videos never play — *the real work; three separate faults*
+
+`IMG_0750.MOV` (155 MB) spins, then stops with no video. `StreamMediaHandler.cs:44-54` has three
+independent problems, any one of which is fatal:
+
+1. **Pipe-buffer deadlock — the likely primary cause.** `RedirectStandardOutput` and
+   `RedirectStandardError` are both `true` and *nothing ever drains them*. ffmpeg is chatty on
+   stderr; once the OS pipe buffer (~4–64 KB) fills, ffmpeg blocks on write forever and
+   `WaitForExitAsync` never returns. Short clips finish before filling the buffer — which is
+   exactly why small videos work and a 155 MB file never does.
+2. **No timeout, and disposal does not kill.** `using var proc` disposes the handle but leaves the
+   process running, so a cancelled request orphans ffmpeg. Retries stack more encoders onto the
+   same file, all writing the same `-y` output path. CLAUDE.md already mandates
+   `Kill(entireProcessTree: true)` with a cap for ExifTool; that rule was never applied to this
+   handler or to `DisplayMediaHandler.cs:55`, which shares the identical pattern.
+3. **Synchronous transcode inside the HTTP request.** A full libx264 re-encode of 155 MB on a
+   CPU-only i7-6700 takes minutes. nginx sets no `proxy_read_timeout` for `/api/`, so the 60 s
+   default cuts the connection regardless of what the backend does.
+
+**Fix, in order of value:**
+
+- **Remux instead of re-encode when possible.** iPhone `.MOV` is usually H.264/AAC already in a
+  QuickTime container — `ffprobe` the codec and, when it is H.264, use
+  `-c copy -movflags +faststart`, which is near-instant instead of minutes. This alone probably
+  makes Mike's file play. HEVC still needs a real encode.
+- Drain both pipes asynchronously, or stop redirecting what is never read.
+- Add an explicit timeout with `Kill(entireProcessTree: true)`; apply the same to
+  `DisplayMediaHandler`.
+- Write to a temp path and move atomically on success, so a partial file is never served or cached.
+- Single-flight per media id so concurrent requests share one transcode.
+- Raise `proxy_read_timeout` on the `/api/` location for the cases that still need a real encode.
+
+**Still unsolved after all that:** a long HEVC re-encode cannot fit in one request. If that turns
+out to be common in the library, transcoding has to move to a background job with a polling
+endpoint — a design change, deliberately out of scope here until the remux fast path shows how
+many files actually need it.
+
+---
+
 ## Phase 9 — Archive Import
 
 **Goal:** all ~20 years of photos (~190K files, 750 GB) catalogued.
