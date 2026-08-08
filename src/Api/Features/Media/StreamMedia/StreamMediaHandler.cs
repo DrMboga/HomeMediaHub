@@ -144,32 +144,47 @@ public sealed class StreamMediaHandler : IRequestHandler<StreamMediaRequest, Str
 
     private sealed record Codecs(string? Video, string? Audio, bool Probed);
 
+    /// <summary>
+    /// One probe per stream type. A single combined call is tempting but wrong: with
+    /// <c>-show_entries stream=codec_type,codec_name</c> ffprobe emits the fields in *its own*
+    /// internal order (codec_name first), not the order requested, so a positional CSV parse
+    /// silently mismatches — which stripped the audio from every video and missed the remux path.
+    /// Selecting one stream and asking for one field cannot be misread.
+    /// </summary>
     private async Task<Codecs> ProbeCodecsAsync(string sourcePath)
+    {
+        var video = await ProbeStreamCodecAsync(sourcePath, "v:0");
+        if (video is null)
+        {
+            // No video stream, or ffprobe failed — fall back to a full re-encode, which is
+            // always correct if slow. Audio is left unknown so it is re-encoded rather than dropped.
+            _logger.LogWarning("ffprobe found no video stream for {Path}", sourcePath);
+            return new Codecs(null, null, Probed: false);
+        }
+
+        return new Codecs(video, await ProbeStreamCodecAsync(sourcePath, "a:0"), Probed: true);
+    }
+
+    private async Task<string?> ProbeStreamCodecAsync(string sourcePath, string stream)
     {
         var psi = new ProcessStartInfo("ffprobe");
         psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
-        psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("stream=codec_type,codec_name");
-        psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("csv=p=0");
+        psi.ArgumentList.Add("-select_streams"); psi.ArgumentList.Add(stream);
+        psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("stream=codec_name");
+        psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("default=nw=1:nk=1");
         psi.ArgumentList.Add(sourcePath);
 
         var probe = await ProcessRunner.RunAsync(psi, ProbeTimeout);
         if (!probe.Succeeded)
         {
-            // Unknown codecs — fall back to a full re-encode, which is always correct if slow.
-            _logger.LogWarning("ffprobe failed for {Path}: {Error}", sourcePath, probe.StandardError);
-            return new Codecs(null, null, Probed: false);
+            _logger.LogWarning("ffprobe {Stream} failed for {Path}: {Error}",
+                stream, sourcePath, probe.StandardError);
+            return null;
         }
 
-        string? video = null, audio = null;
-        foreach (var line in probe.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var parts = line.Trim().Split(',');
-            if (parts.Length < 2) continue;
-            if (parts[0] == "video" && video is null) video = parts[1];
-            if (parts[0] == "audio" && audio is null) audio = parts[1];
-        }
-
-        return new Codecs(video, audio, Probed: true);
+        // Empty output means the stream simply is not there (common: a video with no audio).
+        var codec = probe.StandardOutput.Trim();
+        return codec.Length == 0 ? null : codec;
     }
 
     private static void TryDelete(string path)

@@ -20,6 +20,14 @@ export function Lightbox() {
   const [tab, setTab] = useState<'info' | 'map'>('info')
   const [imgFailed, setImgFailed] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  // A video that has never been streamed is transcoded on demand. An H.264 .MOV remuxes in
+  // seconds, but a real re-encode outlives the element's patience — it used to fail once and
+  // sit on a grey box forever, even though the server finished and cached moments later
+  // (reopening the lightbox then played it instantly). Retry until the cache is warm.
+  const [videoAttempt, setVideoAttempt] = useState(0)
+  const [videoWaiting, setVideoWaiting] = useState(false)
+  const [videoGaveUp, setVideoGaveUp] = useState(false)
+  const retryTimer = useRef<number | undefined>(undefined)
   const videoRef = useRef<HTMLVideoElement>(null)
   const photoAreaRef = useRef<HTMLDivElement>(null)
 
@@ -48,11 +56,41 @@ export function Lightbox() {
       setTab('info')
       setImgFailed(false)
       setDeleteConfirm(false)
+      setVideoAttempt(0)
+      setVideoWaiting(false)
+      setVideoGaveUp(false)
     } else {
       document.body.classList.remove('lb-open')
     }
     return () => document.body.classList.remove('lb-open')
   }, [mediaId])
+
+  // Drop any pending retry when the lightbox closes or moves to another item.
+  useEffect(() => () => window.clearTimeout(retryTimer.current), [mediaId])
+
+  // Poll roughly as long as the server will keep working on a first-time transcode, then hand
+  // over to a manual retry rather than hammering it forever.
+  const VIDEO_RETRY_MS = 10_000
+  const VIDEO_MAX_ATTEMPTS = 30
+
+  function scheduleVideoRetry() {
+    setVideoWaiting(true)
+    retryTimer.current = window.setTimeout(() => setVideoAttempt(a => a + 1), VIDEO_RETRY_MS)
+  }
+
+  function handleVideoError() {
+    if (videoAttempt >= VIDEO_MAX_ATTEMPTS) {
+      setVideoWaiting(false)
+      setVideoGaveUp(true)
+      return
+    }
+    scheduleVideoRetry()
+  }
+
+  function retryVideoNow() {
+    setVideoGaveUp(false)
+    setVideoAttempt(0)
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -126,13 +164,32 @@ export function Lightbox() {
               </MapContainer>
             </div>
           ) : isVideo ? (
-            <video
-              ref={videoRef}
-              className="lb-video"
-              src={streamUrl(mediaId)}
-              controls
-              autoPlay
-            />
+            <>
+              {/* key forces a remount so the element re-requests; the failed response is not
+                  cached, so the same URL is fetched again. */}
+              <video
+                key={videoAttempt}
+                ref={videoRef}
+                className="lb-video"
+                src={streamUrl(mediaId)}
+                controls
+                autoPlay
+                onError={handleVideoError}
+                onLoadedData={() => { setVideoWaiting(false); setVideoGaveUp(false) }}
+              />
+              {(videoWaiting || videoGaveUp) && (
+                <div className="lb-video-status">
+                  {videoWaiting ? (
+                    <>Preparing video… the first play of a large file can take a few minutes.</>
+                  ) : (
+                    <>
+                      Video is still not ready.{' '}
+                      <button className="lb-retry-btn" onClick={retryVideoNow}>Retry</button>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
           ) : (
             <img
               className="lb-img"

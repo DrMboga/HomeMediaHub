@@ -900,6 +900,32 @@ independent problems, any one of which is fatal:
 `ffprobe` ships with the `ffmpeg` package already installed in `src/Api/Dockerfile`, so the image
 is unchanged.
 
+**Follow-up fix, same day — the first cut of the probe was wrong and cost audio on every video.**
+It asked for `-show_entries stream=codec_type,codec_name -of csv=p=0` and parsed positionally.
+**ffprobe emits fields in its own internal order (`codec_name` before `codec_type`), not the order
+requested**, so the output was `h264,video` against a parser expecting `video,h264`. Both codecs
+came back null with `Probed: true`, which took the `-an` branch — **stripping the audio track from
+every transcode** — and simultaneously missed the H.264 remux path, so an H.264 file re-encoded
+for 86 seconds. One bug, both symptoms. Now one probe per stream (`-select_streams v:0` / `a:0`,
+one field each), which cannot be misread; empty output correctly means the stream is absent.
+
+**Also fixed: the player never recovered.** The `<video>` element failed once and sat on a grey
+box forever even after the server finished and cached the file moments later — reopening the
+lightbox played it instantly, which is what made the bug look intermittent. The element now
+retries every 10 s for up to 30 attempts behind a "Preparing video…" status, then offers a manual
+Retry. This is the piece that makes the "transcode survives client disconnect" decision above
+actually pay off.
+
+**Videos already transcoded before this fix have no audio and must be re-generated** — delete the
+cached MP4s and the `video_transcodes` rows:
+
+```sql
+TRUNCATE public.video_transcodes;
+```
+```bash
+rm -f /opt/homemediahub/stage/data/video-cache/*.mp4
+```
+
 **Still true after all that:** a long HEVC re-encode cannot complete inside one request. It will
 now finish in the background and be cached, so the *second* attempt plays — but the first still
 fails from the browser's point of view. If the library turns out to hold many HEVC videos, that

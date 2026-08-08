@@ -189,6 +189,21 @@ body {
   text-transform: uppercase; letter-spacing: .18em; color: var(--ink-70);
 }
 
+/* First-play transcode status, over the lightbox's video area. */
+.lb-video-status {
+  position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%);
+  max-width: 80%; padding: 8px 14px; text-align: center;
+  background: rgba(12,10,8,.82);
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .04em;
+  color: var(--ink-70);
+}
+.lb-retry-btn {
+  margin-left: 6px; padding: 2px 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--ink-70);
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-70);
+}
+.lb-retry-btn:hover { color: var(--ink); border-color: var(--ink); }
+
 /* Relevance readout on semantic-search cards. Same quiet mono treatment as
    .origin-badge, opposite corner so the two never collide. */
 .distance-badge {
