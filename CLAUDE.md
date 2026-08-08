@@ -263,6 +263,7 @@ curl -X POST http://192.168.0.192/api/admin/scan -H "Authorization: Bearer $TOKE
 # pipeline progress
 curl http://192.168.0.192/api/admin/pipeline/status -H "Authorization: Bearer $TOKEN"
 # RabbitMQ mgmt UI: http://192.168.0.192:15672   Grafana: http://192.168.0.192:3001
+# Watching an import (which tool for what, metric-name cookbook): docs/monitoring.md
 
 # one-off psql
 docker compose --env-file .env.stage exec postgres psql -U postgres -d homemediahub_db
