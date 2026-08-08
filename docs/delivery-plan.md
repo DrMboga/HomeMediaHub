@@ -779,7 +779,9 @@ untagged, both the Tags page and the hybrid are worth far less than they look on
 Five items from Mike's UI pass. Causes below are **read off the code**, not guessed; effort is
 sized against that. Do these before the prod archive import — items 2 and 5 get worse at scale.
 
-### 1. Photo of the Day renders the thumbnail, not the photo — *trivial*
+**Status: 1–4 fixed 2026-08-08 (frontend rebuild needed, no re-import). 5 still open.**
+
+### 1. Photo of the Day renders the thumbnail, not the photo — ✅ fixed
 
 `DashboardPage.tsx:116` uses `thumbnailUrl(potd.id)` inside the large `.potd-img` card, so a
 WebP thumbnail is being upscaled to hero size and looks pixellated.
@@ -788,7 +790,7 @@ WebP thumbnail is being upscaled to hero size and looks pixellated.
 display endpoint already handles on-demand HEIC conversion, which `original` does not. Check
 `.potd-img`'s `object-fit` still behaves with a full-resolution source.
 
-### 2. `taken_at` is two hours late — *small, and NOT where it was looked for*
+### 2. `taken_at` is two hours late — ✅ fixed (and NOT where it was looked for)
 
 Mike's examples: `IMG_3127.JPG` EXIF 2007-07-14 **10:17**, library shows **12:17**;
 `IMG_0817.HEIC` EXIF 2025-05-02 **17:00**, library shows **19:00**. Both exactly +2 — his browser
@@ -802,16 +804,14 @@ which assumes the machine offset the same way. **In the container TZ is UTC, so 
 the wall-clock value is stored verbatim and is correct. The shift happens at *display*:
 `PhotoCard.tsx:21-22` reads `d.getHours()`, i.e. the browser's local zone, adding +2.
 
-**Verify before fixing** (one query — decides which side to change):
+**Verified** — the query returned `2007-07-14 10:17:45 +00:00`, i.e. storage is correct wall-clock
+and the fault was display-only. Frontend fix, **no re-import**.
 
 ```sql
 SELECT file_path, taken_at FROM media_files WHERE file_path LIKE '%IMG_3127%';
 ```
 
-`10:17` ⇒ storage is right, fix is frontend-only, **no re-import**. `08:17` ⇒ the container has a
-non-UTC TZ and the backend converted; then the parser fix is needed too and dates must be re-derived.
-
-**Fix (assuming 10:17):** render `taken_at` as UTC everywhere — `timeZone: 'UTC'` in
+**Fix applied:** render `taken_at` as UTC everywhere — `timeZone: 'UTC'` in
 `toLocaleDateString` options and `getUTC*` getters, in `PhotoCard.formatCardDate`,
 `DashboardPage.formatFullDate`, the Lightbox, and the On This Day / Gallery groupings. Harden the
 backend regardless: replace `ToUniversalTime()` with `DateTime.SpecifyKind(dt, DateTimeKind.Utc)`
@@ -819,12 +819,24 @@ so the intent is explicit and setting a container TZ can never silently corrupt 
 fixes the unit test currently left failing (`MetadataServiceTests.Extract_DateTimeOriginalExif_
 ReturnsTakenAt`, which expects the unconverted wall-clock value).
 
-**Known wrinkle, not blocking:** the mtime fallback (`MetadataService.cs:184`,
-`LastWriteTimeUtc`) is a *true UTC instant*, unlike EXIF's wall-clock, so one column carries two
-semantics. Photos with no EXIF date will be off by the offset under a UTC-render rule. Affects
-only undated files; note it and move on.
+Landed as a shared `src/Frontend/src/utils/mediaDate.ts` rather than four patched copies — the
+four divergent local implementations are how this drifted in the first place. All `takenAt`
+renderers (PhotoCard, Lightbox, Dashboard POTD + stats tile, Review) now go through it; the
+"today" dates on On This Day and the Gallery pickers stay local and deliberately do not.
 
-### 3. Download original from the Lightbox — *small*
+**Semantic decision made while fixing:** `ParseExiftoolDate` previously called `dto.UtcDateTime`,
+so a HEIC carrying a real `+HH:mm` offset would be converted to a true instant while zone-less
+JPEGs kept wall-clock — two rules in one column. It now keeps the wall-clock half and drops the
+offset, so a photo taken at 17:00 in Crete reads 17:00 like every other file. Existing stage rows
+are unaffected (they all took the zone-less path); only future imports of offset-carrying files
+change.
+
+**Known wrinkle, still open:** the mtime fallback (`MetadataService.cs:184`, `LastWriteTimeUtc`)
+is a *true UTC instant*, unlike EXIF's wall-clock, so the column still carries two semantics for
+files with no EXIF date at all — those will read off by the viewer's offset. Affects undated files
+only; not worth a schema change today, but it will resurface looking like a fresh bug.
+
+### 3. Download original from the Lightbox — ✅ fixed
 
 `GET /api/media/{id}/original` already exists (`MediaEndpoints.cs:42`) and is public by design.
 
@@ -834,12 +846,12 @@ saved file would be named `original`. Add an opt-in `?download=1` that supplies
 `Path.GetFileName(f.FilePath)` as the download name, leaving the default inline behaviour intact
 for `<img>`/`<video>` consumers.
 
-### 4. Videos page sorted oldest-first — *one line*
+### 4. Videos page sorted oldest-first — ✅ fixed
 
 `VideosPage.tsx:15` passes `sortAsc: true`. `GetMediaListHandler.cs:19` already defaults
 `SortAsc = false` (newest first, matching Gallery). Drop the argument.
 
-### 5. Large videos never play — *the real work; three separate faults*
+### 5. Large videos never play — ⬜ open; the real work, three separate faults
 
 `IMG_0750.MOV` (155 MB) spins, then stops with no video. `StreamMediaHandler.cs:44-54` has three
 independent problems, any one of which is fatal:

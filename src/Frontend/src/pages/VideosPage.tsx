@@ -12,7 +12,8 @@ export function VideosPage() {
 
   const { data, isFetching } = useQuery({
     queryKey: ['videos', page],
-    queryFn: () => getMediaList({ page, pageSize, isVideo: true, sortAsc: true }),
+    // Newest first, matching Gallery — the handler already defaults SortAsc to false.
+    queryFn: () => getMediaList({ page, pageSize, isVideo: true }),
     staleTime: 30_000,
   })
 

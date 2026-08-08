@@ -39,7 +39,7 @@ public static class MediaEndpoints
             return Results.Ok();
         });
 
-        app.MapGet("/api/media/{id:guid}/original", async (Guid id, AppDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/media/{id:guid}/original", async (Guid id, AppDbContext db, CancellationToken ct, bool download = false) =>
         {
             var f = await db.MediaFiles
                 .Where(x => x.Id == id && !x.IsDeleted)
@@ -49,7 +49,13 @@ public static class MediaEndpoints
             if (f is null || !File.Exists(f.FilePath))
                 return Results.NotFound();
 
-            return Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);
+            // ?download=1 attaches the real filename (Content-Disposition: attachment) for the
+            // Lightbox's download control. Without it the response stays inline, which is what
+            // <img>/<video> src consumers need — and a bare <a download> would otherwise save
+            // the file as "original".
+            return download
+                ? Results.File(f.FilePath, f.MimeType, Path.GetFileName(f.FilePath), enableRangeProcessing: true)
+                : Results.File(f.FilePath, f.MimeType, enableRangeProcessing: true);
         });
 
         app.MapGet("/api/media/{id:guid}/display", async (

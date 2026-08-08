@@ -3,13 +3,9 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getReviewQueue, confirmReview, bulkDeleteMedia, thumbnailUrl } from '../api/media'
 import type { MediaListItem } from '../types/api'
+import { formatShortDate } from '../utils/mediaDate'
 
 const PAGE_SIZE = 50
-
-function formatCardDate(takenAt: string | null): string {
-  if (!takenAt) return '—'
-  return new Date(takenAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
 
 export function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -164,7 +160,7 @@ export function ReviewPage() {
                   {item.originClass && (
                     <span className="review-badge">{item.originClass}</span>
                   )}
-                  <div className="photo-card-date">{formatCardDate(item.takenAt)}</div>
+                  <div className="photo-card-date">{formatShortDate(item.takenAt)}</div>
                 </div>
                 <div className="review-actions">
                   <button

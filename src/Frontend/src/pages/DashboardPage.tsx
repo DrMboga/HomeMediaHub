@@ -1,19 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getMediaList, getStats, getOnThisDay, thumbnailUrl } from '../api/media'
+import { getMediaList, getStats, getOnThisDay, thumbnailUrl, displayUrl } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
 import { useLightbox } from '../context/LightboxContext'
-
-function formatMonthYear(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-}
-
-function formatFullDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-}
+import { formatLongDate, formatMonthYear } from '../utils/mediaDate'
 
 export function DashboardPage() {
   const { open } = useLightbox()
@@ -113,11 +104,13 @@ export function DashboardPage() {
           {potd ? (
             <>
               <div className="potd-img" onClick={() => open(potd.id)}>
-                <img src={thumbnailUrl(potd.id)} alt="" />
+                {/* Hero-sized card: the WebP thumbnail visibly pixellates when upscaled.
+                    displayUrl, not originalUrl — it handles on-demand HEIC conversion. */}
+                <img src={displayUrl(potd.id)} alt="" />
               </div>
               <div className="potd-footer">
                 <div>
-                  <div className="potd-date-main">{formatFullDate(potd.takenAt ?? new Date().toISOString())}</div>
+                  <div className="potd-date-main">{formatLongDate(potd.takenAt ?? new Date().toISOString())}</div>
                   {potd.address && (
                     <div className="potd-date-sub">{potd.address}</div>
                   )}

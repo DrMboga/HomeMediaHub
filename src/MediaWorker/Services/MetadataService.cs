@@ -159,12 +159,20 @@ public sealed class MetadataService
         return entry?.Value;
     }
 
+    // EXIF DateTimeOriginal is naive wall-clock — the time the camera's own display showed,
+    // with no zone attached. Tag it UTC without shifting it: ToUniversalTime() treats a
+    // Kind=Unspecified value as the *host's* local time, so the same photo would land on a
+    // different taken_at depending on where the worker runs. The frontend renders UTC to match
+    // (src/Frontend/src/utils/mediaDate.ts).
     private static DateTime? ParseDateTime(string? value) =>
         DateTime.TryParseExact(value, "yyyy:MM:dd HH:mm:ss",
             CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
-            ? dt.ToUniversalTime() : null;
+            ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : null;
 
-    // ExifTool dates: "yyyy:MM:dd HH:mm:ss" or "yyyy:MM:dd HH:mm:ss+HH:mm"
+    // ExifTool dates: "yyyy:MM:dd HH:mm:ss" or "yyyy:MM:dd HH:mm:ss+HH:mm". Where an offset is
+    // present we deliberately keep the wall-clock half and drop the offset, so a photo taken at
+    // 17:00 in Crete reads 17:00 rather than 15:00 — and so offset-carrying HEICs stay consistent
+    // with the far more common zone-less JPEGs above.
     private static DateTime? ParseExiftoolDate(JsonElement exif, string tag)
     {
         if (!exif.TryGetProperty(tag, out var prop)) return null;
@@ -173,7 +181,7 @@ public sealed class MetadataService
         if (DateTimeOffset.TryParseExact(s,
                 ["yyyy:MM:dd HH:mm:sszzz", "yyyy:MM:dd HH:mm:ss"],
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
-            return dto.UtcDateTime;
+            return DateTime.SpecifyKind(dto.DateTime, DateTimeKind.Utc);
         return null;
     }
 

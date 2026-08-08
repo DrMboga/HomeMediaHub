@@ -14,8 +14,8 @@ export function thumbnailUrl(id: string) {
   return `/api/media/${id}/thumbnail`
 }
 
-export function originalUrl(id: string) {
-  return `/api/media/${id}/original`
+export function originalUrl(id: string, download = false) {
+  return `/api/media/${id}/original${download ? '?download=1' : ''}`
 }
 
 export function displayUrl(id: string) {

@@ -2,26 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Minus, Plus, Crosshair, Trash2, Check } from 'lucide-react'
-import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia } from '../api/media'
+import { X, Minus, Plus, Crosshair, Trash2, Check, Download } from 'lucide-react'
+import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia, originalUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  const weekday = d.toLocaleDateString('en-US', { weekday: 'short' })
-  const datePart = `${dd}.${mm}.${yyyy}`
-  // Midnight UTC exactly means the time came from a path-year fallback, not real EXIF.
-  // Don't show a misleading time in that case.
-  const isMidnightUtc = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0
-  if (isMidnightUtc) return `${datePart}, ${weekday}`
-  const hh = String(d.getHours()).padStart(2, '0')
-  const min = String(d.getMinutes()).padStart(2, '0')
-  return `${datePart} ${hh}:${min}, ${weekday}`
-}
+import { formatDetailDate } from '../utils/mediaDate'
 
 function Resizer() {
   const map = useMap()
@@ -168,7 +152,7 @@ export function Lightbox() {
         <div className="lb-info">
           <div className="lb-info-row">
             <div className="lb-meta">
-              <span className="lb-meta-date">{formatDate(detail?.takenAt ?? null)}</span>
+              <span className="lb-meta-date">{formatDetailDate(detail?.takenAt ?? null)}</span>
               {camera && (<><span className="lb-dot">·</span><span>{camera}</span></>)}
               {dims && (<><span className="lb-dot">·</span><span>{dims}</span></>)}
               {detail?.address && (<><span className="lb-dot">·</span><span className="lb-place">{detail.address}</span></>)}
@@ -196,6 +180,18 @@ export function Lightbox() {
                   >MAP</button>
                 )}
               </div>
+
+              {/* Native anchor, not a fetch — /original is public by design, so the browser
+                  streams it straight to disk with no JS and no memory copy of a 155 MB video. */}
+              {mediaId && (
+                <a
+                  className="lb-icon-btn"
+                  href={originalUrl(mediaId, true)}
+                  download
+                  title="Download original"
+                  onClick={e => e.stopPropagation()}
+                ><Download size={14} /></a>
+              )}
 
               {deleteConfirm ? (
                 <div className="lb-del-row">
