@@ -129,18 +129,21 @@ targets + Grafana. See "Stage validation complete" and the dated sections in
 `docs/delivery-plan.md` for what each one flushed out. **Watch an import with
 `docs/monitoring.md`.**
 
-**Phase 10 — Tags page — built 2026-08-09, not yet exercised on stage.** `/tags` makes the YOLO
-tags reachable: a chip row over the whole vocabulary with live photo counts, multi-select AND
+**Phase 10 — Tags page — complete, validated on stage 2026-08-09.** `/tags` makes the YOLO tags
+reachable: a chip row over the whole vocabulary with live photo counts, multi-select AND
 filtering, and facet narrowing that greys out chips which would return nothing. Backed by
 `GET /api/tags` (vocabulary + narrowed counts, one endpoint for both) and `GET /api/tags/media`
 (paged grid) in `src/Api/Features/Tags/`. The dead `GET /api/search/tags` path is deleted.
-Tests are green and the page was driven end-to-end against a local mock, but it has **not** run
-against real Postgres or real tag data — see "Built — 2026-08-09" in `docs/delivery-plan.md` for
-what that leaves open, and for two EF Core translation constraints the query shapes depend on.
+Two query shapes there are load-bearing for EF Core translation reasons that are not obvious from
+reading them — **read the "Built — 2026-08-09" notes in `docs/delivery-plan.md` before touching
+`TagHandlers.cs`**. Open at prod scale only: `CHIP_FLOOR = 24` is calibrated on stage's 46 tags
+and should be re-judged after the archive import.
 
-**What does NOT exist yet (do not assume it does):** a prod rollout / full-archive scan (Phase 9,
-scheduled *after* the Tags page); full per-page visual redesign beyond the Step 10 pilot pages;
-the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search still ignores them).
+**Next up: Phase 9, the prod archive import** — nothing blocks it now that the Tags page is done.
+
+**What does NOT exist yet (do not assume it does):** the prod rollout / full-archive scan itself
+(Phase 9); full per-page visual redesign beyond the Step 10 pilot pages; the CLIP + tag hybrid
+*ranking* (tags are browsable now, but semantic search still ignores them).
 
 **Known blind spot:** file-level processing failures never reach Grafana. `IngestConsumer` catches
 them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit records a

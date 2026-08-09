@@ -1050,8 +1050,8 @@ well cover almost everything, and that is cheap to find out by watching for `re-
 > frontend work awkward (the two environments share ports, so developing during the import means
 > developing against prod).
 >
-> **Built 2026-08-09** — code complete and green, not yet exercised on stage. See "Built" at the
-> end of this section.
+> **Complete 2026-08-09** — built and validated on stage the same day. See "Built" and
+> "Validated on stage" at the end of this section.
 
 **Goal:** make the YOLO tags reachable. Today they are computed on every photo, stored, and shown
 only as passive text in the lightbox — see the audit under the 2026-08-07 validation above.
@@ -1208,10 +1208,20 @@ Two things that only this click-through would have caught:
   the same result set. Every chip's number now means one thing: photos you get with this chip in
   the selection.
 
-**Still unverified, for the stage pass:** the SQL runs against real Postgres (translation is
-proven, execution is not), behaviour against real YOLO tags rather than the fixture, and chip-row
-density at 46 tags. The `CHIP_FLOOR = 24` top-N floor is a guess calibrated on a 276-file sample —
-re-judge it after the archive import, when `person` is ~68K.
+### Validated on stage — 2026-08-09 ✅
+
+Mike exercised `/tags` against the live stage stack the same day it was built. It works; no
+defects reported, nothing to fix.
+
+That closes the three items this section had left open. Both queries execute against real
+Postgres, not just translate — the EXISTS chain and the `count(DISTINCT …)` facet aggregate both
+run, which is what the translation tests could not prove on their own. The page renders real
+YOLO tags rather than the fixture, and the chip row reads correctly at the real vocabulary size.
+
+**Phase 10 is done.** The one caveat that stage cannot settle stands: `CHIP_FLOOR = 24` is a
+top-N floor calibrated against a 276-file sample. Stage has 46 distinct tags; prod is ~690×
+larger and `person` becomes ~68K photos. Re-judge the floor after the archive import — along with
+the tag distribution itself, per the note under Phase 9.
 
 ---
 
