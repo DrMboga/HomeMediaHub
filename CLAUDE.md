@@ -129,9 +129,18 @@ targets + Grafana. See "Stage validation complete" and the dated sections in
 `docs/delivery-plan.md` for what each one flushed out. **Watch an import with
 `docs/monitoring.md`.**
 
+**Phase 10 — Tags page — built 2026-08-09, not yet exercised on stage.** `/tags` makes the YOLO
+tags reachable: a chip row over the whole vocabulary with live photo counts, multi-select AND
+filtering, and facet narrowing that greys out chips which would return nothing. Backed by
+`GET /api/tags` (vocabulary + narrowed counts, one endpoint for both) and `GET /api/tags/media`
+(paged grid) in `src/Api/Features/Tags/`. The dead `GET /api/search/tags` path is deleted.
+Tests are green and the page was driven end-to-end against a local mock, but it has **not** run
+against real Postgres or real tag data — see "Built — 2026-08-09" in `docs/delivery-plan.md` for
+what that leaves open, and for two EF Core translation constraints the query shapes depend on.
+
 **What does NOT exist yet (do not assume it does):** a prod rollout / full-archive scan (Phase 9,
-now scheduled *after* the Tags page); the Tags page itself (Phase 10 — specced, not built); full
-per-page visual redesign beyond the Step 10 pilot pages.
+scheduled *after* the Tags page); full per-page visual redesign beyond the Step 10 pilot pages;
+the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search still ignores them).
 
 **Known blind spot:** file-level processing failures never reach Grafana. `IngestConsumer` catches
 them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit records a
@@ -139,8 +148,8 @@ successful consume — the "consume faults" and "error queue depth" panels stay 
 files fail. `processing_jobs` + the Admin page are the only surfaces that show them. A
 failed-jobs gauge is proposed but unbuilt.
 
-Phases 1–7.5 are complete: full React frontend (7 pages + Review), JWT auth, semantic search,
-albums, videos, geo map, review/meme workflow, on-demand HEIC display + video transcoding.
+Phases 1–7.5 are complete: full React frontend (8 pages + Review), JWT auth, semantic search,
+albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + video transcoding.
 
 ## Server Access
 

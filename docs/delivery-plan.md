@@ -1049,6 +1049,9 @@ well cover almost everything, and that is cheap to find out by watching for `re-
 > Stage is fully validated and cheap to iterate on; prod is a days-long run that makes any
 > frontend work awkward (the two environments share ports, so developing during the import means
 > developing against prod).
+>
+> **Built 2026-08-09** — code complete and green, not yet exercised on stage. See "Built" at the
+> end of this section.
 
 **Goal:** make the YOLO tags reachable. Today they are computed on every photo, stored, and shown
 only as passive text in the lightbox — see the audit under the 2026-08-07 validation above.
@@ -1143,8 +1146,72 @@ earn less as a chip than its count suggests.
 the way semantic search does (`SemanticSearchHandler.cs:45`), or show everything the way Gallery
 does. Not obvious either way — worth a call rather than a silent default.
 
+*(Resolved while building — the question rested on a wrong premise. Gallery does **not** show
+everything: `GetMediaListHandler.cs:33` filters `OriginClass != "meme"`, as do semantic search and
+On This Day. All three surfaces agree, so tags follow them. There was no real fork.)*
+
 **Not in scope here:** the CLIP + tag hybrid *ranking* described in the audit. That changes the
 semantic search box; this phase only adds browse-by-tag. They share the data, not the code path.
+
+### Built — 2026-08-09
+
+All of the above shipped. `dotnet test` green across the solution (Api **51** · GeoService 12 ·
+MediaWorker 60 — Api was 31); `tsc -b && vite build` green.
+
+**API** — `src/Api/Features/Tags/TagHandlers.cs` (`GetTagsHandler`, `GetTagMediaHandler`,
+`TagCountDto`, shared `TagQueries.FilesCarryingAllTags`), `src/Api/Endpoints/TagsEndpoints.cs`,
+mapped in `Program.cs`. `GET /api/search/tags`, `TagSearchHandler` and `tagSearch()` are deleted
+as planned.
+
+**Frontend** — `src/api/tags.ts`, `pages/TagsPage.tsx`, route `/tags`, nav link, and a `.tag-chip`
+block in `global.css` built from the darkroom tokens (accent fill = selected, dashed hairline +
+`--ink-28` = disabled, so the two states differ by more than colour).
+
+**Two deliberate deviations from the spec above**, both forced by what EF Core 10 will actually
+translate — and both found by a test, not on stage:
+
+1. **AND is an `EXISTS` chain, not `GROUP BY … HAVING COUNT(DISTINCT tag)`.** One `EXISTS` per
+   selected tag, each an index lookup on `media_tags(tag)`. It composes — the same builder backs
+   both the facet counts and the paged grid, which the HAVING form cannot — and it is immune to
+   duplicate rows by construction rather than by a defensive `DISTINCT`.
+2. **The facet-count query's shape is load-bearing.** It aggregates into an anonymous type,
+   orders, and only then projects into `TagCountDto`. EF Core 10 cannot order by a property of a
+   positional record it has just constructed and throws "could not be translated"; over an
+   anonymous projection the identical ordering translates to `ORDER BY count(DISTINCT …)`, and
+   the record projection tacked on last translates away. `COUNT(DISTINCT media_file_id)` — the
+   plan's original intent — does translate, but only in that arrangement.
+
+**`Api.Tests/Features/Tags/TagQueryTranslationTests.cs` exists because of the above.** The other
+tag tests run on the in-memory provider, which evaluates client-side and would have passed every
+one of the broken formulations; these render the same queries to SQL through the real Npgsql
+provider, which happens before any connection is opened, so no database is needed. The first run
+failed immediately on `COUNT(DISTINCT)` — that would otherwise have reached stage as a 500 on
+page load. Worth reusing wherever a query is more than a `Where` + `OrderBy`.
+
+**Exercised locally, not on stage** — same sandbox limitation as Steps 3/6/7/8. Driven with
+`vite` + Playwright against a throwaway mock config serving `/api/tags*` from a fixture shaped
+like the measured distribution (person-dominant, a cliff, a 32-tag tail, sparse co-occurrence);
+the config lived in `src/Frontend` only for the run and is deleted. Verified: chip row and
+counts, selecting/deselecting, facet narrowing greying out dead ends, two-chip AND, pagination
+(3 pages over 104), page reset on chip toggle, show-all/show-less, a rare selected chip staying
+pinned when the row collapses, and the empty state's drop-a-chip recovery. Zero console errors
+on `/tags`.
+
+Two things that only this click-through would have caught:
+
+- **Axios' default array serialization would have broken both endpoints.** It sends
+  `?selected[]=a`, which binds to nothing on a .NET `string[]`. Fixed with
+  `paramsSerializer: { indexes: null }`; the wire format was then read back off the mock server
+  and confirmed as `?selected=person&selected=bottle`.
+- **Selected chips showed their unfiltered count**, so "person AND bottle" rendered a 7-photo
+  grid under a chip row reading `PERSON 104` / `BOTTLE 7` — two selected chips disagreeing about
+  the same result set. Every chip's number now means one thing: photos you get with this chip in
+  the selection.
+
+**Still unverified, for the stage pass:** the SQL runs against real Postgres (translation is
+proven, execution is not), behaviour against real YOLO tags rather than the fixture, and chip-row
+density at 46 tags. The `CHIP_FLOOR = 24` top-N floor is a guess calibrated on a 276-file sample —
+re-judge it after the archive import, when `person` is ~68K.
 
 ---
 

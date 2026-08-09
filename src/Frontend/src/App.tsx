@@ -8,6 +8,7 @@ import { GalleryPage } from './pages/GalleryPage'
 import { OnThisDayPage } from './pages/OnThisDayPage'
 import { GeoPage } from './pages/GeoPage'
 import { SearchPage } from './pages/SearchPage'
+import { TagsPage } from './pages/TagsPage'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { VideosPage } from './pages/VideosPage'
 import { ReviewPage } from './pages/ReviewPage'
@@ -25,6 +26,7 @@ function ProtectedLayout() {
         <Route path="/on-this-day" element={<OnThisDayPage />} />
         <Route path="/geo"        element={<GeoPage />} />
         <Route path="/search"     element={<SearchPage />} />
+        <Route path="/tags"       element={<TagsPage />} />
         <Route path="/albums"     element={<AlbumsPage />} />
         <Route path="/videos"     element={<VideosPage />} />
         <Route path="/review"     element={<ReviewPage />} />

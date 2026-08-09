@@ -172,6 +172,7 @@ try
     app.MapAuthEndpoints();
     app.MapMediaEndpoints();
     app.MapSearchEndpoints();
+    app.MapTagsEndpoints();
     app.MapAlbumsEndpoints();
     app.MapSeriesEndpoints();
     app.MapAdminEndpoints();

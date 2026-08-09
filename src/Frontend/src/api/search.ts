@@ -14,12 +14,5 @@ export async function semanticSearch(
   return data
 }
 
-export async function tagSearch(
-  q: string,
-  limit = 100
-): Promise<MediaListItem[]> {
-  const { data } = await client.get<MediaListItem[]>('/search/tags', {
-    params: { q, limit },
-  })
-  return data
-}
+// tagSearch() removed in Phase 10 — browse-by-tag lives in api/tags.ts, against
+// /api/tags, which pages and narrows facets. The old /api/search/tags is gone.

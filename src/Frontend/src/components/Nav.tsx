@@ -7,6 +7,7 @@ const LINKS: [string, string, boolean?][] = [
   ['/gallery', 'Gallery'],
   ['/geo', 'Geo'],
   ['/search', 'Search'],
+  ['/tags', 'Tags'],
   ['/albums', 'Albums'],
   ['/videos', 'Videos'],
   ['/review', 'Review'],

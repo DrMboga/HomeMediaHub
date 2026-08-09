@@ -18,6 +18,12 @@ export interface TagDto {
   model: string
 }
 
+/** A tag and how many photos carry it, within whatever chip selection is active. */
+export interface TagCount {
+  tag: string
+  count: number
+}
+
 export interface MediaDetail {
   id: string
   filePath: string

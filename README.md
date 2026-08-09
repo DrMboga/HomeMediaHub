@@ -12,7 +12,8 @@ tagging, and semantic search. LAN-only.
   applied as async enrichment (**save-early**: photos are browsable in the gallery immediately;
   AI results fill in afterwards)
 - **Natural-language search** ("birthday cake", "beach sunset") powered by CLIP ViT-B/32 + pgvector
-- **Object detection tags** via YOLOv8n (runs fully local — no cloud ML)
+- **Object detection tags** via YOLOv8n (runs fully local — no cloud ML), browsable on a Tags page
+  that AND-filters across several tags at once
 - **Browser UI** (React + TypeScript) for browsing, searching, albums, favorites, and an Admin
   page for triggering scans / watching pipeline progress / retrying failed jobs
 - **Samba share** for direct file access from Windows/macOS on the LAN

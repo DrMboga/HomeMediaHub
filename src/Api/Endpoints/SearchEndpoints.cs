@@ -1,5 +1,4 @@
 using Api.Features.Search.SemanticSearch;
-using Api.Features.Search.TagSearch;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
@@ -29,17 +28,7 @@ public static class SearchEndpoints
             return Results.Ok(items);
         });
 
-        g.MapGet("/tags", async (
-            IMediator m,
-            CancellationToken ct,
-            [FromQuery] string q = "",
-            [FromQuery] int limit = 0) =>
-        {
-            if (string.IsNullOrWhiteSpace(q))
-                return Results.BadRequest(new { error = "q is required" });
-
-            var items = await m.Send(new TagSearchRequest(q, limit > 0 ? limit : 100), ct);
-            return Results.Ok(items);
-        });
+        // GET /api/search/tags retired in Phase 10 — browse-by-tag lives at /api/tags,
+        // which pages its results and does facet narrowing. Two tag routes would compete.
     }
 }

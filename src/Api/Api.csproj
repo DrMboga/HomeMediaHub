@@ -10,6 +10,10 @@
     <ProjectReference Include="..\Data\Data.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Lets the tag query-translation tests reach the internal IQueryable builders. -->
+    <InternalsVisibleTo Include="Api.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="MediatR" Version="14.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Pgvector" Version="0.3.2" />
