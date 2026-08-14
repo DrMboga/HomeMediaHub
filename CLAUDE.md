@@ -139,7 +139,9 @@ reading them — **read the "Built — 2026-08-09" notes in `docs/delivery-plan.
 `TagHandlers.cs`**. Open at prod scale only: `CHIP_FLOOR = 24` is calibrated on stage's 46 tags
 and should be re-judged after the archive import.
 
-**Next up: Phase 9, the prod archive import** — nothing blocks it now that the Tags page is done.
+**Phase 9, the prod archive import, is RUNNING** (as of 2026-08-14). Do not rebuild or restart
+worker containers while it drains — it takes days. Deferred fixes found mid-import live in
+`docs/backlog.md`.
 
 **What does NOT exist yet (do not assume it does):** the prod rollout / full-archive scan itself
 (Phase 9); full per-page visual redesign beyond the Step 10 pilot pages; the CLIP + tag hybrid
@@ -150,6 +152,19 @@ them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransi
 successful consume — the "consume faults" and "error queue depth" panels stay flat even while
 files fail. `processing_jobs` + the Admin page are the only surfaces that show them. A
 failed-jobs gauge is proposed but unbuilt.
+
+**Deferred work lives in `docs/backlog.md`** — currently the video-ingest bugs found during the
+prod import (sub-second videos wrongly failed; ffmpeg errors unreadable in the Admin table).
+Read it before touching `FileConvertService.cs`.
+
+**Phase 11 — Photo of the Day — is specified, not built.** A daily 15:00 Telegram post of a random
+`person`-tagged photo from On This Day. It is **not** an n8n job and not a queue/consumer: it is a
+`PhotoOfTheDayScheduler : BackgroundService` in the Api, built like the existing `ScanScheduler`.
+Design in `docs/architecture.md` §14, steps in `docs/delivery-plan.md` → Phase 11. The spec is
+complete — both open questions were answered 2026-08-14, so nothing blocks implementation.
+The pick falls back through three tiers (`person` ≥ 0.5 conf → geotagged → any non-video) so
+something goes out every day. It is **not** schedule-only: `POST /api/admin/potd/send` (optional
+date / mediaFileId / dryRun) fires it on demand, with a Send Now card on `/admin`.
 
 Phases 1–7.5 are complete: full React frontend (8 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + video transcoding.
@@ -354,8 +369,11 @@ public by design (`<img>`/`<video>` can't send JWT; GUID URLs, LAN-only).
 ## Out of Scope
 
 Face/people recognition · remote access (LAN only) · browser upload (Samba + scan) ·
-RAW files (CR2/ARW/NEF) · per-user library separation · Telegram notifications and
-Photo-of-the-Day (dropped with n8n; future dead-letter consumer / scheduled worker).
+RAW files (CR2/ARW/NEF) · per-user library separation · Telegram dead-letter/error alerts.
+
+**No longer out of scope:** Photo-of-the-Day. Dropped with n8n, but Mike asked for it back on
+2026-08-14 and it is now specified as Phase 11 — a scheduled `BackgroundService` in the Api,
+**not** a resurrected workflow. See `docs/architecture.md` §14 and `docs/delivery-plan.md`.
 
 ## Prior Art
 

@@ -345,7 +345,9 @@ src/
 ├── Data/                 shared entity POCOs + one copy of the EF fluent mapping
 │                         MediaModelConfiguration.ConfigureMediaEntities(builder, excludeFromMigrations)
 ├── Api/                  frontend-facing REST + JWT auth + admin endpoints + ScanScheduler
-│                         AppDbContext (Identity + media entities) — OWNS media schema migrations
+│   │                     AppDbContext (Identity + media entities) — OWNS media schema migrations
+│   ├── Services/         ScanScheduler, PhotoOfTheDayScheduler (planned, §14)
+│   └── Features/         …, PhotoOfTheDay/ (planned: pick handler + Telegram client)
 ├── MediaWorker/          Worker Service: consumers, saga, ported processing services
 │   ├── Services/         FileHashService, DedupService, FileConvertService,
 │   │                     MetadataService, ThumbnailService, ScanService
@@ -418,6 +420,8 @@ directly via EF Core.
 | `GET /api/admin/jobs/{id}` | job detail |
 | `POST /api/admin/jobs/{id}/retry` | reset to `queued`, `retry_count++`, publish `FileDiscovered(Reprocess: true)` |
 | `POST /api/admin/jobs/retry-failed` | bulk retry of all failed jobs |
+| `POST /api/admin/potd/send` `{month?, day?, mediaFileId?, dryRun?}` | **(planned, §14)** run the Photo-of-the-Day pick + send once, now. Ignores the schedule, `Potd:Enabled`, and the already-sent guard; does **not** write `potd_sends`. → `{ sent, tier, mediaFileId, caption }` |
+| `GET /api/admin/potd/last` | **(planned, §14)** most recent rows from `potd_sends` — what the Admin card shows |
 
 The frontend `/admin` page consumes these: scan trigger, polling progress card
 (5 s `refetchInterval`), failed-jobs table with retry.
@@ -456,6 +460,9 @@ Env vars (examples in `.env.stage.example` / `.env.prod.example`): `COMPOSE_PROJ
 `DISPLAY_CACHE_DIR`, `WORK_DIR`, `DATA_DIR`, **`RABBITMQ_USER`, `RABBITMQ_PASS`,
 `GRAFANA_PASSWORD`** (new). `SERVER_IP` is removed (only n8n's webhook URL used it).
 
+Planned for Photo of the Day (§14): `POTD_ENABLED` (**`false` in `.env.stage`** — stage must never
+post to the family channel), `POTD_BOT_TOKEN`, `POTD_CHAT_ID`, `POTD_TIMEZONE`.
+
 ## 13. Design Decisions
 
 - **RabbitMQ + MassTransit replaces n8n as the orchestrator.** The old design hid the work
@@ -484,13 +491,221 @@ Env vars (examples in `.env.stage.example` / `.env.prod.example`): `COMPOSE_PROJ
 - **Separate Postgres per concern** (app, Immich, geo cache). **Samba native**, not
   containerized. **All AI local**, CPU-only; face recognition out of scope.
 
-## 14. Out of Scope
+## 14. Photo of the Day — scheduled Telegram post (planned)
+
+> **Status: specified, not built.** Requested by Mike 2026-08-14. Implementation steps and
+> verification live in [`delivery-plan.md`](delivery-plan.md) → Phase 11.
+
+Once a day at **15:00 local time**, post one randomly-chosen `person`-tagged photo from the
+current calendar day across all years ("On This Day") to a private Telegram channel.
+
+The same feature ran under n8n as Workflow 3 and was deleted with it in Step 7. It is **not**
+coming back as a workflow, a queue, or a consumer — it is a `BackgroundService` inside the Api,
+built exactly like `ScanScheduler`.
+
+### Why a BackgroundService in the Api, not a message
+
+There is no pipeline work here and nothing to back-pressure: one timer, one row, one HTTPS POST,
+once per day. Routing it through RabbitMQ would mean inventing a message, an exchange, a queue,
+and a consumer to move a tick from the Api to a service that would then need the Api's media
+queries anyway. `ScanScheduler` publishes a message only because the *scan itself* belongs to
+MediaWorker; here the work belongs where the data is.
+
+The Api is also the only service with the pieces already built: the media queries, the
+`processing_jobs`/media schema ownership, and — critically — the on-demand HEIC→JPEG conversion
+(§10). MediaWorker has no HTTP egress and none of the query surface.
+
+**This is the Api's first outbound internet call.** The stack is LAN-only for *inbound*; the
+container already has egress (GeoService reaches Nominatim), but nothing in `api` has used it
+before. Worth stating explicitly since "LAN-only" appears throughout these docs.
+
+### Shape
+
+```
+PhotoOfTheDayScheduler : BackgroundService        (src/Api/Services/)
+  gate on Potd:Enabled (default false)            ← same pattern as Scan:Enabled
+  loop:
+    delay until next 15:00 in Potd:TimeZone
+    ── per-run body wrapped in try/catch ──
+    create a DI scope                             ← AppDbContext is scoped; the service is not
+    already sent today?  (potd_sends)  → skip
+    pick  → SendPhotoOfTheDayHandler (MediatR, in-process)
+    record the send
+```
+
+Five things that differ from `ScanScheduler` and are easy to get wrong:
+
+1. **Scope creation.** `ScanScheduler` injects `IPublishEndpoint`, which is a singleton, so it can
+   hold it directly. This one needs `AppDbContext`, which is **scoped** — a `BackgroundService` is
+   a singleton and cannot inject it. Inject `IServiceScopeFactory` and open a scope per run.
+2. **Local time, not UTC.** `ScanScheduler.NextRunTime` hardcodes `TimeSpan.Zero` (02:00 UTC)
+   because a monthly maintenance scan does not care. 15:00 must be 15:00 *for Mike*, and the
+   containers run UTC. Resolve `Potd:TimeZone` via `TimeZoneInfo` and convert. Verify tzdata and
+   ICU are present in the `aspnet:10.0-noble` image and that `InvariantGlobalization` is not set —
+   `FindSystemTimeZoneById` throws without them.
+3. **Unhandled exceptions kill the host.** Since .NET 6 the default
+   `BackgroundServiceExceptionBehavior` is `StopHost` — an exception escaping `ExecuteAsync` takes
+   the whole Api down. A Telegram outage must not do that. Wrap the per-run body in try/catch, log
+   at Error, continue the loop. (`ScanScheduler` has the same exposure today; a publish failure
+   would stop the Api. Worth fixing there at the same time.)
+4. **Restart idempotency.** A sleep-until-next-run loop re-sends if the Api restarts across the
+   boundary — deploys tend to happen during the day. Guard on a persisted last-sent date.
+5. **`NextRunTime` stays `internal static`.** That is why `ScanScheduler`'s is testable without a
+   host; keep the same shape so the 15:00/timezone/rollover arithmetic can be unit-tested.
+
+### The pick — three tiers, best available wins
+
+**The intent is that something goes out every day.** Mike's call (2026-08-14): a person photo is
+the ideal, but an empty channel is worse than a lesser photo. So the candidate set is built by
+falling back through three tiers, and the **random choice happens inside whichever tier matched** —
+not across the union.
+
+Every tier shares the same base filter, which is the On This Day set minus what can't be posted:
+
+```
+BASE = media_files
+  where not IsDeleted
+    and OriginClass != 'meme'
+    and MimeType not like 'video/%'          ← sendPhoto takes a still
+    and TakenAt.Month = today.Month
+    and TakenAt.Day   = today.Day
+```
+
+| | Tier | Candidate set |
+|---|---|---|
+| 1 | **person** | `BASE` and `exists (Tags where Tag = 'person' and Confidence >= Potd:MinConfidence)` |
+| 2 | **geotagged** | `BASE` and `Metadata.Latitude != null and Metadata.Longitude != null` |
+| 3 | **anything** | `BASE` |
+
+First non-empty tier wins; pick uniformly at random from it. If tier 3 is also empty the calendar
+day genuinely holds no postable photo — **send nothing and log it.** That is the only silent case.
+
+Rationale for tier 2: a geotag means the photo was taken somewhere, which correlates with trips and
+events rather than screenshots and receipts, and it is the one signal already on the record that
+costs nothing to filter on. It also makes the caption worth reading, since the caption is built
+from `Address` (below).
+
+**The tag is `person`, singular.** The old Raspberry Pi implementation matched `TagLabel ==
+"People"` because ML.NET produced that vocabulary; HomeMediaHub's tags are YOLOv8n COCO classes.
+Measured against prod 2026-08-14: `person` = 16,876 rows and **no `people` tag exists at all**.
+
+**`Potd:MinConfidence` starts at 0.5** and applies to tier 1 only. A daily single-photo pick is a
+precision problem, not a recall one — the opposite of Phase 10's tag browsing, which deliberately
+rejected a confidence floor because it thinned an already-starved dataset. Here, dropping a
+marginal `person` hit costs nothing: tier 2 catches the day anyway. Re-judge the number against
+the real post-import distribution.
+
+Select **ids only**, then pick in memory. A single calendar day's slice is small (hundreds of rows
+even at full archive scale), and it sidesteps translating `random()` — this codebase has been
+bitten by EF translation before (see the Phase 10 notes on `TagHandlers.cs`). Use
+`Random.Shared.Next(0, count)`; note the old implementation's `rand.Next(0, len - 1)` was an
+off-by-one that could never pick the last element.
+
+Query the tiers lazily — tier 2 only runs if tier 1 came back empty. Three round trips in the worst
+case, once a day, against a day-sized slice.
+
+Log which tier supplied the photo. It is the cheapest possible read on whether the AI tagging is
+actually earning its place: a channel running on tier 3 most days means `person` coverage is worse
+than assumed.
+
+`OnThisDayHandler` (`src/Api/Features/Media/OnThisDay/`) is **not** reusable for any tier: no tag
+filter, no video exclusion, and it `Take(200)`s after ordering by date, so it is not a uniform
+sample. Write a sibling handler — do not widen it, `/on-this-day` depends on its current shape.
+
+### The send
+
+Reuse `DisplayMediaRequest` (§10) in-process via MediatR — it returns a **file path plus content
+type**, handling HEIC→JPEG conversion and caching. No HTTP call to itself, and none of the old
+implementation's hand-rolled convert/thumbnail code. Prefer this over the stored WebP thumbnail
+(`media_thumbnails.thumbnail_path`): higher quality, and Telegram treats WebP inconsistently.
+
+`AddHttpClient("TelegramBotApi")` with base address `https://api.telegram.org/`, then
+`POST bot{token}/sendPhoto` as `multipart/form-data` (`chat_id`, `caption`, `photo`).
+
+Caption = `TakenAt` + `MediaMetadata.Address` when present. Simpler than the Pi version, which
+assembled locality/region/country separately — `Address` here is one formatted string.
+
+**Telegram's `sendPhoto` caps uploads at 10 MB** (and 10,000px combined width+height). A q90 JPEG
+off a 12 MP iPhone HEIC lands well inside both, but full-size originals from other sources can
+exceed 10 MB. Check length before posting and downscale rather than letting the API reject it.
+
+### Persistence
+
+One new table, owned by the Api's `AppDbContext` like every other media table (§9):
+
+| `potd_sends` | |
+|---|---|
+| `sent_on` `date` **PK** | the local calendar date — the idempotency guard |
+| `media_file_id` `uuid` | which photo went out |
+| `sent_at` `timestamptz` | when |
+
+The primary key *is* the guard: insert before/with the send and let a 23505 mean "already sent
+today", the same duplicate-as-control-flow idiom the ingest consumers use. It also gives a send
+history, which makes "don't repeat a photo across years" cheap to add later.
+
+### Config
+
+`Potd:Enabled` (default **false**), `Potd:BotToken`, `Potd:ChatId`, `Potd:SendAtLocal`
+(default `15:00`), `Potd:TimeZone`, `Potd:MinConfidence` (default **0.5**).
+
+Off by default for the same reason `Scan:Enabled` is: stage and prod share ports and run from one
+compose file, and stage must never post to the family channel.
+
+### Manual trigger
+
+The scheduler must never be the only way to fire this — waiting until 15:00 to find out whether a
+token is wrong is not a debug loop. The old implementation had the same escape hatch
+(`WorkerController.SendPhotoOfTheDay`).
+
+**`POST /api/admin/potd/send` (JWT, §10)** — runs the pick-and-send once, immediately.
+
+```
+POST /api/admin/potd/send
+  { "month": 8, "day": 14,          ← optional, defaults to today in Potd:TimeZone
+    "mediaFileId": "…",             ← optional, skip the pick and send this exact photo
+    "dryRun": false }               ← optional, pick and report but do not post
+
+→ 200 { sent, tier, mediaFileId, filePath, caption, skippedReason? }
+```
+
+Four behaviours that make it useful rather than just present:
+
+1. **It ignores `Potd:Enabled`.** That flag exists to stop the *scheduler* posting from stage; an
+   explicit button press is not an accident. Bot token and chat ID must still be configured — if
+   they are not, fail with a clear message rather than a null-reference.
+2. **It ignores the already-sent-today guard**, so it can be run repeatedly while debugging.
+3. **It does not write `potd_sends`** — a manual test at 11:00 must not cause the real 15:00 run to
+   skip the day. Only the scheduler records sends. (`dryRun` additionally skips the Telegram call.)
+4. **It returns the chosen tier and caption**, so a failure is diagnosable from the response
+   instead of the logs — which tier fired, which photo, what the caption would read.
+
+`month`/`day` matter more than they look: they make every branch testable on demand. Today's date
+may well have no `person` photo, and picking a date that does is the only way to exercise tier 1
+without waiting a year.
+
+**A button on the `/admin` page** (§10, "Photo of the Day" card) alongside it — Send Now, plus the
+last-send info read from `potd_sends`. The endpoint alone still means curl and a hand-copied JWT;
+the Admin page already holds the JWT and already has the Scan card as a precedent for
+button-triggers-endpoint.
+
+### Settled 2026-08-14
+
+Both of this section's open questions were answered by Mike and are folded into the design above:
+
+- **Fallback:** there should be a photo of the day *anyway*. Person → geotagged → any non-video,
+  first non-empty tier wins. Silence only when the day holds nothing postable.
+- **Confidence floor:** yes, start at `0.5`, and pick at random from whatever the matching tier
+  selects.
+
+Nothing is blocking implementation.
+
+## 15. Out of Scope
 
 - Face / people recognition
 - Remote access (LAN only) · web upload (use Samba + scan)
 - RAW camera files (CR2/ARW/NEF)
 - Per-user library separation (shared pool)
-- Telegram notifications / Photo-of-the-Day posts (dropped with n8n; future: dead-letter
-  consumer or scheduled worker)
+- Telegram **error / dead-letter alerts** (n8n's Workflow 4; no replacement planned.
+  Photo-of-the-Day is back in scope — §14)
 - Saga scheduler timeouts (needs delayed-message-exchange plugin; revisit if stale sagas
   actually occur)

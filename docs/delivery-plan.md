@@ -1248,3 +1248,175 @@ failures never reach Grafana, so the Admin page is the only place they surface.
 **Re-run the tag distribution afterwards.** Phase 10's design rests on stage's 276-file sample;
 prod is ~690× that, and the plan's extrapolation assumes TestPhoto is representative. Worth
 confirming rather than trusting.
+
+---
+
+## Phase 11 — Photo of the Day
+
+> **Specified 2026-08-14, not started.** Design and rationale: `architecture.md` §14 — read it
+> first, it settles the "why a BackgroundService and not a queue" question and lists five ways
+> this differs from `ScanScheduler`.
+>
+> **Runs after Phase 9.** Not blocked by it technically — but the pick query wants real tag
+> confidence data to calibrate `Potd:MinConfidence`, and building against prod while the import
+> runs means developing against prod (the two environments share ports).
+
+**Goal:** a daily 15:00 post of one random `person`-tagged photo from On This Day to the family
+Telegram channel — the n8n Workflow 3 behaviour, rebuilt as our own scheduled worker.
+
+Mike already has the bot and the channel; the token and chat ID exist. `docs/telegram-potd-setup.md`
+sections 1–3 still describe that setup correctly. **Nothing about this is an n8n job any more** —
+no workflow, no webhook, no queue, no consumer. One `BackgroundService` in the Api, built the same
+way as `ScanScheduler`.
+
+### Step 1 — `potd_sends` table
+
+Api migration (`dotnet ef migrations add AddPotdSends --project src/Api`). Entity in
+`src/Data/Entities/`, mapped in `MediaModelConfiguration.ConfigureMediaEntities` alongside the
+rest, so `WorkerDbContext` excludes it automatically like every other media table.
+
+`sent_on date` PK · `media_file_id uuid` · `sent_at timestamptz`.
+
+*Verify:* migration applies on a throwaway pg16 container; `WorkerDbContext` still produces no new
+migration (the two-migrator invariant, §9).
+
+### Step 2 — the pick handler
+
+`src/Api/Features/PhotoOfTheDay/` — a MediatR request returning the chosen `MediaFile` id (and the
+tier it came from), or null.
+
+**Three tiers over a shared base filter**, per §14. Base = not deleted, not `meme`,
+`MimeType not like 'video/%'`, `TakenAt` month+day match. Then:
+
+1. `EXISTS` a `person` tag with `Confidence >= Potd:MinConfidence` (0.5)
+2. else `Metadata.Latitude != null && Metadata.Longitude != null`
+3. else the base set alone
+
+First non-empty tier wins; **pick uniformly at random inside that tier**, not across the union.
+Query lazily — tier 2 only runs if tier 1 is empty. Null (send nothing, log it) only when tier 3
+is also empty.
+
+**Select ids only, pick in memory** with `Random.Shared.Next(0, count)` — sidesteps translating
+`random()`, and a day-sized slice is small even at archive scale.
+
+Return the tier alongside the id and log it. It is a free read on whether AI tagging is earning its
+place — mostly-tier-3 days mean `person` coverage is worse than assumed.
+
+Do not extend `OnThisDayHandler` — it has no tag filter, includes videos, and `Take(200)`s after
+ordering by date, so it is not a uniform sample. `/on-this-day` depends on its current shape.
+
+*Verify:* unit tests over the in-memory provider for the filters **and the tier fallback order** —
+seed a day with only geotagged photos and assert tier 2, a day with neither and assert tier 3, an
+empty day and assert null, and a `person` tag at 0.4 confidence and assert it does *not* satisfy
+tier 1. **Plus a translation test in `Api.Tests/Features/`** rendering each tier's query to SQL
+through the real Npgsql provider. Phase 10 established why: the in-memory provider evaluates
+client-side and passes formulations that throw at runtime against Postgres. The `EXISTS`-over-tags
+shape is exactly the kind that broke there.
+
+### Step 3 — the Telegram client
+
+`AddHttpClient("TelegramBotApi")`, base `https://api.telegram.org/`; `POST bot{token}/sendPhoto`
+as multipart (`chat_id`, `caption`, `photo`).
+
+Get the image by sending `DisplayMediaRequest` in-process — it returns a file path and content
+type, already handling HEIC→JPEG and caching. Do **not** re-implement conversion or thumbnailing
+(the old Pi `TelegramBotService` did, and none of it is needed here), and do not call the Api's own
+HTTP endpoint from inside the Api.
+
+Caption: `TakenAt` + `MediaMetadata.Address` when present.
+
+Check the file is under **10 MB** before posting — Telegram's `sendPhoto` limit — and downscale if
+not.
+
+*Verify:* against the real bot with a hand-picked media id, before any scheduling exists.
+
+### Step 4 — manual trigger
+
+**Before the scheduler, not after.** This is how Steps 2 and 3 get exercised at all — the
+scheduler is the last thing to wire up, not the first, and nothing should require waiting until
+15:00 to find out a token is wrong.
+
+`POST /api/admin/potd/send` (JWT), body all-optional:
+
+| Field | Effect |
+|---|---|
+| `month` / `day` | pick for that calendar date instead of today — the only way to exercise tier 1 on a date that actually has a `person` photo |
+| `mediaFileId` | skip the pick entirely and send this exact photo |
+| `dryRun` | run the pick, build the caption, report — but do not call Telegram |
+
+Returns `{ sent, tier, mediaFileId, filePath, caption, skippedReason? }`.
+
+Three deliberate differences from the scheduled path, all in §14:
+
+- **ignores `Potd:Enabled`** — that flag stops the *scheduler* posting from stage; a button press
+  is not an accident. Still fail clearly if token/chat ID are unconfigured.
+- **ignores the already-sent-today guard** — so it can be run repeatedly while debugging.
+- **does not write `potd_sends`** — a manual test at 11:00 must not make the real 15:00 run skip
+  the day. Only the scheduler records sends.
+
+Plus `GET /api/admin/potd/last` for the Admin card.
+
+*Verify:* `dryRun` against a date known to have person photos → tier 1; a date with none →
+tier 2 or 3; `mediaFileId` for a HEIC → confirms the `DisplayMediaRequest` path converts. Then one
+real send to the channel.
+
+### Step 5 — `PhotoOfTheDayScheduler`
+
+`src/Api/Services/PhotoOfTheDayScheduler.cs`, mirroring `ScanScheduler`: config gate first,
+`internal static NextRunTime` for testability, `Task.Delay` loop. By this point the pick and the
+send are already proven through Step 4, so this step is only the clock.
+
+The five deltas from `ScanScheduler` are in §14 and all of them matter:
+`IServiceScopeFactory` (not a direct `AppDbContext`) · local time via `Potd:TimeZone` (not UTC) ·
+try/catch around the per-run body (an escaped exception stops the **whole Api host**) ·
+`potd_sends` guard against re-send on restart · `NextRunTime` kept static and testable.
+
+Unlike Step 4's endpoint, the scheduled path **does** honour `Potd:Enabled` and the already-sent
+guard, and **does** write `potd_sends`.
+
+*Verify:* unit tests on `NextRunTime` — before/after 15:00, day rollover, month rollover, and a
+DST boundary in `Potd:TimeZone`. Then confirm `TimeZoneInfo.FindSystemTimeZoneById` actually
+resolves **inside the container** (`aspnet:10.0-noble` — check tzdata/ICU are present and
+`InvariantGlobalization` is not set); it throws if they are not, and that is a runtime failure no
+unit test on the host will catch.
+
+**While here:** give `ScanScheduler` the same try/catch. It has the identical host-stopping
+exposure today — a publish failure at 02:00 on the 1st would take the Api down.
+
+### Step 6 — Admin page card + config
+
+A "Photo of the Day" card on `/admin`, following the existing Scan card as the precedent for
+button-triggers-endpoint: **Send Now** (with an optional date), the returned tier and photo, and
+last-send info from `GET /api/admin/potd/last`. Client functions into
+`src/Frontend/src/api/admin.ts` alongside `triggerScan`/`retryFailedJobs`.
+
+Without this the endpoint means curl and a hand-copied JWT every time; the Admin page already
+holds the JWT.
+
+Reuse existing styles per the Step 10 no-redesign-yet rule. Note the bug that pass caught last
+time: `.btn-primary` is `width: 100%` (styled for the login form) and stretches when used in a
+section header — check any new button against that.
+
+Env vars into both `.env.*.example` files: `POTD_ENABLED` (**false in stage** — stage must never
+post to the family channel), `POTD_BOT_TOKEN`, `POTD_CHAT_ID`, `POTD_TIMEZONE`.
+
+### Step 7 — docs
+
+Rewrite `docs/telegram-potd-setup.md` sections 4–6 against the real implementation (keep 1–3, they
+are still correct) and drop its superseded banner — the new section 4 is the env vars, and the new
+"test it" section is the Admin card / `POST /api/admin/potd/send`, not n8n's Execute Workflow
+button. Update `CLAUDE.md`: Out of Scope, the pipeline summary, and the service/config tables.
+
+### Answered 2026-08-14 — nothing left blocking
+
+Both open questions were settled by Mike and are built into Step 2 above:
+
+1. **Fallback:** there should be a photo of the day *anyway*. Person → geotagged → any non-video.
+   Not silence-on-no-person.
+2. **`Potd:MinConfidence` = 0.5**, applied to tier 1 only, with the random pick happening inside
+   whichever tier matched. Re-judge the number against the real post-import distribution.
+
+The one thing still worth measuring after the archive import: **how often tier 1 actually fires.**
+If most days fall through to tier 2 or 3, either the floor is too high or `person` coverage is
+thinner than the stage sample suggested. The tier log line from Step 2 answers this without any
+extra instrumentation.

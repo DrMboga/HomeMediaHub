@@ -1,10 +1,14 @@
 # Telegram Photo of the Day Setup
 
-> **Superseded (Phase 8, 2026-08-01).** n8n — and with it Workflow 3 (Photo of the Day) and
-> Workflow 4 (Error Handler/Telegram alerts) — is fully removed. Telegram notifications are
-> out of scope until a replacement (a dead-letter consumer or scheduled worker in MediaWorker/Api)
-> is built; see `CLAUDE.md` → Out of Scope. This guide is kept for historical reference only —
-> none of the n8n UI steps below apply to the current stack.
+> **Partly superseded (Phase 8, 2026-08-01).** n8n — and with it Workflow 3 (Photo of the Day) and
+> Workflow 4 (Error Handler/Telegram alerts) — is fully removed. **Sections 1–3 below (create the
+> bot, create the channel, get the chat ID) are still accurate** and are the setup a rebuilt
+> Photo-of-the-Day would need. Sections 4–6 are n8n UI steps and no longer apply to anything.
+>
+> Photo-of-the-Day was requested again on 2026-08-14 and is specified as **Phase 11**: a
+> `PhotoOfTheDayScheduler : BackgroundService` in the Api, built like `ScanScheduler`. Nothing
+> about it is workflow-shaped any more. Design in `architecture.md` §14, steps in
+> `delivery-plan.md`. Rewrite sections 4–6 and drop this banner when it ships.
 
 Workflow 3 ran daily at 15:00 and sent a photo to a Telegram channel. This guide covers creating the bot, creating the channel, and wiring them into n8n.
 
