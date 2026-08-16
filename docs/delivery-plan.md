@@ -1262,8 +1262,8 @@ source files. The fixes are Phase 12 below.
 **Still to do from the original Phase 9 scope:**
 - ~~Recreate the ivfflat index now that the table is at full size.~~ **Done 2026-08-16 — dropped
   instead of rebuilt. See below.**
-- Spot-check geo addresses and semantic search quality at prod scale. **Do this after deploying
-  the index drop** — every measurement taken before it is a measurement of the wrong result set.
+- ~~Spot-check geo addresses and semantic search quality at prod scale.~~ **Done 2026-08-16, both
+  pass. See "Geo and semantic spot-check" below.**
 - **Re-judge `CHIP_FLOOR = 24`** on the Tags page — it was calibrated on stage's 46 tags, and prod
   is ~690× the sample. See Phase 10.
 
@@ -1324,6 +1324,35 @@ like; a mis-probed cluster does not produce it. **Semantic search quality should
 from scratch** — every impression formed of it on prod before this date was formed against the
 wrong result set, and the deferred background-vocabulary scoring should be re-argued against this
 baseline rather than the old one.
+
+### Geo and semantic spot-check — 2026-08-16 ✅ both pass
+
+**Geo: 119,316 GPS-tagged rows, 119,298 with an address — 100.0%**, eighteen short of everything,
+which is a rounding artefact rather than a gap (almost certainly coordinates Nominatim genuinely
+cannot resolve). The 20 most common addresses are all recognisable places — Rosenstraße in
+Saarbrücken, улица Островского in Пушкино, Offenburg, Sarreguemines — with no transposed
+coordinates and nothing at Null Island. The cache and the concurrency-1 consumer held across the
+whole archive.
+
+**63% of the library is geotagged** (119,316 / 188,416). Worth remembering for Phase 11: that is
+the size of Photo of the Day's tier-2 fallback population.
+
+**Semantic search: confirmed working, post-drop.** The strongest evidence is a *compositional*
+query — **"dog on the beach"** returns Albert I-Promenade in Oostende three times (April 2023 and
+April 2026) plus Monterosso al Mare in the Cinque Terre. Two concepts resolving to real beach
+trips on two coasts is a much harder ask than a single noun.
+
+The single-noun queries corroborate themselves through the address field, which is independent of
+the embedding:
+
+| query | evidence |
+|-------|----------|
+| bridge | top hit is *Passerelle René Ludwig* — a footbridge, named in its own address; ranks 2 and 4 are the Saar towpath at Leinpfad |
+| snow | 2018-12-18 Pushkino, 2025-12-27, 2016-01-07, 2012-12-31 — deep winter every one |
+| birthday cake | Mike's birthday (28 March, confirmed) across 2019 · 2022 · 2025, in two countries |
+
+**car** remains the weakest query (0.699–0.704, the highest distances of the set), exactly as the
+2026-08-07 stage session found. Consistent behaviour, not a new fault.
 
 **Original scope, for reference:** all ~20 years of photos (~190K files, 750 GB) catalogued.
 

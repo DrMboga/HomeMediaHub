@@ -179,13 +179,15 @@ k-means centroids modelled nothing, and `probes` was never set anywhere. Slower 
 ivfflat; if ~350 ms ever hurts, use HNSW (pgvector 0.8.6 is installed). The 2026-08-07 stage note
 that "ivfflat was exonerated" was measured on 276 rows and is **not** evidence about prod.
 
-Semantic search was re-checked on prod after the drop (2026-08-16) and is healthy: top hits at
-0.67–0.70, and "birthday cake" returns the same annual birthday across three separate years.
-**Any judgement of search quality formed before that date was formed against the wrong result
-set** — re-argue the deferred background-vocabulary scoring against this baseline, not the old one.
+Semantic search and geo were both re-checked on prod after the drop (2026-08-16) and both pass.
+Search: top hits at 0.67–0.70, "dog on the beach" resolves to real beach trips on two coasts, and
+"bridge" returns a photo whose own address names a footbridge. Geo: **119,316 GPS rows, 119,298
+addressed — 100.0%**, all recognisable places (**63% of the library is geotagged**, which is Photo
+of the Day's tier-2 population). **Any judgement of search quality formed before that date was
+formed against the wrong result set** — re-argue the deferred background-vocabulary scoring
+against this baseline, not the old one.
 
-Still open from Phase 9 itself: spot-check geo addresses at prod scale, and re-judge the Tags
-page's `CHIP_FLOOR = 24`.
+Still open from Phase 9 itself: re-judge the Tags page's `CHIP_FLOOR = 24`.
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
