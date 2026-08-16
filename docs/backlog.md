@@ -11,6 +11,36 @@ Ordered newest first.
 
 ---
 
+## Every scan rediscovers all 992 duplicates — 2026-08-16
+
+Found by the Phase 12 confirmation scan on prod, which logged `discovered 992 new files` on a
+library that was already fully imported. 992 is exactly the `skipped_duplicate` count.
+
+`ScanService.DiscoverAsync` excludes a file when it is present in `media_files` **or** holds a job
+in an active status (`queued`, `processing`, `enriching`). A duplicate satisfies neither: it never
+earned a `media_files` row of its own — that belongs to the file it duplicates, under a different
+path — and `skipped_duplicate` is a terminal status, not an active one.
+
+So every scan re-queues all 992, hashes each one off the HDD, finds the match in
+`FindByHashAsync`, and writes a second `skipped_duplicate` row. Prod went 992 → 1,984 job rows on
+the first re-scan, and would gain another 992 on each subsequent one.
+
+**Not urgent.** Dedup runs *before* conversion in `IngestConsumer`, so the wasted work is one hash
+read per file — no AI, no thumbnails, no media rows, no risk to the library. It stayed invisible
+until now only because `ScanScheduler` is off by default (`Scan:Enabled=false`) and prod had never
+been re-scanned after an import.
+
+**The fix** is one more exclusion in `DiscoverAsync`: treat a `skipped_duplicate` job on a path as
+a reason to skip it, the same way `media_files` presence is. Worth a moment's thought first about
+the case it forecloses — if the *original* is later deleted from the library, the duplicate would
+then never be picked up as its replacement. That may well be the right trade anyway, since nothing
+today promotes a duplicate when its original disappears.
+
+Weigh it against just leaving it: the cost is ~992 wasted hashes and 992 junk rows per manual
+scan, and scans are rare.
+
+---
+
 ## Prod import failure triage — 171 failed jobs — 2026-08-16
 
 **The import is drained.** Final prod counts: **188,291 completed · 992 skipped_duplicate ·
@@ -187,10 +217,12 @@ ImageMagick as a one-off — a different HEIF parser may be more forgiving than 
 
 ### Fixes to make
 
-> **Written and tested 2026-08-16 as Phase 12 Steps 1–3 and 5 — A1–A4, B5 and C6 are all done in
-> code.** Nothing is deployed to prod yet, so no file has been recovered: that needs a
-> `media-worker` + `ai-sidecar` + `api` rebuild there and a Retry All Failed. See
-> `docs/delivery-plan.md` → Phase 12 → "Built — 2026-08-16" and "Still to do on prod".
+> **Done and deployed 2026-08-16 as Phase 12 Steps 1–3 and 5 — A1–A4, B5 and C6 are all live on
+> prod.** The retry recovered **all 125** files: buckets 1 and 3 are empty, failed went 171 → 32,
+> and `media_files` = `media_embeddings` = 188,416. The 14 AppleDouble rows (buckets 2 and 5) were
+> deleted and are filtered at scan now. What remains is buckets 4 and 6 plus the 13 zero-byte/XML
+> files — dead source data, pending Mike's Step 4 call. Numbers in `docs/delivery-plan.md` →
+> Phase 12 → "Deployed and verified on prod".
 > The evidence below stands unchanged and is still the reference for what each bucket was.
 
 **A. `src/MediaWorker/Services/FileConvertService.cs`** — recovers the 116 videos.

@@ -151,15 +151,25 @@ should never have been queued, and ~30 are genuinely dead source files (no `moov
 or unexplained. Evidence per bucket in `docs/backlog.md` → "Prod import failure triage"; the fixes
 are **Phase 12** in `docs/delivery-plan.md`.
 
-**Phase 12 — import failure cleanup — is BUILT but NOT DEPLOYED (2026-08-16).** Steps 1, 2, 3 and
-5 are written and tested locally (MediaWorker 79 · Api 51 · AiSidecar 10, all green): the video
-frame seek is duration-relative with a frame-0 fallback, the sidecar sets
-`ImageFile.LOAD_TRUNCATED_IMAGES`, `ScanService` filters AppleDouble `._*` and zero-length files
-and reports the counts, and a `FailedJobsCollector` in the Api exports
-`homemediahub_processing_jobs_failed` with two Grafana panels. **No file has been recovered yet** —
-that needs a prod rebuild of `media-worker`/`ai-sidecar`/`api` and a Retry All Failed. Step 4
-(what to do with the ~30 dead files) is Mike's decision and is still open. See
-`docs/delivery-plan.md` → Phase 12 → "Built" and "Still to do on prod".
+**Phase 12 — import failure cleanup — is DEPLOYED AND VERIFIED ON PROD (2026-08-16).** Steps 1, 2,
+3 and 5 are live: the video frame seek is duration-relative with a frame-0 fallback, the sidecar
+sets `ImageFile.LOAD_TRUNCATED_IMAGES`, `ScanService` filters AppleDouble `._*` and zero-length
+files and logs the counts, and `FailedJobsCollector` (Api) exports
+`homemediahub_processing_jobs_failed` to two Grafana panels.
+**All 125 recoverable files came back** — completed 188,291 → **188,416**, and
+`media_files` = `media_embeddings` = 188,416, so enrichment coverage is 100% with no AI-step gap.
+Step 4 was settled the same day: the 14 AppleDouble rows were deleted, and the 32 dead source
+files (21 zero-byte, 8 truncated MOVs, 1 XML named `.JPG`, the 2 unexplained HEICs) were deleted
+from disk with their rows — manifest at `/opt/homemediahub/phase12-deleted-2026-08-16.txt`.
+**Final: 188,416 completed · 992 skipped_duplicate · 0 failed.** A confirming scan logged
+`skipped 14 AppleDouble sidecar(s) and 0 zero-length file(s)`. Numbers and the full record in
+`docs/delivery-plan.md` → Phase 12 → "Deployed and verified".
+
+**Every scan rediscovers all 992 duplicates** (found by that confirmation scan). `DiscoverAsync`
+excludes files in `media_files` or holding an *active* job; a duplicate has neither, since
+`skipped_duplicate` is terminal. Each scan therefore re-hashes all 992 and writes 992 more job
+rows. Harmless — dedup precedes conversion, so no AI/thumbnail/media-row work — and **not a Phase
+12 regression**. Details and the one-line fix in `docs/backlog.md`.
 
 Still open from Phase 9 itself: rebuild the ivfflat index at full table size, spot-check geo +
 semantic search at prod scale, and re-judge the Tags page's `CHIP_FLOOR = 24`.
@@ -167,8 +177,7 @@ semantic search at prod scale, and re-judge the Tags page's `CHIP_FLOOR = 24`.
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
 still ignores them); Photo of the Day (Phase 11, specified only); the On This Day uncap + date
-picker (Phase 13, specified only). The Phase 12 fixes exist in code but are **not on prod**, so
-the 171 failed jobs are all still failed until it is deployed and retried.
+picker (Phase 13, specified only).
 
 **`/on-this-day` silently truncates.** `OnThisDayHandler.cs:28` has a `.Take(200)` applied *before*
 the group-by-year, so a day with 1,049 photos renders 200 of them across two year sections and
@@ -177,13 +186,12 @@ cannot simply be deleted. Fix + date picker are Phase 13; per-calendar-day count
 median 454 / p95 1,014 / max 2,252, which is the scale any "one page, no pagination" render must
 survive.
 
-**Known blind spot — fixed in code, not yet on prod.** File-level processing failures do not fault
-a consumer: `IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than
-rethrowing, so MassTransit records a successful consume and the "consume faults" / "error queue
-depth" panels stay flat even while files fail. **Confirmed by the archive import:** all 171
-failures passed unseen. Phase 12 Step 5 adds `FailedJobsCollector` (Api) →
-`homemediahub_processing_jobs_failed` + "Failed jobs" panels; until that is deployed,
-`processing_jobs` and the Admin page remain the only surfaces that show a failed file.
+**Former blind spot — now covered.** File-level processing failures still do not fault a consumer:
+`IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than rethrowing, so
+MassTransit records a successful consume and the "consume faults" / "error queue depth" panels
+stay flat even while files fail — that is by design, and it is how all 171 archive-import failures
+passed unseen. **Watch the "Failed jobs" panels instead** (`homemediahub_processing_jobs_failed`,
+sampled from `processing_jobs` by `FailedJobsCollector` every 30 s, live since 2026-08-16).
 
 **Deferred work lives in `docs/backlog.md`** — currently the full prod-import failure triage
 (all six error buckets, measured on prod, with what was ruled out as well as what was found).

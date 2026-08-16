@@ -1293,9 +1293,9 @@ confirming rather than trusting.
 > data to calibrate `Potd:MinConfidence` — that data now exists (146,767 of 188,300 files carry at
 > least one tag).
 >
-> **Prefer running Phase 12 first.** It is a few hours and lands 125 more files, including 116
-> videos; calibrating tier 1 against the library before that is calibrating against a library
-> that is about to change.
+> **Phase 12 is complete as of 2026-08-16, so the library has stopped moving** — the 125 recovered
+> files (116 of them videos) have landed and the dead files are gone. Tier-1 calibration now reads
+> a stable tag distribution: re-measure it rather than reusing the pre-Phase-12 numbers.
 
 **Goal:** a daily 15:00 post of one random `person`-tagged photo from On This Day to the family
 Telegram channel — the n8n Workflow 3 behaviour, rebuilt as our own scheduled worker.
@@ -1459,18 +1459,19 @@ extra instrumentation.
 
 ---
 
-## Phase 12 — Import failure cleanup
+## Phase 12 — Import failure cleanup ✅ COMPLETE (2026-08-16)
 
-> **Specified 2026-08-16 from the Phase 9 triage. Recommended to run *before* Phase 11.**
-> It is a few hours of work and it recovers **125 real files** that are currently missing from
-> the library or sitting there unenriched. Phase 11's tier-1 calibration also reads the tag
-> distribution, so it is better done after these 125 land.
+> **Specified, built, deployed and verified on prod the same day.** All 125 recoverable files are
+> back and `processing_jobs` holds **zero** failed rows: 188,416 completed · 992
+> skipped_duplicate · 0 failed, with `media_files` = `media_embeddings` = 188,416. Steps 1, 2, 3
+> and 5 shipped; Step 4 was decided (delete) and executed. Read "Deployed and verified on prod"
+> below for the outcome, and "Built" for the implementation notes.
 >
 > **Evidence lives in `docs/backlog.md` → "Prod import failure triage — 171 failed jobs".**
 > Read it first — every claim below was measured on prod, and the section records what was ruled
 > out as well as what was found. Do not re-derive it.
 
-**Goal:** get the 171 failed jobs down to ~30 unavoidable ones, and make the next import's
+**Goal (met):** get the 171 failed jobs down to ~30 unavoidable ones, and make the next import's
 failures readable in the Admin table on the first look instead of the third.
 
 ### Step 1 — sub-second video frame extraction (116 files) ✅ Built (2026-08-16)
@@ -1599,20 +1600,96 @@ that file was zero-byte and the new filter skipped all of them. `Touch` now writ
 separate `TouchEmpty` exists for the zero-length cases. Any new test that creates a fixture file
 has to write something into it.
 
-### Still to do on prod
+### Deployed and verified on prod — 2026-08-16 ✅ every recoverable file is back
 
-Not started — these are the steps that actually recover the files:
+`media-worker`, `ai-sidecar` and `api` rebuilt on prod, then **Retry All Failed** from `/admin`.
 
-1. `docker compose --env-file .env.prod build media-worker ai-sidecar api` and `up -d`.
-2. **Retry All Failed** on `/admin`. Expect 116 videos to go `failed → completed` with 116 new
-   `media_files` rows, and the 9 truncated JPEGs to gain tags + embeddings — i.e.
-   `media_embeddings` reaching 188,300 and closing the gap with `media_files`. Anything that stays
-   failed is new information: re-triage it rather than retrying twice.
-3. Delete the 14 AppleDouble `processing_jobs` rows, then re-scan and confirm they do not come
-   back (the scan log line now reports the skip count).
-4. Confirm the **Failed jobs** panels render in Grafana — the metric only exists once the rebuilt
-   Api has scraped at least once.
-5. Then Step 4: decide what happens to the ~30 that remain.
+| | before | after |
+|--|--|--|
+| completed | 188,291 | **188,416** (+125) |
+| failed | 171 | **32** |
+| `media_files` | 188,300 | **188,416** |
+| `media_embeddings` | 188,291 | **188,416** |
+| sagas in flight | 0 | 0 |
+
+**+125 is exactly the predicted number** — all 116 sub-second videos and all 9 truncated JPEGs
+recovered, nothing else moved. `media_files` and `media_embeddings` are now **equal**, so the
+AI-step gap that bucket 3 opened is closed and enrichment coverage is 100% again.
+
+The 14 AppleDouble rows were retried rather than deleted first, so they re-failed (harmless — the
+retry set was 171, not 157) and were deleted afterwards. `ScanService` filters them from here on.
+
+**Two things this confirmed that only prod could:**
+
+- **Step 5 works end to end.** `homemediahub_processing_jobs_failed` read 46, then 32 within one
+  30 s sample of the delete. The gauge is live on the pipeline dashboard.
+- **The `-hide_banner -loglevel error` fix is real.** The remaining rows read
+  `ffmpeg exited 183: [mov,mp4,m4a,3gp…` — the reason first, where before the message opened with
+  the version banner and the whole `./configure` line. (Those 17 group as 17 distinct
+  `error_message` values only because ffmpeg embeds a different pointer address per run.)
+
+### What is left: Step 4, and nothing else
+
+The 32 remaining failures are exactly the non-recoverable set from the triage, no surprises:
+
+| n | `error_message` | what they are |
+|---|---|---|
+| 13 | `Image cannot be loaded. Available decoders:` | 12 zero-byte JPG + 1 XML named `.JPG` |
+| 17 | `ffmpeg exited 183` | MOVs with no `moov` atom (9 of them zero-byte) |
+| 2 | `heif-convert … No 'hvcC' box` | the two unexplained HEICs — real photos |
+
+**Note the side effect of leaving them:** the Failed jobs panel now sits permanently at 32 and its
+threshold shows orange forever, which costs the panel exactly the alarm value it was added for. An
+argument for clearing the rows once the files are dealt with, not a reason to hide them.
+
+**Do not trigger a re-scan before settling this.** The ~20 that are *not* zero-byte (8 truncated
+MOVs, the XML, the 2 HEICs) have no `media_files` row and no active job, so a scan rediscovers
+them and writes a *second* failed row each. That is pre-existing `ScanService` behaviour, not
+something Phase 12 changed — the zero-byte and `._*` ones are the only ones the new filter stops.
+Once the files are gone this stops mattering, and a re-scan becomes safe.
+
+**Decided 2026-08-16 — delete the source files and clear the rows.** Mike's call: all 32 go,
+including the 2 HEICs, which are written off rather than chased through a re-copy or a second HEIF
+parser (two files out of 190K, and the triage had already ruled out the gain-map explanation).
+The paths are dumped from `processing_jobs` and each one is re-probed before removal — a file that
+turns out to be playable stops the run rather than being deleted on the strength of an old job
+row. The manifest of what was removed is kept on the server at
+`/opt/homemediahub/phase12-deleted-2026-08-16.txt`.
+
+End state: `processing_jobs` has **zero** failed rows, the Failed jobs panel reads 0 and is an
+alarm again rather than a permanent orange 32.
+
+**Done 2026-08-16.** The 32 rows were cleared first and the files deleted afterwards, so the path
+list had to be rebuilt: `find -size 0` over the library's extension set recovered the 21 zero-byte
+ones, and the other 11 were read off the bucket-4/2/6 tables in `docs/backlog.md`. Sizes matched
+the triage exactly (the 191 MiB and 475 MiB truncated MOVs included) and the ffprobe pass reported
+nothing playable, so all 32 were removed. Manifest:
+`/opt/homemediahub/phase12-deleted-2026-08-16.txt`.
+
+**Phase 12 is complete.** Final prod state: 188,416 completed · 992 skipped_duplicate · **0
+failed** · `media_files` = `media_embeddings` = 188,416.
+
+### The re-scan verified Step 3 — and turned up one unrelated wrinkle
+
+The confirming scan logged exactly what it should:
+
+```
+Scan …: skipped 14 AppleDouble sidecar(s) and 0 zero-length file(s)
+```
+
+14 sidecars filtered (they are still on disk, simply never queued again), and 0 zero-length
+because they had just been deleted.
+
+The same scan also logged **`discovered 992 new files`** — precisely the `skipped_duplicate`
+count. Duplicates are rediscovered by every scan: `DiscoverAsync` excludes files present in
+`media_files` or holding an *active* job, and a duplicate has neither — it never earned a
+`media_files` row, and `skipped_duplicate` is terminal, not active. So each scan re-queues all
+992, re-hashes them off the HDD and re-marks them, leaving another 992 job rows behind.
+
+Harmless (dedup runs before conversion, so there is no AI, thumbnail or media-row work) and
+**not a Phase 12 regression** — any re-scan of a fully-imported library would have done it. It
+stayed invisible because `ScanScheduler` is off by default and nobody had re-scanned prod before.
+Logged in `docs/backlog.md`; the fix is one more exclusion in `DiscoverAsync`.
 
 ---
 
