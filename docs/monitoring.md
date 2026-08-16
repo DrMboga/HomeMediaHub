@@ -78,14 +78,19 @@ explicit prefetch, so depth is expected — the question is *which* queue is dee
 
 `http://192.168.0.192:3001` · dashboard **HomeMediaHub Pipeline**
 
-Eight panels. The ones worth watching during an import:
+Ten panels. The ones worth watching during an import:
 
 - **Queue depth (messages ready)** — the same story as the RabbitMQ UI, but over time, so you can
   see whether it is draining or growing.
 - **Jobs completed / hour** — extrapolate your finish time from this.
 - **AI inference duration (P95)** — your real cost per photo. The prod projection of days rests on
   the 2–5 s/image estimate; this is where you find out whether that holds.
-- **MassTransit consume faults** — flat is good. Any movement means files are failing.
+- **Failed jobs (now)** and **Failed jobs over time** — `processing_jobs` rows in the `failed`
+  state, sampled by the Api every 30 s. This is the panel that shows a file failing.
+- **MassTransit consume faults** — movement here means a consumer *threw*. It does **not** cover
+  per-file failures: `IngestConsumer` catches those and publishes `MediaProcessingFailed` rather
+  than rethrowing, so the broker records a successful consume and this panel stays flat. All 171
+  failures of the prod archive import passed it unseen — watch **Failed jobs** for those.
 
 Grafana matters over hours, not minutes. For a "what is happening right now" question, use the
 Admin page or the RabbitMQ UI.
@@ -195,6 +200,10 @@ curl -s 'localhost:9090/api/v1/series?match[]=messaging_masstransit_consume_ea_t
 # per-queue depth right now
 curl -s 'localhost:9090/api/v1/query?query=rabbitmq_detailed_queue_messages_ready' \
   | jq -r '.data.result[] | "\(.metric.queue) \(.value[1])"'
+
+# files that failed processing (the Api gauge, not a MassTransit metric)
+curl -s 'localhost:9090/api/v1/query?query=homemediahub_processing_jobs_failed' \
+  | jq -r '.data.result[].value[1]'
 ```
 
 **When a Grafana panel is empty, always check whether the metric name exists before assuming the
@@ -212,6 +221,8 @@ pipeline is idle.** That distinction cost a full debugging round on 2026-08-08.
 | `media-ingest` deep | Disk-bound, prefetch 2 on one spindle | Expected; raising concurrency causes seek thrash |
 | Everything idle mid-scan | Broker auth or connection failure | `logs api`/`media-worker` for `ACCESS_REFUSED` |
 | Grafana panel empty | Metric name wrong, or lazily-registered counter | Cookbook above |
+| **Failed jobs** climbing, consume faults flat | Normal — per-file failures never fault the consumer | `/admin` → Failed Jobs, or the `error_message` query above |
+| **Failed jobs** panel has no data | Api not scraped, or it has not sampled yet (30 s) | `homemediahub_processing_jobs_failed` in the cookbook |
 | Gallery has photos but no tags | Save-early working as designed | Not a fault — enrichment trails ingest |
 
 ---

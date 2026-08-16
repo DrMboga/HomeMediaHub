@@ -149,15 +149,26 @@ files are good** (116 sub-second videos rejected by a hardcoded `-ss 00:00:01` f
 truncated JPEGs that Pillow refuses to decode), 14 are macOS AppleDouble `._*` sidecars that
 should never have been queued, and ~30 are genuinely dead source files (no `moov` atom, zero-byte)
 or unexplained. Evidence per bucket in `docs/backlog.md` → "Prod import failure triage"; the fixes
-are **Phase 12** in `docs/delivery-plan.md`, and it is worth running before Phase 11.
+are **Phase 12** in `docs/delivery-plan.md`.
+
+**Phase 12 — import failure cleanup — is BUILT but NOT DEPLOYED (2026-08-16).** Steps 1, 2, 3 and
+5 are written and tested locally (MediaWorker 79 · Api 51 · AiSidecar 10, all green): the video
+frame seek is duration-relative with a frame-0 fallback, the sidecar sets
+`ImageFile.LOAD_TRUNCATED_IMAGES`, `ScanService` filters AppleDouble `._*` and zero-length files
+and reports the counts, and a `FailedJobsCollector` in the Api exports
+`homemediahub_processing_jobs_failed` with two Grafana panels. **No file has been recovered yet** —
+that needs a prod rebuild of `media-worker`/`ai-sidecar`/`api` and a Retry All Failed. Step 4
+(what to do with the ~30 dead files) is Mike's decision and is still open. See
+`docs/delivery-plan.md` → Phase 12 → "Built" and "Still to do on prod".
 
 Still open from Phase 9 itself: rebuild the ivfflat index at full table size, spot-check geo +
 semantic search at prod scale, and re-judge the Tags page's `CHIP_FLOOR = 24`.
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
-still ignores them); Photo of the Day (Phase 11, specified only); the import failure fixes
-(Phase 12, specified only); the On This Day uncap + date picker (Phase 13, specified only).
+still ignores them); Photo of the Day (Phase 11, specified only); the On This Day uncap + date
+picker (Phase 13, specified only). The Phase 12 fixes exist in code but are **not on prod**, so
+the 171 failed jobs are all still failed until it is deployed and retried.
 
 **`/on-this-day` silently truncates.** `OnThisDayHandler.cs:28` has a `.Take(200)` applied *before*
 the group-by-year, so a day with 1,049 photos renders 200 of them across two year sections and
@@ -166,12 +177,13 @@ cannot simply be deleted. Fix + date picker are Phase 13; per-calendar-day count
 median 454 / p95 1,014 / max 2,252, which is the scale any "one page, no pagination" render must
 survive.
 
-**Known blind spot:** file-level processing failures never reach Grafana. `IngestConsumer` catches
-them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit records a
-successful consume — the "consume faults" and "error queue depth" panels stay flat even while
-files fail. `processing_jobs` + the Admin page are the only surfaces that show them. **Confirmed by
-the archive import:** all 171 failures passed unseen by Grafana. The failed-jobs gauge that fixes
-this is Phase 12 Step 5.
+**Known blind spot — fixed in code, not yet on prod.** File-level processing failures do not fault
+a consumer: `IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than
+rethrowing, so MassTransit records a successful consume and the "consume faults" / "error queue
+depth" panels stay flat even while files fail. **Confirmed by the archive import:** all 171
+failures passed unseen. Phase 12 Step 5 adds `FailedJobsCollector` (Api) →
+`homemediahub_processing_jobs_failed` + "Failed jobs" panels; until that is deployed,
+`processing_jobs` and the Admin page remain the only surfaces that show a failed file.
 
 **Deferred work lives in `docs/backlog.md`** — currently the full prod-import failure triage
 (all six error buckets, measured on prod, with what was ruled out as well as what was found).

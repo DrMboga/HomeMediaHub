@@ -187,6 +187,12 @@ ImageMagick as a one-off — a different HEIF parser may be more forgiving than 
 
 ### Fixes to make
 
+> **Written and tested 2026-08-16 as Phase 12 Steps 1–3 and 5 — A1–A4, B5 and C6 are all done in
+> code.** Nothing is deployed to prod yet, so no file has been recovered: that needs a
+> `media-worker` + `ai-sidecar` + `api` rebuild there and a Retry All Failed. See
+> `docs/delivery-plan.md` → Phase 12 → "Built — 2026-08-16" and "Still to do on prod".
+> The evidence below stands unchanged and is still the reference for what each bucket was.
+
 **A. `src/MediaWorker/Services/FileConvertService.cs`** — recovers the 116 videos.
 
 1. **Clamp the seek.** Probe duration and seek to `min(1s, duration/2)`, or drop the seek and use

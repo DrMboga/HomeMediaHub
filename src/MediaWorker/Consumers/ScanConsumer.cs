@@ -37,8 +37,15 @@ public sealed class ScanConsumer : IConsumer<ScanRequested>
             return;
         }
 
-        var files = await _scan.DiscoverAsync(msg.Path, ct);
+        var discovery = await _scan.DiscoverAsync(msg.Path, ct);
+        var files = discovery.Files;
         _log.LogInformation("Scan {ScanId}: discovered {Count} new files under {Path}", msg.ScanId, files.Count, msg.Path);
+
+        // Logged even at zero: "the scan skipped nothing" is an answer, and a silent filter is one
+        // you cannot tell apart from a scan that never saw the file.
+        _log.LogInformation(
+            "Scan {ScanId}: skipped {Sidecars} AppleDouble sidecar(s) and {Empty} zero-length file(s)",
+            msg.ScanId, discovery.SkippedSidecars, discovery.SkippedEmpty);
 
         var batch = new List<ProcessingJob>(BatchSize);
         foreach (var file in files)

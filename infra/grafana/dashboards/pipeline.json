@@ -115,6 +115,69 @@
           "legendFormat": "{{status}}"
         }
       ]
+    },
+    {
+      "id": 9,
+      "title": "Failed jobs (now)",
+      "description": "processing_jobs rows in the failed state. This is the one failure mode the MassTransit panels cannot show: IngestConsumer catches per-file failures and publishes MediaProcessingFailed instead of rethrowing, so the broker records a successful consume and 'consume faults' stays flat. All 171 failures of the prod archive import passed unseen that way. Sampled by the Api every 30 s; no data until the first successful sample.",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "max(homemediahub_processing_jobs_failed)",
+          "legendFormat": "failed"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Failed jobs over time",
+      "description": "Flat is good. A step means a new batch of files failed — go to /admin (Failed Jobs) or query processing_jobs for the error_message; Grafana says when and how many, never why.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max(homemediahub_processing_jobs_failed)",
+          "legendFormat": "failed jobs"
+        }
+      ]
     }
   ]
 }

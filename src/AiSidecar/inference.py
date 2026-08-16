@@ -3,9 +3,16 @@ import threading
 from pathlib import Path
 
 import torch
-from PIL import Image, ImageOps
+from PIL import Image, ImageFile, ImageOps
 from ultralytics import YOLO
 import open_clip
+
+# Pillow refuses a JPEG with no ff-d9 end-of-image marker by policy, not by inability — it can
+# decode what is there and leaves the missing tail grey. Ingest already accepts these files
+# (MetadataService reads headers only), so without this the AI step is the one that fails and the
+# photo sits in the gallery with no tags and no embedding: 9 of them after the prod import
+# (docs/backlog.md bucket 3). A tagged photo with a grey strip beats an untagged one.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ── Models (loaded once at startup via load_models()) ───────────────────────
 

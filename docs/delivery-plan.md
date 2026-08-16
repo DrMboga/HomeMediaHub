@@ -1473,7 +1473,7 @@ extra instrumentation.
 **Goal:** get the 171 failed jobs down to ~30 unavoidable ones, and make the next import's
 failures readable in the Admin table on the first look instead of the third.
 
-### Step 1 — sub-second video frame extraction (116 files)
+### Step 1 — sub-second video frame extraction (116 files) ✅ Built (2026-08-16)
 
 `src/MediaWorker/Services/FileConvertService.cs`, `ExtractVideoFrameAsync` (line 22). Four changes,
 all in this one file — backlog fixes A1–A4:
@@ -1490,7 +1490,7 @@ all in this one file — backlog fixes A1–A4:
 `failed → completed` and 116 new rows in `media_files`. Any that stay failed are new information —
 re-triage rather than retrying twice.
 
-### Step 2 — truncated JPEG decoding (9 files)
+### Step 2 — truncated JPEG decoding (9 files) ✅ Built (2026-08-16)
 
 `src/AiSidecar/inference.py` — backlog fix B5. Add at import time:
 
@@ -1507,7 +1507,7 @@ AI fails (`ApplyEnrichmentConsumer.cs:59-60`), so they retry without re-reading 
 raising `InferenceError`. Then rebuild `ai-sidecar`, retry those 9, and confirm
 `media_embeddings` reaches 188,300 — i.e. the gap between `media_files` and embeddings closes.
 
-### Step 3 — scan-level junk filtering (14 files, and every scan hereafter)
+### Step 3 — scan-level junk filtering (14 files, and every scan hereafter) ✅ Built (2026-08-16)
 
 `src/MediaWorker/Services/ScanService.cs:33-35` — backlog fix C6. Before the extension filter,
 skip files whose name starts with `._` (macOS AppleDouble resource forks — 4096 bytes,
@@ -1518,7 +1518,7 @@ skip files whose name starts with `._` (macOS AppleDouble resource forks — 409
 a real `IMG_3.JPG` — only the third is returned. On prod, delete the 14 AppleDouble
 `processing_jobs` rows after deploying, then re-scan and confirm they do not come back.
 
-### Step 4 — decide the fate of the ~30 unrecoverable files
+### Step 4 — decide the fate of the ~30 unrecoverable files ⏸ Mike's call, not code
 
 Not code. Mike's call, once Steps 1–3 land and the list is short enough to read:
 
@@ -1532,7 +1532,7 @@ Not code. Mike's call, once Steps 1–3 land and the list is short enough to rea
 The options are: leave them as a permanent ~30-row entry in Failed Jobs, or delete the source
 files and clear the rows. There is no third option where the pipeline fixes them.
 
-### Step 5 — make file failures visible in Grafana
+### Step 5 — make file failures visible in Grafana ✅ Built (2026-08-16)
 
 The known blind spot, now that we have a real number to check it against. `IngestConsumer` catches
 per-file failures and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit
@@ -1545,6 +1545,74 @@ existing `/metrics` endpoint, and a panel + alert threshold on the pipeline dash
 `docs/monitoring.md` to delete the blind-spot caveat once the panel exists.
 
 This is what would have caught the 116-file bug on day one of the import instead of at the end.
+
+### Built — 2026-08-16
+
+Steps 1, 2, 3 and 5 are written and tested locally. **Nothing has been deployed to prod yet**, so
+no file has actually been recovered: the 125 files land only after `media-worker` and `ai-sidecar`
+are rebuilt there and the failed jobs are retried (below).
+
+**Step 1 — `FileConvertService.ExtractVideoFrameAsync`.** The seek is now duration-relative:
+ffprobe reports the container duration, `SeekSeconds` takes `min(1 s, duration/2)` and returns 0
+(take frame 0) when that lands under 0.25 s or the duration is unknown. All four backlog fixes
+landed: output existence is asserted, `-hide_banner -loglevel error` trims the error message to
+the reason, and `RunAsync` now drains stdout/stderr *concurrently* with `WaitForExitAsync` instead
+of after it, closing the pipe-buffer deadlock.
+
+One thing the plan did not predict, found by running it: **how the bug surfaces depends on the
+ffmpeg build.** Prod's exits 0 having written nothing (which is why the failure appeared one stage
+later as a missing `/shared-temp` file); ffmpeg 7/8 fails the mjpeg encoder open and exits
+non-zero instead. A fallback that only checked for a missing file would therefore fix prod and
+break on any newer image, so the seeked attempt is wrapped in a `try` and *any* failure falls
+through to a frame-0 retry. If that retry also fails, its error propagates — an unreadable file
+still reports honestly, which is what the 17 dead MOVs should keep doing.
+
+**Step 2 — `inference.py`.** `ImageFile.LOAD_TRUNCATED_IMAGES = True` at import, with the
+reasoning inline so it does not read as a stray global.
+
+**Step 3 — `ScanService`.** `DiscoverAsync` now returns a `ScanDiscovery` record (files +
+`SkippedSidecars` + `SkippedEmpty`) instead of a bare list, and `ScanConsumer` logs the counts on
+every scan, including when they are zero. Enumeration moved to `DirectoryInfo.EnumerateFiles` so
+the zero-length check costs no extra syscall per file across 190K files.
+
+**Step 5 — `FailedJobsCollector` (Api).** A `BackgroundService` samples
+`count(processing_jobs WHERE status='failed')` every 30 s into an OTel observable gauge,
+`homemediahub.processing_jobs.failed` → `homemediahub_processing_jobs_failed` at the Prometheus
+endpoint. Sampling on a timer rather than inside the gauge callback is deliberate: observable
+callbacks run synchronously on the scrape, and a DB round-trip there would tie scrape latency to
+database health. Before the first successful sample the gauge reports *nothing* rather than 0 — a
+gap is honest about "unknown" where a zero reads as "nothing is failing". Two dashboard panels
+(stat + trend, thresholds at 1/50), and `docs/monitoring.md`'s "consume faults — any movement
+means files are failing" line is corrected, since that was precisely the false reassurance.
+
+**Tests — all green locally.** MediaWorker 79 (was 60): 10 `SeekSeconds` cases plus real
+ffmpeg-driven conversions of 0.3 s / 1.05 s / 3 s clips, a banner-free error assertion, and 4 new
+`ScanService` cases. Api 51 unchanged, full solution builds. AiSidecar 10 (was 5), run for the
+first time in this repo: the truncated-JPEG test asserts both directions — it passes with the flag
+and raises `InferenceError` with it off — plus tests that a missing file and an AppleDouble
+sidecar still fail. `tests/conftest.py` is new: it stubs only *missing* heavy imports (torch,
+ultralytics, open_clip, fastapi, …) so the sidecar's pure-logic tests run without a 2 GB torch
+download, and never stubs Pillow, which the decode tests need for real.
+
+**One existing-test trap worth knowing:** `ScanServiceTests.Touch` wrote `""`, so every fixture in
+that file was zero-byte and the new filter skipped all of them. `Touch` now writes content and a
+separate `TouchEmpty` exists for the zero-length cases. Any new test that creates a fixture file
+has to write something into it.
+
+### Still to do on prod
+
+Not started — these are the steps that actually recover the files:
+
+1. `docker compose --env-file .env.prod build media-worker ai-sidecar api` and `up -d`.
+2. **Retry All Failed** on `/admin`. Expect 116 videos to go `failed → completed` with 116 new
+   `media_files` rows, and the 9 truncated JPEGs to gain tags + embeddings — i.e.
+   `media_embeddings` reaching 188,300 and closing the gap with `media_files`. Anything that stays
+   failed is new information: re-triage it rather than retrying twice.
+3. Delete the 14 AppleDouble `processing_jobs` rows, then re-scan and confirm they do not come
+   back (the scan log line now reports the skip count).
+4. Confirm the **Failed jobs** panels render in Grafana — the metric only exists once the rebuilt
+   Api has scraped at least once.
+5. Then Step 4: decide what happens to the ~30 that remain.
 
 ---
 

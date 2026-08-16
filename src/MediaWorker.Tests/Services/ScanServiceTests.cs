@@ -13,7 +13,15 @@ public sealed class ScanServiceTests : IDisposable
 
     private static WorkerDbContext CreateDb() => TestDbContextFactory.Create();
 
+    // Non-empty on purpose: zero-length files are now filtered out as dead source data, so a
+    // fixture written with "" would be skipped for a reason the test never meant to exercise.
     private static void Touch(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "not empty");
+    }
+
+    private static void TouchEmpty(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "");
@@ -28,7 +36,7 @@ public sealed class ScanServiceTests : IDisposable
         Touch(Path.Combine(_tempDir, "doc.pdf"));
 
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Equal(2, files.Count);
         Assert.Contains(files, f => f.EndsWith("photo.jpg"));
@@ -50,7 +58,7 @@ public sealed class ScanServiceTests : IDisposable
         Touch(Path.Combine(_tempDir, $"file{extension}"));
 
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Single(files);
     }
@@ -67,7 +75,7 @@ public sealed class ScanServiceTests : IDisposable
         db.MediaFiles.Add(new MediaFile { Id = Guid.NewGuid(), FilePath = existingPath });
         await db.SaveChangesAsync();
 
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Single(files);
         Assert.Contains(files, f => f.EndsWith("new.jpg"));
@@ -85,7 +93,7 @@ public sealed class ScanServiceTests : IDisposable
         db.ProcessingJobs.Add(new ProcessingJob { Id = Guid.NewGuid(), FilePath = activePath, Status = "enriching" });
         await db.SaveChangesAsync();
 
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Single(files);
         Assert.Contains(files, f => f.EndsWith("free.jpg"));
@@ -102,7 +110,7 @@ public sealed class ScanServiceTests : IDisposable
         db.ProcessingJobs.Add(new ProcessingJob { Id = Guid.NewGuid(), FilePath = path, Status = "completed" });
         await db.SaveChangesAsync();
 
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Single(files);
     }
@@ -118,7 +126,7 @@ public sealed class ScanServiceTests : IDisposable
         db.MediaFiles.Add(new MediaFile { Id = Guid.NewGuid(), FilePath = path, IsDeleted = true });
         await db.SaveChangesAsync();
 
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Empty(files);
     }
@@ -131,7 +139,7 @@ public sealed class ScanServiceTests : IDisposable
         Touch(Path.Combine(_tempDir, "2024", "photo3.jpg"));
 
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Equal(3, files.Count);
     }
@@ -140,7 +148,7 @@ public sealed class ScanServiceTests : IDisposable
     public async Task Discover_EmptyDirectory_ReturnsEmptyList()
     {
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Empty(files);
     }
@@ -153,9 +161,74 @@ public sealed class ScanServiceTests : IDisposable
         Touch(Path.Combine(_tempDir, "b.jpg"));
 
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Equal(files.OrderBy(f => f).ToList(), files);
+    }
+
+    [Fact]
+    public async Task Discover_AppleDoubleSidecars_AreSkippedAndCounted()
+    {
+        // macOS resource forks: media extension, 4096 bytes of AppleDouble header, never an image.
+        Touch(Path.Combine(_tempDir, "._IMG_1.JPG"));
+        Touch(Path.Combine(_tempDir, "._IMG_2.HEIC"));
+        Touch(Path.Combine(_tempDir, "IMG_3.JPG"));
+
+        using var db = CreateDb();
+        var result = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+
+        Assert.Single(result.Files);
+        Assert.EndsWith("IMG_3.JPG", result.Files[0]);
+        Assert.Equal(2, result.SkippedSidecars);
+        Assert.Equal(0, result.SkippedEmpty);
+    }
+
+    [Fact]
+    public async Task Discover_ZeroLengthFiles_AreSkippedAndCounted()
+    {
+        TouchEmpty(Path.Combine(_tempDir, "IMG_2.JPG"));
+        TouchEmpty(Path.Combine(_tempDir, "IMG_4.MOV"));
+        Touch(Path.Combine(_tempDir, "IMG_3.JPG"));
+
+        using var db = CreateDb();
+        var result = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+
+        Assert.Single(result.Files);
+        Assert.EndsWith("IMG_3.JPG", result.Files[0]);
+        Assert.Equal(2, result.SkippedEmpty);
+        Assert.Equal(0, result.SkippedSidecars);
+    }
+
+    [Fact]
+    public async Task Discover_JunkFilteringLeavesRealMediaUntouched()
+    {
+        // The Phase 12 Step 3 fixture: one sidecar, one empty, one real file.
+        Touch(Path.Combine(_tempDir, "._IMG_1.JPG"));
+        TouchEmpty(Path.Combine(_tempDir, "IMG_2.JPG"));
+        Touch(Path.Combine(_tempDir, "IMG_3.JPG"));
+
+        using var db = CreateDb();
+        var result = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+
+        Assert.Single(result.Files);
+        Assert.EndsWith("IMG_3.JPG", result.Files[0]);
+        Assert.Equal(1, result.SkippedSidecars);
+        Assert.Equal(1, result.SkippedEmpty);
+    }
+
+    [Fact]
+    public async Task Discover_NonMediaSidecars_AreNotCountedAsSkipped()
+    {
+        // ._notes.txt is filtered by extension like any other non-media file; the sidecar counter
+        // is about files that would otherwise have been queued.
+        Touch(Path.Combine(_tempDir, "._notes.txt"));
+        Touch(Path.Combine(_tempDir, "photo.jpg"));
+
+        using var db = CreateDb();
+        var result = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+
+        Assert.Single(result.Files);
+        Assert.Equal(0, result.SkippedSidecars);
     }
 
     [Fact]
@@ -165,7 +238,7 @@ public sealed class ScanServiceTests : IDisposable
         Touch(Path.Combine(_tempDir, "VIDEO.MP4"));
 
         using var db = CreateDb();
-        var files = await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None);
+        var files = (await new ScanService(db).DiscoverAsync(_tempDir, CancellationToken.None)).Files;
 
         Assert.Equal(2, files.Count);
     }

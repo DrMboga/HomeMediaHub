@@ -131,12 +131,15 @@ try
     });
 
     builder.Services.AddHostedService<ScanScheduler>();
+    builder.Services.AddHostedService<FailedJobsCollector>();
 
     // MassTransit v8 emits instrumentation as OTel Meters.
     builder.Services.AddOpenTelemetry()
         .WithMetrics(m => m
             .AddAspNetCoreInstrumentation()
             .AddMeter("MassTransit")
+            // File-level failures never reach MassTransit's meters — see FailedJobsCollector.
+            .AddMeter(FailedJobsCollector.MeterName)
             .AddPrometheusExporter());
 
     var app = builder.Build();
