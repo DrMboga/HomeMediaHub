@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Tags, X } from 'lucide-react'
@@ -7,14 +7,22 @@ import { PhotoCard } from '../components/PhotoCard'
 
 const PAGE_SIZE = 50
 
-// A relative floor, not a constant count: "≥ 4 photos" would show 14 chips on stage's 276
-// files and all 46 after the archive import, which defeats the point. Top-N by count holds
-// at both scales — and the YOLO vocabulary is capped at COCO's 80 classes either way.
-const CHIP_FLOOR = 24
+// Every tag is a chip; there is no floor and no "show all" toggle.
+//
+// This replaced a top-24 cut once the full library could be measured (2026-08-16, 188,416
+// files, all 80 COCO classes present). The counts decay smoothly from person (114,793) to
+// zebra (59) with no cliff anywhere to cut at, and count order is not usefulness order —
+// `fire hydrant` (595) and `stop sign` (499) outrank `elephant` (393), `giraffe` (221) and
+// `skis` (115). Any count-based floor admits street furniture before it admits the zoo, and
+// reaching `zebra` would need a floor of 78 out of 80 regardless.
+//
+// Showing everything is safe because the vocabulary is permanently bounded: YOLOv8n emits
+// COCO's 80 classes and no more, however large the library grows. Facet narrowing already
+// greys out chips that would return nothing, so the long tail costs a row of height, not
+// confusion. Revisit only if the tagging model changes to one with an open vocabulary.
 
 export function TagsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [showAll, setShowAll] = useState(false)
 
   const selected = searchParams.getAll('tags')
   const page = parseInt(searchParams.get('page') ?? '1')
@@ -64,16 +72,10 @@ export function TagsPage() {
     [narrowed]
   )
 
-  // Chips keep the unfiltered order even as counts change — re-sorting on every toggle
-  // would slide them out from under the cursor. Anything below the floor stays reachable
-  // through "show all", and a selected chip is never hidden, however rare it is.
-  const chips = useMemo(() => {
-    if (!vocabulary) return []
-    if (showAll) return vocabulary
-    return vocabulary.filter((t, i) => i < CHIP_FLOOR || selected.includes(t.tag))
-  }, [vocabulary, showAll, selected])
+  // Chips keep the unfiltered order even as counts change — re-sorting on every toggle would
+  // slide them out from under the cursor.
+  const chips = vocabulary ?? []
 
-  const hiddenCount = (vocabulary?.length ?? 0) - chips.length
   const totalPages = media ? Math.max(1, Math.ceil(media.total / PAGE_SIZE)) : 1
 
   return (
@@ -136,12 +138,6 @@ export function TagsPage() {
               </button>
             )
           })}
-
-          {(hiddenCount > 0 || showAll) && (
-            <button className="tag-chip tag-chip-more" onClick={() => setShowAll(s => !s)}>
-              {showAll ? 'Show less' : `Show all ${vocabulary?.length}`}
-            </button>
-          )}
         </div>
       )}
 

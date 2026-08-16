@@ -1223,10 +1223,33 @@ Postgres, not just translate — the EXISTS chain and the `count(DISTINCT …)` 
 run, which is what the translation tests could not prove on their own. The page renders real
 YOLO tags rather than the fixture, and the chip row reads correctly at the real vocabulary size.
 
-**Phase 10 is done.** The one caveat that stage cannot settle stands: `CHIP_FLOOR = 24` is a
-top-N floor calibrated against a 276-file sample. Stage has 46 distinct tags; prod is ~690×
-larger and `person` becomes ~68K photos. Re-judge the floor after the archive import — along with
-the tag distribution itself, per the note under Phase 9.
+**Phase 10 is done.** ~~The one caveat that stage cannot settle stands: `CHIP_FLOOR = 24` is a
+top-N floor calibrated against a 276-file sample.~~
+
+### Chip floor re-judged and removed — 2026-08-16
+
+Measured against the full library: **all 80 COCO classes present**, `person` at **114,793** (61%
+of the library, 11× the next tag), decaying smoothly to `zebra` at 59. Then a genuine cliff, but
+only at the very end — `toaster` 2, `hair drier` 1.
+
+Two findings killed the floor rather than moving it:
+
+1. **There is no cliff to cut at.** The counts decay continuously from rank 1 to 78. Any floor is
+   arbitrary, and 24 fell in a comical place: `dog` (1,798) scraped in at rank 24 while `cat`
+   (1,407) sat hidden at 28.
+2. **Count order is not usefulness order.** `fire hydrant` (595) and `stop sign` (499) outrank
+   `elephant` (393), `giraffe` (221) and `skis` (115). Any count-based floor admits street
+   furniture before it admits the zoo, and reaching `zebra` would need a floor of 78 out of 80.
+
+So the chip row now shows the **whole vocabulary**, and the "show all" toggle is gone along with
+`CHIP_FLOOR` and the `.tag-chip-more` style. This is safe because the vocabulary is permanently
+bounded — YOLOv8n emits COCO's 80 classes and no more, however large the library grows — and
+facet narrowing already greys out chips that would return nothing. Revisit only if the tagging
+model is ever swapped for one with an open vocabulary.
+
+The alternative considered and rejected was curating the list (dropping COCO's street furniture
+and kitchen appliances). It would read better, but it bakes a judgement about what the photos are
+*for* into the code, and `fire hydrant` at 595 photos is at least honest about what the model saw.
 
 ---
 
@@ -1264,8 +1287,8 @@ source files. The fixes are Phase 12 below.
   instead of rebuilt. See below.**
 - ~~Spot-check geo addresses and semantic search quality at prod scale.~~ **Done 2026-08-16, both
   pass. See "Geo and semantic spot-check" below.**
-- **Re-judge `CHIP_FLOOR = 24`** on the Tags page — it was calibrated on stage's 46 tags, and prod
-  is ~690× the sample. See Phase 10.
+- ~~**Re-judge `CHIP_FLOOR = 24`** on the Tags page.~~ **Done 2026-08-16 — the floor was removed
+  entirely, not retuned. See Phase 10 → "Chip floor re-judged and removed".**
 
 ### ivfflat: dropped, not rebuilt — 2026-08-16
 

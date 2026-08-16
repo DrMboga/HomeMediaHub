@@ -677,6 +677,3 @@ body.lb-open { overflow: hidden; }
   cursor: not-allowed; opacity: .55;
 }
 .tag-chip.disabled .tag-chip-count { color: var(--ink-28); }
-
-.tag-chip-more { color: var(--ink-45); border-style: dashed; }
-.tag-chip-more:hover { color: var(--accent); border-color: var(--accent); }

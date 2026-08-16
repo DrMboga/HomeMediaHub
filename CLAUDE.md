@@ -136,8 +136,10 @@ filtering, and facet narrowing that greys out chips which would return nothing. 
 (paged grid) in `src/Api/Features/Tags/`. The dead `GET /api/search/tags` path is deleted.
 Two query shapes there are load-bearing for EF Core translation reasons that are not obvious from
 reading them — **read the "Built — 2026-08-09" notes in `docs/delivery-plan.md` before touching
-`TagHandlers.cs`**. Open at prod scale only: `CHIP_FLOOR = 24` is calibrated on stage's 46 tags
-and should be re-judged after the archive import.
+`TagHandlers.cs`**. The chip row shows the **whole vocabulary** — `CHIP_FLOOR` and the "show all"
+toggle were removed 2026-08-16 once prod could be measured: all 80 COCO classes present, counts
+decaying smoothly with no cliff to cut at, and count order isn't usefulness order (`fire hydrant`
+595 outranks `elephant` 393). Safe because YOLOv8n's vocabulary is permanently capped at 80.
 
 **Phase 9, the prod archive import, is COMPLETE — the queue drained 2026-08-16.**
 Final: **188,291 completed · 992 skipped_duplicate · 171 failed (0.09%) · 0 in flight.**
@@ -187,7 +189,8 @@ of the Day's tier-2 population). **Any judgement of search quality formed before
 formed against the wrong result set** — re-argue the deferred background-vocabulary scoring
 against this baseline, not the old one.
 
-Still open from Phase 9 itself: re-judge the Tags page's `CHIP_FLOOR = 24`.
+**Phase 9 is fully closed as of 2026-08-16** — the ivfflat rebuild, the geo and semantic
+spot-checks, and the `CHIP_FLOOR` re-judgement are all done. Nothing is outstanding from it.
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
