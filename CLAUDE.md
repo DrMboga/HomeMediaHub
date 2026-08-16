@@ -139,23 +139,43 @@ reading them — **read the "Built — 2026-08-09" notes in `docs/delivery-plan.
 `TagHandlers.cs`**. Open at prod scale only: `CHIP_FLOOR = 24` is calibrated on stage's 46 tags
 and should be re-judged after the archive import.
 
-**Phase 9, the prod archive import, is RUNNING** (as of 2026-08-14). Do not rebuild or restart
-worker containers while it drains — it takes days. Deferred fixes found mid-import live in
-`docs/backlog.md`.
+**Phase 9, the prod archive import, is COMPLETE — the queue drained 2026-08-16.**
+Final: **188,291 completed · 992 skipped_duplicate · 171 failed (0.09%) · 0 in flight.**
+`media_files` 188,300 · `media_embeddings` 188,291 · 146,767 files (78%) carry ≥1 tag · 7,204
+videos. Enrichment coverage on completed work is 100%. Worker containers are free to rebuild again.
 
-**What does NOT exist yet (do not assume it does):** the prod rollout / full-archive scan itself
-(Phase 9); full per-page visual redesign beyond the Step 10 pilot pages; the CLIP + tag hybrid
-*ranking* (tags are browsable now, but semantic search still ignores them).
+The 171 failures were triaged file-by-file on 2026-08-16 — **125 of them are our bugs and the
+files are good** (116 sub-second videos rejected by a hardcoded `-ss 00:00:01` frame seek; 9
+truncated JPEGs that Pillow refuses to decode), 14 are macOS AppleDouble `._*` sidecars that
+should never have been queued, and ~30 are genuinely dead source files (no `moov` atom, zero-byte)
+or unexplained. Evidence per bucket in `docs/backlog.md` → "Prod import failure triage"; the fixes
+are **Phase 12** in `docs/delivery-plan.md`, and it is worth running before Phase 11.
+
+Still open from Phase 9 itself: rebuild the ivfflat index at full table size, spot-check geo +
+semantic search at prod scale, and re-judge the Tags page's `CHIP_FLOOR = 24`.
+
+**What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
+Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
+still ignores them); Photo of the Day (Phase 11, specified only); the import failure fixes
+(Phase 12, specified only); the On This Day uncap + date picker (Phase 13, specified only).
+
+**`/on-this-day` silently truncates.** `OnThisDayHandler.cs:28` has a `.Take(200)` applied *before*
+the group-by-year, so a day with 1,049 photos renders 200 of them across two year sections and
+says nothing about the other twelve years. `DashboardPage` calls the same endpoint, so the cap
+cannot simply be deleted. Fix + date picker are Phase 13; per-calendar-day counts run
+median 454 / p95 1,014 / max 2,252, which is the scale any "one page, no pagination" render must
+survive.
 
 **Known blind spot:** file-level processing failures never reach Grafana. `IngestConsumer` catches
 them and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit records a
 successful consume — the "consume faults" and "error queue depth" panels stay flat even while
-files fail. `processing_jobs` + the Admin page are the only surfaces that show them. A
-failed-jobs gauge is proposed but unbuilt.
+files fail. `processing_jobs` + the Admin page are the only surfaces that show them. **Confirmed by
+the archive import:** all 171 failures passed unseen by Grafana. The failed-jobs gauge that fixes
+this is Phase 12 Step 5.
 
-**Deferred work lives in `docs/backlog.md`** — currently the video-ingest bugs found during the
-prod import (sub-second videos wrongly failed; ffmpeg errors unreadable in the Admin table).
-Read it before touching `FileConvertService.cs`.
+**Deferred work lives in `docs/backlog.md`** — currently the full prod-import failure triage
+(all six error buckets, measured on prod, with what was ruled out as well as what was found).
+Read it before touching `FileConvertService.cs`, `AiSidecar/inference.py`, or `ScanService.cs`.
 
 **Phase 11 — Photo of the Day — is specified, not built.** A daily 15:00 Telegram post of a random
 `person`-tagged photo from On This Day. It is **not** an n8n job and not a queue/consumer: it is a

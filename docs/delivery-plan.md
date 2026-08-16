@@ -1225,11 +1225,43 @@ the tag distribution itself, per the note under Phase 9.
 
 ---
 
-## Phase 9 — Archive Import
+## Phase 9 — Archive Import ✅ COMPLETE (drained 2026-08-16)
 
-> **Runs after Phase 10.** See the note there.
+> Ran after Phase 10, as planned. Started 2026-08-14, queue fully drained 2026-08-16.
 
-**Goal:** all ~20 years of photos (~190K files, 750 GB) catalogued.
+**Result:**
+
+| | |
+|--|--|
+| completed | **188,291** |
+| skipped_duplicate | 992 |
+| failed | **171** (0.09%) |
+| queued / processing / enriching | 0 |
+| `media_files` rows | 188,300 |
+| `media_embeddings` rows | 188,291 |
+| files with ≥1 tag | 146,767 (78%) |
+| videos | 7,204 |
+
+**Enrichment coverage on completed work is 100%** — `media_embeddings` matches `completed`
+exactly, and the 9-row gap between `media_files` and embeddings is precisely the AI-step failures
+below (save-early gave them rows; the AI step never produced an embedding). The 22% of files with
+no tags is expected: YOLOv8n's 80-class COCO vocabulary simply finds nothing it recognises in a
+landscape or a document, and the confidence floor is 0.30.
+
+**The 171 failures were triaged file-by-file on 2026-08-16** — every bucket probed on prod with
+ffprobe/stat/header dumps, not guessed. Full evidence in `docs/backlog.md` → "Prod import failure
+triage". Headline: **125 of the 171 are our bugs and the files are good**; 14 are macOS
+AppleDouble sidecars that should never have been queued; 30 are genuinely dead or unexplained
+source files. The fixes are Phase 12 below.
+
+**Still to do from the original Phase 9 scope:**
+- Recreate the ivfflat index now that the table is at full size (it was built when the table was
+  small; ivfflat lists should be ~`rows/1000` ≈ 188, and the index needs a rebuild to re-cluster).
+- Spot-check geo addresses and semantic search quality at prod scale.
+- **Re-judge `CHIP_FLOOR = 24`** on the Tags page — it was calibrated on stage's 46 tags, and prod
+  is ~690× the sample. See Phase 10.
+
+**Original scope, for reference:** all ~20 years of photos (~190K files, 750 GB) catalogued.
 
 **Prerequisite met:** the full stage validation checklist passed on 2026-08-08 — see
 "Stage validation complete" above. Items 1–10 are all exercised.
@@ -1257,9 +1289,13 @@ confirming rather than trusting.
 > first, it settles the "why a BackgroundService and not a queue" question and lists five ways
 > this differs from `ScanScheduler`.
 >
-> **Runs after Phase 9.** Not blocked by it technically — but the pick query wants real tag
-> confidence data to calibrate `Potd:MinConfidence`, and building against prod while the import
-> runs means developing against prod (the two environments share ports).
+> **Phase 9 finished 2026-08-16, so this is unblocked.** The pick query wanted real tag confidence
+> data to calibrate `Potd:MinConfidence` — that data now exists (146,767 of 188,300 files carry at
+> least one tag).
+>
+> **Prefer running Phase 12 first.** It is a few hours and lands 125 more files, including 116
+> videos; calibrating tier 1 against the library before that is calibrating against a library
+> that is about to change.
 
 **Goal:** a daily 15:00 post of one random `person`-tagged photo from On This Day to the family
 Telegram channel — the n8n Workflow 3 behaviour, rebuilt as our own scheduled worker.
@@ -1420,3 +1456,270 @@ The one thing still worth measuring after the archive import: **how often tier 1
 If most days fall through to tier 2 or 3, either the floor is too high or `person` coverage is
 thinner than the stage sample suggested. The tier log line from Step 2 answers this without any
 extra instrumentation.
+
+---
+
+## Phase 12 — Import failure cleanup
+
+> **Specified 2026-08-16 from the Phase 9 triage. Recommended to run *before* Phase 11.**
+> It is a few hours of work and it recovers **125 real files** that are currently missing from
+> the library or sitting there unenriched. Phase 11's tier-1 calibration also reads the tag
+> distribution, so it is better done after these 125 land.
+>
+> **Evidence lives in `docs/backlog.md` → "Prod import failure triage — 171 failed jobs".**
+> Read it first — every claim below was measured on prod, and the section records what was ruled
+> out as well as what was found. Do not re-derive it.
+
+**Goal:** get the 171 failed jobs down to ~30 unavoidable ones, and make the next import's
+failures readable in the Admin table on the first look instead of the third.
+
+### Step 1 — sub-second video frame extraction (116 files)
+
+`src/MediaWorker/Services/FileConvertService.cs`, `ExtractVideoFrameAsync` (line 22). Four changes,
+all in this one file — backlog fixes A1–A4:
+
+1. Seek to `min(1s, duration/2)` instead of the hardcoded `-ss 00:00:01`, or drop the seek and use
+   `-ss 0 -vf thumbnail`. **Must be duration-relative** — four of the 116 files are *over* 1.0 s
+   (up to 1.113 s) and still fail, so `if (duration < 1) skip the seek` does not cover them.
+2. Throw if the output file does not exist after ffmpeg returns 0.
+3. `-hide_banner -loglevel error` on the invocation.
+4. Read stderr concurrently with `WaitForExitAsync` (latent pipe-buffer deadlock).
+
+*Verify:* unit tests in `MediaWorker.Tests` over a 0.3 s and a 1.05 s fixture clip; then rebuild
+`media-worker` on prod and hit **Retry All Failed** on `/admin`. Expect 116 jobs to go
+`failed → completed` and 116 new rows in `media_files`. Any that stay failed are new information —
+re-triage rather than retrying twice.
+
+### Step 2 — truncated JPEG decoding (9 files)
+
+`src/AiSidecar/inference.py` — backlog fix B5. Add at import time:
+
+```python
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+```
+
+These 9 already have `media_files` rows and are visible in the gallery (save-early worked); what
+they lack is tags and an embedding. `ApplyEnrichmentConsumer` deliberately keeps the work file when
+AI fails (`ApplyEnrichmentConsumer.cs:59-60`), so they retry without re-reading the source.
+
+*Verify:* a sidecar test that truncates a JPEG fixture and asserts `analyze()` returns rather than
+raising `InferenceError`. Then rebuild `ai-sidecar`, retry those 9, and confirm
+`media_embeddings` reaches 188,300 — i.e. the gap between `media_files` and embeddings closes.
+
+### Step 3 — scan-level junk filtering (14 files, and every scan hereafter)
+
+`src/MediaWorker/Services/ScanService.cs:33-35` — backlog fix C6. Before the extension filter,
+skip files whose name starts with `._` (macOS AppleDouble resource forks — 4096 bytes,
+`00 05 16 07` magic, not media) and files of zero length. Log the skipped count from
+`ScanConsumer` so the filtering is observable rather than silent.
+
+*Verify:* a `ScanService` test with a temp tree containing `._IMG_1.JPG`, a 0-byte `IMG_2.JPG` and
+a real `IMG_3.JPG` — only the third is returned. On prod, delete the 14 AppleDouble
+`processing_jobs` rows after deploying, then re-scan and confirm they do not come back.
+
+### Step 4 — decide the fate of the ~30 unrecoverable files
+
+Not code. Mike's call, once Steps 1–3 land and the list is short enough to read:
+
+- **17 MOV** with no `moov` atom (9 of them zero-byte) — unplayable in any player.
+- **12 zero-byte JPG** + **1 XML file named `.JPG`** — dead source data.
+- **2 HEIC** that libheif 1.19.8 rejects with `No 'hvcC' box` despite being structurally intact
+  (backlog bucket 6 — the `tmap`/gain-map explanation was tested and ruled out). Worth one attempt
+  at re-copying from the phone or a backup, or a one-off `pillow-heif`/ImageMagick conversion,
+  before writing them off.
+
+The options are: leave them as a permanent ~30-row entry in Failed Jobs, or delete the source
+files and clear the rows. There is no third option where the pipeline fixes them.
+
+### Step 5 — make file failures visible in Grafana
+
+The known blind spot, now that we have a real number to check it against. `IngestConsumer` catches
+per-file failures and publishes `MediaProcessingFailed` rather than rethrowing, so MassTransit
+records a *successful* consume — the "consume faults" and "error queue depth" panels stayed flat
+through all 171 of these. `processing_jobs` and the Admin page were the only surfaces that showed
+them, and only if you went looking.
+
+Add an OTel gauge (or counter) for `processing_jobs` in `failed` state, exported from the Api's
+existing `/metrics` endpoint, and a panel + alert threshold on the pipeline dashboard. Update
+`docs/monitoring.md` to delete the blind-spot caveat once the panel exists.
+
+This is what would have caught the 116-file bug on day one of the import instead of at the end.
+
+---
+
+## Phase 13 — On This Day: no cap, plus a date picker
+
+> **Specified 2026-08-16 from Mike's report.** Independent of Phases 11 and 12 — no shared files,
+> can run in any order. The smallest of the three.
+
+Three things: the page silently shows a fraction of what matches, the date is hardcoded to today,
+and the photos inside each year block run backwards through the day.
+
+### The bug: `.Take(200)`
+
+`src/Api/Features/Media/OnThisDay/OnThisDayHandler.cs:28` caps the query at 200 rows **before**
+the in-memory `GroupBy(year)`. Nothing in the API or the UI says it did so.
+
+Measured on prod for 16 August (1,049 rows match Mike's `count(*)`):
+
+| Year | 2025 | 2024 | 2023 | 2022 | 2021 | 2020 | 2019 | 2018 | 2017 | 2016 | 2015 | 2014 | 2013 | 2011 | 2009 |
+|------|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|-----:|
+| n | 61 | 196 | 126 | 19 | 382 | 36 | 172 | 13 | 8 | 5 | 7 | 13 | 2 | 1 | 8 |
+
+`OrderByDescending(TakenAt).Take(200)` therefore returns **all 61 of 2025 plus the newest 139 of
+2024, and stops** — which is exactly what Mike saw: a "61 photos" section header, and a last
+visible photo of `16.08.2024 09:37`. **Twelve years of that day never reach the browser.**
+
+The two filters absent from Mike's SQL (`is_deleted`, `origin_class <> 'meme'`) remove nothing on
+this date — verified, all four count variants return 1,049. The cap is the whole story.
+
+### Scale to design for
+
+Per-calendar-day totals across the whole library (`NOT is_deleted`, `taken_at NOT NULL`):
+
+| min | median | mean | p95 | **max** |
+|----:|-------:|-----:|----:|--------:|
+| 82 | 454 | 514 | 1,014 | **2,252** (02 May) |
+
+So "no pagination, everything on one page" means a **typical page of ~450 cards and a worst case
+of ~2,250**. That is the number to design and test against, not 1,049.
+
+The query itself is not the problem: `EXPLAIN (ANALYZE)` on the full 188K-row table gives a
+parallel seq scan at **23 ms** for the 1,049-row result. Removing the cap does not make it slower —
+`Take(200)` never saved a scan, only rows returned. **No index needed**; an expression index on
+`(date_part('month'…), date_part('day'…))` was considered and rejected on this measurement.
+
+### Step 1 — endpoint takes a limit, and the default is unlimited
+
+`GET /api/media/on-this-day?month=&day=&limit=`
+
+**`DashboardPage` calls the same endpoint** (`DashboardPage.tsx:35-37`) for its horizontal strip
+and its Photo-of-the-Day pick — so simply deleting the `Take` would have the dashboard pull 2,252
+items to render a strip. Add `limit` to `OnThisDayRequest`, applied only when `> 0`:
+
+- **On This Day page** passes no limit → everything.
+- **Dashboard** passes `limit=200` → byte-for-byte today's behaviour, no regression on a page
+  that is not what Mike asked to change. (200 there is an arbitrary carry-over, not a considered
+  number — revisit when Phase 11 replaces the dashboard's home-grown POTD pick.)
+
+Default unlimited is deliberate: a caller that forgets a limit gets a slow page, which is
+obvious, instead of a silently truncated one, which hid this bug for months.
+
+### Step 2 — handler
+
+`OnThisDayHandler.cs`:
+
+1. Drop `.Take(200)` (or apply `req.Limit` when positive).
+2. Replace `.Include(f => f.Thumbnail).Include(f => f.Metadata)` + in-memory `ToListItemDto()`
+   with a `.Select(...)` projection into `MediaListItemDto`, so 2,252 rows do not materialise as
+   full entities with two navigations each. Keep the `GroupBy(year)` client-side — it runs on the
+   already-materialised list and is cheap.
+3. **Pin the timezone.** `f.TakenAt.Value.Month` translates to `date_part('month', taken_at)`,
+   which for a `timestamptz` resolves against the **session** TimeZone. Prod's session is UTC
+   today, so this and `AT TIME ZONE 'UTC'` return an identical 1,049 — but the date picker makes
+   the boundary user-visible (a 23:30 local photo can land on the neighbouring day), so make the
+   choice explicit in the query instead of inheriting it from the session.
+
+**Keep `OrderByDescending(TakenAt)` in the query — it is the *selection* order, not the display
+order.** Newest-first is what makes `limit` mean "the most recent N" for the dashboard. The
+display order Mike wants (ascending inside each year block) is a presentation concern and belongs
+on the page — see Step 3. Flipping the query to `OrderBy` ascending would silently change which
+photos the dashboard picks, because it slices the first 4 of each group.
+
+*Verify:* an `Api.Tests` case seeding >200 rows across several years for one month/day and
+asserting every row comes back, grouped, newest year first. That test is the regression guard —
+its absence is why a 200-row cap survived into prod.
+
+Read the **"Built — 2026-08-09"** notes on `TagHandlers.cs` before reshaping the query: that
+section records which EF Core query shapes translate and which silently fall back to client
+evaluation. Same trap here.
+
+### Step 3 — date picker on the page
+
+`src/Frontend/src/pages/OnThisDayPage.tsx`. Per Mike's answer: **the picker chooses a month and
+day; the page still shows every year for it.** The year component of the picked date is display
+only — picking 16.08.2024 shows all fifteen 16-Augusts, not just 2024's.
+
+- Native `<input type="date">` — no new dependency, and the browser renders it in the user's
+  locale. Default value: today.
+- Hold the selection in the URL (`/on-this-day?d=2026-08-16`) via `useSearchParams`, so it
+  survives reload, back-button and sharing. Absent → today.
+- Feed `month`/`day` into the TanStack Query key so switching dates refetches and caches per day.
+- **Three existing spots hardcode `today` and must follow the selection:** the `todayLabel()`
+  header (lines 5-7 and 21), the query key and call (13-14), and the per-year section date
+  `new Date(group.year, today.getMonth(), today.getDate())` (line 35) — that last one currently
+  builds every section label from *today's* month/day.
+- **Guard 29 February:** `new Date(2023, 1, 29)` silently rolls to 1 March, so the section heading
+  would name the wrong day in non-leap years. Format the label from the group's year plus the
+  selected month/day directly rather than round-tripping through `Date`.
+- Add prev/next-day arrows either side of the picker — cheap once the date is state, and the
+  natural way to browse an anniversary.
+- Put the total in the header ("1,049 photos across 15 years"), so a future cap can never hide
+  again.
+
+**Sort photos ascending *within* each year block.** Year blocks stay newest-first (2025, then
+2024, then 2023…) — only the photos inside a block change direction, so each day reads forward
+from morning to night instead of backwards. Today everything is descending at both levels, because
+`OnThisDayHandler` orders descending and `GroupBy` preserves source order.
+
+Do this in `OnThisDayPage.tsx`, not in the handler. The API's descending order is load-bearing for
+the dashboard: `DashboardPage.tsx:178` renders `group.items.slice(0, 4)`, so an ascending API
+would swap its four most recent photos of each year for the four earliest — a silent change to a
+page Mike did not ask to touch. Sorting on the one page that wants it keeps the two independent.
+
+Sort **explicitly on `takenAt`** rather than calling `.reverse()` on the array. Reversing bakes in
+an assumption about the API's order that nothing enforces; an explicit comparator survives the
+handler being reshaped later:
+
+```ts
+const items = [...group.items].sort(
+  (a, b) => new Date(a.takenAt ?? 0).getTime() - new Date(b.takenAt ?? 0).getTime()
+)
+```
+
+Cost is nil — a few thousand comparisons per group, once per render, against a page that is
+already mounting thousands of DOM nodes.
+
+### Step 4 — make 2,250 cards on one page behave
+
+Mike does not want pagination, so the render has to hold up at the p95 (~1,000) and the max
+(~2,250) without virtualization.
+
+Most of this is already in place and worth not breaking:
+
+- `PhotoCard` already sets `loading="lazy"` (`PhotoCard.tsx:24`), and `.otd-full-photo` is a fixed
+  `160×160` (`global.css:302`). Fixed-size boxes are what make native lazy-loading work properly —
+  the layout is stable before any image loads, so the browser only fetches what is on screen.
+  **Do not** make these cards intrinsically sized.
+- Add `decoding="async"` alongside the existing `loading="lazy"`.
+
+The remaining cost is DOM size: ~6 elements per card × 2,250 ≈ 13K nodes on the worst day.
+**Measure it on 02 May before building anything for it.** If scrolling janks, the fix that fits
+this page's structure is progressive reveal of the year sections with an `IntersectionObserver` —
+render the first two or three year sections, mount the rest as they approach the viewport. That
+keeps "everything on one page, no pagination" true while keeping the initial DOM small. Grid
+virtualization is the wrong tool here: the page is a stack of variable-height year sections, not
+one uniform grid.
+
+*Optional, measured:* `MediaListItemDto.ThumbnailPath` is declared in `types/api.ts:4` and **never
+read** anywhere in the frontend — `PhotoCard` builds its URL from `thumbnailUrl(item.id)`. At
+2,252 items that is ~135 KB of dead JSON per page load. Dropping it touches every list endpoint,
+so it is a separate cleanup, not part of this phase.
+
+### Step 5 — verify on prod
+
+1. `/on-this-day` with no query param → today, 15 year sections, **1,049** photos, oldest section
+   2009. Cross-check against Mike's `count(*)`.
+2. Pick 02 May → 2,252 photos. This is the stress case: time to first paint, scroll smoothness,
+   payload size, and how many thumbnail requests nginx actually serves versus how many `<img>`
+   tags exist (that ratio is the proof lazy-loading is working).
+3. Pick 29 February → section headings read "29 February" in every year listed.
+4. **Ordering, both levels at once:** year blocks descend (2025 → 2009) while the photos inside
+   each block ascend. Easiest check on prod is the 16 August page — the 2025 block should now
+   *open* with the earliest of its 61 photos and *end* on the latest, and the same within 2024's
+   196. Confirm on at least two blocks, since a single block can look right by accident.
+5. Dashboard's On This Day strip is visually unchanged — still the four **most recent** photos of
+   each year, in descending order. This is the check that the sort stayed on the page and did not
+   leak into the handler.
+6. A day with nothing → the existing empty state, not a spinner.
