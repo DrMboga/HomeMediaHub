@@ -171,8 +171,17 @@ excludes files in `media_files` or holding an *active* job; a duplicate has neit
 rows. Harmless — dedup precedes conversion, so no AI/thumbnail/media-row work — and **not a Phase
 12 regression**. Details and the one-line fix in `docs/backlog.md`.
 
-Still open from Phase 9 itself: rebuild the ivfflat index at full table size, spot-check geo +
-semantic search at prod scale, and re-judge the Tags page's `CHIP_FLOOR = 24`.
+**The ivfflat index is gone (2026-08-16) — semantic search runs an exact scan.** Measured on prod:
+exact 354 ms with perfect recall, versus 556 ms and **7/15** (image vector) or **0/15** (real text
+query vector) for the index at its live `probes = 1`. It was built on an *empty* table, so its
+k-means centroids modelled nothing, and `probes` was never set anywhere. Slower *and* wrong, so
+`DropIvfflatEmbeddingIndex` removes it rather than rebuilding at `lists = 188`. Do not re-add
+ivfflat; if ~350 ms ever hurts, use HNSW (pgvector 0.8.6 is installed). The 2026-08-07 stage note
+that "ivfflat was exonerated" was measured on 276 rows and is **not** evidence about prod.
+
+Still open from Phase 9 itself: spot-check geo + semantic search at prod scale (**after** the
+index drop is deployed — anything measured before it measured the wrong result set), and re-judge
+the Tags page's `CHIP_FLOOR = 24`.
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search

@@ -745,6 +745,10 @@ straight out of psql):
 - **ivfflat was exonerated** — indexed and `enable_indexscan = off` top-20 came back
   byte-identical. The empty-table build is still worth redoing at prod scale (see Open risks),
   but it was not causing the bad results here.
+  > ⚠️ **This bullet does not hold at prod scale — corrected 2026-08-16.** 276 rows is no evidence
+  > about 188K. Measured on prod, the index returned **7/15** of the true nearest neighbours on an
+  > image vector and **0/15** on a real text query vector, while being *slower* than no index at
+  > all. It was dropped (`DropIvfflatEmbeddingIndex`). See "ivfflat: dropped, not rebuilt" below.
 - **Mean-centering the image embeddings was tested and rejected.** It is a 1.5× affine rescale
   (z-score of the best match unchanged: 3.48 → 3.49 for Bridge), and its one ranking change
   swapped a false positive for a different false positive.
@@ -859,9 +863,10 @@ untagged, both the Tags page and the hybrid are worth far less than they look on
   the always-publish AI contract + Admin stale surfacing; add saga `Schedule` later if it bites.
 - **MassTransit 8.x on net10** — targets net8; forward-compat expected, verify at first restore.
   OTel Prometheus exporters are pre-release — pin exact versions.
-- **ivfflat recall** — index created on an empty table; recreate once after the Phase 9 archive
-  load. Verified *not* to be distorting results at stage scale (2026-08-07), but 276 rows is no
-  evidence about 190K.
+- ~~**ivfflat recall** — index created on an empty table; recreate once after the Phase 9 archive
+  load.~~ **Risk realised, then closed 2026-08-16.** It *was* distorting results at prod scale —
+  0/15 recall on a text query — and was dropped rather than rebuilt, because exact search proved
+  both faster and perfect. See "ivfflat: dropped, not rebuilt".
 - **190K-message scan burst** — fine for RabbitMQ; ScanConsumer batches job inserts (~1000/SaveChanges).
 - **pika heartbeat** on a pathological multi-minute image — reconnect loop + redelivery covers
   it; redelivery count isn't tracked (visible in Grafana if it loops).
@@ -1255,11 +1260,51 @@ AppleDouble sidecars that should never have been queued; 30 are genuinely dead o
 source files. The fixes are Phase 12 below.
 
 **Still to do from the original Phase 9 scope:**
-- Recreate the ivfflat index now that the table is at full size (it was built when the table was
-  small; ivfflat lists should be ~`rows/1000` ≈ 188, and the index needs a rebuild to re-cluster).
-- Spot-check geo addresses and semantic search quality at prod scale.
+- ~~Recreate the ivfflat index now that the table is at full size.~~ **Done 2026-08-16 — dropped
+  instead of rebuilt. See below.**
+- Spot-check geo addresses and semantic search quality at prod scale. **Do this after deploying
+  the index drop** — every measurement taken before it is a measurement of the wrong result set.
 - **Re-judge `CHIP_FLOOR = 24`** on the Tags page — it was calibrated on stage's 46 tags, and prod
   is ~690× the sample. See Phase 10.
+
+### ivfflat: dropped, not rebuilt — 2026-08-16
+
+The leftover said "rebuild at `lists ≈ 188`". Measuring first said something else entirely.
+
+| | latency | recall @ top-15 |
+|--|--|--|
+| **exact scan, no index** | **354 ms** warm · 478 ms cold | **15/15** by definition |
+| ivfflat `probes = 1` (the live setting) | 556 ms | **7/15** image · **0/15 text** |
+| ivfflat `probes = 5` | 1,678 ms | 13/15 |
+| ivfflat `probes = 10` | 1,012 ms | 14/15 |
+
+**The index was slower than brute force at every probes setting, and never as accurate.**
+
+The **0/15 on a text query vector** ("a photo of bridge", embedded through the sidecar's
+`/embed/text` — the same path a real search takes) is the finding that matters: not degraded
+ranking, a *disjoint* result set. Every semantic search run on prod between the import and this
+date returned near-arbitrary photos out of one wrong cluster.
+
+Cause, and it is the one the migration warned about: `AddMediaSchema` built the index on an
+**empty table**, and ivfflat derives its list centroids by k-means over the rows present at build
+time. Zero rows means 100 arbitrary centroids, and all 188,416 vectors were then filed against
+clusters that model nothing — badly unbalanced, which is why raising `probes` cost *more* time
+than scanning everything. The modality gap compounds it: text vectors sit in a region those
+centroids never saw, so the single probed list held none of the true neighbours. `ivfflat.probes`
+was also never set anywhere in the repo, leaving it at Postgres's default of 1.
+
+A rebuild at `lists = 188` would have fixed the centroids, but exact search already wins on both
+axes at this size, so `DropIvfflatEmbeddingIndex` removes the index outright — 100% recall, no
+`lists`/`probes` to tune, and 491 MB of disk back (the index was 35× the main table's 14 MB,
+because pgvector stores vectors inline while the table's own live in TOAST).
+
+**If ~350 ms ever hurts**, the replacement is HNSW — pgvector **0.8.6** is installed, so it is
+available: ~99% recall at single-digit ms, minutes to build, `hnsw.ef_search` to tune. Revisit if
+the library doubles; do not reach for ivfflat again.
+
+**Deploy:** rebuild `api` on prod so the migration runs at startup, then re-run the recall check —
+it should be 15/15 by construction — and redo the semantic spot-check, which is only now
+measuring the real thing.
 
 **Original scope, for reference:** all ~20 years of photos (~190K files, 750 GB) catalogued.
 

@@ -169,18 +169,21 @@ duplicates.
 
 ## Post-scan cleanup
 
-Once the archive finishes ingesting (before enrichment fully completes is fine — ivfflat recall
-degrades gracefully):
+> **The ivfflat rebuild step that used to live here is gone — the index itself is gone.**
+> Measured on prod at 188,416 embeddings (2026-08-16), exact search beat it on *both* axes:
+> 354 ms and perfect recall, against 556 ms and 7/15 — 0/15 on a real text query vector — for the
+> index at its live `probes = 1`. `DropIvfflatEmbeddingIndex` removes it, and semantic search now
+> runs a parallel sequential scan. Nothing to rebuild after an import.
+>
+> The step was also wrong twice over, which is worth remembering if you find it in an old copy:
+> `REINDEX` rebuilds an ivfflat index with the *same* `lists`, so it could never have fixed
+> centroids built on an empty table, and it named an index (`media_embeddings_embedding_idx`)
+> that has never existed — the real one was `ix_media_embeddings_embedding`.
 
-```bash
-# Recreate the ivfflat index now that media_embeddings has real data (it was created empty)
-docker compose --env-file .env.prod exec postgres \
-    psql -U postgres -d homemediahub_db \
-    -c "REINDEX INDEX media_embeddings_embedding_idx;"
-```
-
-Then spot-check geo addresses and semantic search quality, and tune
-`Search:MaxCosineDistance` against the full library if results feel too strict/loose.
+Once the archive finishes ingesting, spot-check geo addresses and semantic search quality.
+Do **not** expect `Search:MaxCosineDistance` to be tunable into good results — stage measured the
+whole corpus into a ~0.68–0.80 band, so no query-independent constant separates a narrow query
+from a broad one. See `docs/delivery-plan.md` → "Semantic search validation".
 
 ---
 
