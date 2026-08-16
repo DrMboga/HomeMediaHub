@@ -179,9 +179,13 @@ k-means centroids modelled nothing, and `probes` was never set anywhere. Slower 
 ivfflat; if ~350 ms ever hurts, use HNSW (pgvector 0.8.6 is installed). The 2026-08-07 stage note
 that "ivfflat was exonerated" was measured on 276 rows and is **not** evidence about prod.
 
-Still open from Phase 9 itself: spot-check geo + semantic search at prod scale (**after** the
-index drop is deployed — anything measured before it measured the wrong result set), and re-judge
-the Tags page's `CHIP_FLOOR = 24`.
+Semantic search was re-checked on prod after the drop (2026-08-16) and is healthy: top hits at
+0.67–0.70, and "birthday cake" returns the same annual birthday across three separate years.
+**Any judgement of search quality formed before that date was formed against the wrong result
+set** — re-argue the deferred background-vocabulary scoring against this baseline, not the old one.
+
+Still open from Phase 9 itself: spot-check geo addresses at prod scale, and re-judge the Tags
+page's `CHIP_FLOOR = 24`.
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search

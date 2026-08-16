@@ -1302,9 +1302,28 @@ because pgvector stores vectors inline while the table's own live in TOAST).
 available: ~99% recall at single-digit ms, minutes to build, `hnsw.ef_search` to tune. Revisit if
 the library doubles; do not reach for ivfflat again.
 
-**Deploy:** rebuild `api` on prod so the migration runs at startup, then re-run the recall check —
-it should be 15/15 by construction — and redo the semantic spot-check, which is only now
-measuring the real thing.
+**Deployed and verified the same day.** `api` rebuilt on prod, migration applied at startup.
+`media_embeddings` went 1012 MB → **520 MB** (the 491 MB index gone), leaving only
+`pk_media_embeddings`.
+
+The five-query spot-check is the confirmation, and it is not subtle. Every top hit now lands at
+**0.67–0.70** — the very bottom of the ~0.68–0.80 band stage measured across the whole corpus —
+where before the drop the results came from whichever arbitrary cluster `probes = 1` happened to
+read. "birthday cake" tops out at **0.6702**, a better first hit than anything the stage session
+recorded bar "Bells on the tower".
+
+Two structural signals matter more than the numbers:
+
+- **birthday cake** — ranks 1–2 are 19:14:50 and 19:14:44 the same evening (two frames of one
+  cake), then **2019-03-28, 2025-03-28, 2022-03-28**: the same annual birthday across three
+  different years, with nothing in the query mentioning a date.
+- **bridge** — 20:13:08 and 20:13:10 on 2020-09-19, consecutive frames of one bridge.
+
+Burst-shot and same-event clustering at the head of the ranking is what correct retrieval looks
+like; a mis-probed cluster does not produce it. **Semantic search quality should now be re-judged
+from scratch** — every impression formed of it on prod before this date was formed against the
+wrong result set, and the deferred background-vocabulary scoring should be re-argued against this
+baseline rather than the old one.
 
 **Original scope, for reference:** all ~20 years of photos (~190K files, 750 GB) catalogued.
 
