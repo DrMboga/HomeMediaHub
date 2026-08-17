@@ -194,25 +194,26 @@ spot-checks, and the `CHIP_FLOOR` re-judgement are all done. Nothing is outstand
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
-still ignores them); Photo of the Day (Phase 11, specified only). Phase 13 (On This Day uncap +
-date picker) is built but **not deployed** — see below.
+still ignores them); Photo of the Day (Phase 11, specified only).
 
-**Phase 13 — On This Day uncap + date picker — is BUILT but NOT DEPLOYED (2026-08-17).** Steps 1–4
-are in the working tree and green (Api tests 51 → **65**, `tsc -b && vite build` clean); prod still
-runs `4ef4ce1`, so **Step 5's six prod checks are outstanding**. The `.Take(200)` is gone —
+**Phase 13 — On This Day uncap + date picker — is COMPLETE, validated on prod 2026-08-17.**
+Api tests 51 → **65**. The `.Take(200)` is gone —
 `OnThisDayRequest` has a `Limit` that defaults to **unlimited**, `GET /api/media/on-this-day` takes
 `?limit=`, and the dashboard strip passes `200` (with `200` in its TanStack query key, or the two
 pages would share one cache entry). The handler now projects into `MediaListItemDto` instead of
 `Include`-ing two navigations, and pins the month/day boundary to UTC via
 `TimeZoneInfo.ConvertTimeBySystemTimeZoneId(…, "UTC")` → `AT TIME ZONE 'UTC'`. `/on-this-day` has a
-native date picker + prev/next arrows, holds the date in the URL as `?d=YYYY-MM-DD`, shows the
+date picker + prev/next arrows, holds the date in the URL as `?d=YYYY-MM-DD`, shows the
 total in the header, and sorts photos ascending **within** each year block while year blocks stay
 newest-first — that sort lives on the page, not in the handler, because `DashboardPage` slices the
 API's first four per year and must keep getting the most recent ones. Per-calendar-day counts run
 median 454 / p95 1,014 / **max 2,252** (02 May); the new query measured **108 ms** there on prod, so
-no index was added. **Step 4's progressive reveal was deliberately not built** — the plan says
-measure 02 May on the deployed page first. Details in `docs/delivery-plan.md` → Phase 13 →
-"Built — 2026-08-17".
+no index was added. **Step 4's progressive reveal was deliberately not built and is not needed** —
+02 May renders fine on real hardware, which is what the plan said to measure before building it.
+**The date field is a styled button, not a bare `<input type="date">`**: the native input renders
+in the browser's locale and cannot be made to read `dd.mm.yyyy`, so it is hidden behind the button
+(`opacity: 0`, *not* `display: none`) and supplies only the calendar popup via `showPicker()`.
+Details in `docs/delivery-plan.md` → Phase 13 → "Built — 2026-08-17" and the note after it.
 
 **Former blind spot — now covered.** File-level processing failures still do not fault a consumer:
 `IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than rethrowing, so

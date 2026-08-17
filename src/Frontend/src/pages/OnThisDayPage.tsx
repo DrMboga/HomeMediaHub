@@ -1,7 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getOnThisDay } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
 
@@ -11,8 +11,14 @@ function pad(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
+/** The wire/URL format: `YYYY-MM-DD`, which is also what `<input type="date">` binds to. */
 function toParam(d: CalendarDay): string {
   return `${d.year}-${pad(d.month)}-${pad(d.day)}`
+}
+
+/** What Mike reads: `17.08.2026`. */
+function toDisplay(d: CalendarDay): string {
+  return `${pad(d.day)}.${pad(d.month)}.${d.year}`
 }
 
 /**
@@ -61,6 +67,7 @@ function sectionLabel(year: number, month: number, day: number): string {
 
 export function OnThisDayPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const nativeDateRef = useRef<HTMLInputElement>(null)
 
   // The selection lives in the URL so it survives reload, back-button and sharing.
   const selected = parseParam(searchParams.get('d')) ?? todayCalendarDay()
@@ -114,15 +121,39 @@ export function OnThisDayPage() {
         >
           <ChevronLeft size={14} />
         </button>
-        <input
-          type="date"
-          className="otd-date-input"
-          value={toParam(selected)}
-          onChange={e => {
-            const picked = parseParam(e.target.value)
-            if (picked) setSelected(picked)
-          }}
-        />
+        {/* `<input type="date">` always renders its value in the browser's own locale — there is
+            no attribute or stylesheet that makes it read dd.mm.yyyy. So the visible control is a
+            button we format ourselves, and the native input survives only to supply the calendar
+            popup, opened with showPicker(). If a browser lacks showPicker the click falls through
+            to focusing the input, and the prev/next arrows and ?d= still work regardless. */}
+        <div className="otd-date-field">
+          <button
+            type="button"
+            className="otd-date-btn"
+            aria-label={`Change date — currently ${toDisplay(selected)}`}
+            onClick={() => {
+              const el = nativeDateRef.current
+              if (!el) return
+              if (typeof el.showPicker === 'function') el.showPicker()
+              else el.focus()
+            }}
+          >
+            <CalendarDays size={13} />
+            {toDisplay(selected)}
+          </button>
+          <input
+            ref={nativeDateRef}
+            type="date"
+            className="otd-date-native"
+            tabIndex={-1}
+            aria-hidden="true"
+            value={toParam(selected)}
+            onChange={e => {
+              const picked = parseParam(e.target.value)
+              if (picked) setSelected(picked)
+            }}
+          />
+        </div>
         <button
           className="pager-btn"
           aria-label="Next day"

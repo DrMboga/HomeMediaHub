@@ -2075,3 +2075,29 @@ changes no result today — it just stops the answer depending on that.
 **Not yet done: Step 5.** Nothing is deployed — prod still runs `4ef4ce1`. The six checks in Step 5
 all need the built page, and items 2 and 4 (scroll behaviour at 2,252 cards; both ordering levels
 at once) cannot be settled any other way.
+
+### Validated on prod, and the picker reformatted — 2026-08-17
+
+Mike deployed `edd0478` and exercised the page: **it works, and 02 May renders fine** — so Step 5
+is closed and Step 4's progressive reveal stays unbuilt, which is what the measurement was for.
+2,252 cards on one page hold up on this hardware; `loading="lazy"` over fixed-size boxes is doing
+its job.
+
+One change requested: **the date field must read `dd.mm.yyyy`.**
+
+`<input type="date">` renders its value in the browser's own locale and there is no attribute,
+`lang`, or stylesheet that overrides that — and no locale renders dots anyway. So the visible
+control is now a `.otd-date-btn` we format ourselves (`17.08.2026`, lucide `CalendarDays` icon),
+with the native input kept only to supply the calendar popup, opened from the button via
+`showPicker()`.
+
+The native input is `position: absolute; inset: 0; opacity: 0; pointer-events: none` over the
+button — **not** `display: none`, which would leave `showPicker()` nothing to anchor to.
+Verified in Chromium that `showPicker()` on an opacity-0 / pointer-events-none input does *not*
+throw (a standalone page, clicked through Playwright, reported `showPicker OK`); the button falls
+back to `focus()` if a browser ever lacks the method, and the prev/next arrows and `?d=` work
+either way. The `::-webkit-calendar-picker-indicator { filter: invert(1) }` rule went away with the
+visible native input.
+
+`toParam()` (the `?d=` / input value, `YYYY-MM-DD`) and `toDisplay()` (`dd.mm.yyyy`) are now
+separate functions — the URL format is unchanged, only the rendering.
