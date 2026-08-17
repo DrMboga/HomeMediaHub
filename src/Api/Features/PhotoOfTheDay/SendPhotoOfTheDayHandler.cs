@@ -146,13 +146,43 @@ public sealed class SendPhotoOfTheDayHandler : IRequestHandler<SendPhotoOfTheDay
         {
             await _telegram.SendPhotoAsync(botToken, chatId, filePath, contentType, caption, ct);
         }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        // Deliberately broad. The point of this handler is that a failure is diagnosable from the
+        // response — "which tier, which photo, what went wrong" — instead of a 500 and a stack
+        // trace in the container log. An allow-list of exception types was too narrow the first
+        // time out: a malformed request URI throws NotSupportedException, which escaped.
+        // Cancellation of the caller's own token is the one thing that must still propagate.
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _log.LogError(ex, "Photo of the Day: Telegram send failed for {MediaFileId}", mediaFileId);
-            return new SendPhotoOfTheDayResult(false, tier, mediaFileId, filePath, caption, ex.Message);
+            return new SendPhotoOfTheDayResult(false, tier, mediaFileId, filePath, caption,
+                Redact(ex.Message, botToken));
         }
 
         return new SendPhotoOfTheDayResult(true, tier, mediaFileId, filePath, caption, null);
+    }
+
+    /// <summary>
+    /// Keeps the bot token out of <c>skippedReason</c>, which is rendered on the Admin page and is
+    /// the sort of string that ends up pasted into a bug report.
+    /// </summary>
+    /// <remarks>
+    /// Nothing we construct includes the token, but the catch around the send is deliberately
+    /// broad, so the message can come from anywhere — and the first prod failure was an exception
+    /// that quoted part of the URL back. Also redacts the id half on its own: a token split on its
+    /// colon is exactly how that message was shaped.
+    /// </remarks>
+    internal static string Redact(string message, string botToken)
+    {
+        message = message.Replace(botToken, "***", StringComparison.Ordinal);
+
+        var colon = botToken.IndexOf(':');
+        if (colon > 0)
+        {
+            message = message.Replace(botToken[..colon], "***", StringComparison.Ordinal);
+            message = message.Replace(botToken[(colon + 1)..], "***", StringComparison.Ordinal);
+        }
+
+        return message;
     }
 
     /// <summary>Today's month/day in <c>Potd:TimeZone</c>, unless the caller named one.</summary>

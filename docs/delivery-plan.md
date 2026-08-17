@@ -1672,6 +1672,35 @@ that cannot happen from here: it needs `POTD_BOT_TOKEN` and `POTD_CHAT_ID` in `.
 5. Untick Dry run → **Send Now** → check the channel.
 6. Then leave it to fire at 15:00 and check `potd_sends` has exactly one row for the day.
 
+### Fixed on the first real send — 2026-08-17
+
+Step 5 above failed on prod with a 500 and
+`System.NotSupportedException: The 'bot…' scheme is not supported`. Two separate bugs, both fixed,
+plus one hardening the second exposed. **Api tests 119 → 126** (`TelegramPhotoSenderTests`).
+
+1. **A bot token is `{id}:{secret}`, and the colon made the request URI parse as absolute.**
+   `client.PostAsync($"bot{token}/sendPhoto", …)` looks like a relative path but isn't:
+   `Uri` reads everything before the first colon as a scheme, so the string parsed as an absolute
+   URI named `bot7088711346:` and the `BaseAddress` was never consulted. Fixed with
+   `BuildSendPhotoUri`, which builds `new Uri(baseAddress, $"/bot{token}/sendPhoto")` — **the
+   leading slash is the fix**: a string starting with `/` cannot match the absolute-URI grammar
+   (a scheme must begin with a letter), so it is unambiguously an absolute-path reference.
+   Colons are legal in a path segment (RFC 3986 `pchar`), so the token still goes out unescaped,
+   which Telegram requires.
+   **Nothing in the dry-run path touches this**, which is why every preview passed — the URI is
+   only built when a real send happens. Worth remembering: `dryRun` proves the pick, the
+   conversion and the caption, and nothing whatsoever about reaching Telegram.
+2. **The failure escaped as a 500 instead of a `skippedReason`.** The catch around the send was an
+   allow-list (`HttpRequestException or InvalidOperationException or TaskCanceledException`) and
+   `NotSupportedException` wasn't on it. That defeats the endpoint's whole purpose — §14 says a
+   failure should be diagnosable from the response rather than the logs. Now catches broadly,
+   re-throwing only cancellation of the caller's own token.
+3. **Hardening that (2) made necessary:** `skippedReason` is rendered on the Admin page, and with
+   a broad catch the message can now come from anywhere rather than only from strings we build.
+   The failing exception quoted part of the URL back — which is where the token lives — so
+   `SendPhotoOfTheDayHandler.Redact` strips the token from the message, including each half of it
+   on its own, since splitting on the colon is exactly how that message was shaped.
+
 ---
 
 ## Phase 12 — Import failure cleanup ✅ COMPLETE (2026-08-16)

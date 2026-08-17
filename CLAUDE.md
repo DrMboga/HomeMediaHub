@@ -227,7 +227,7 @@ sampled from `processing_jobs` by `FailedJobsCollector` every 30 s, live since 2
 Read it before touching `FileConvertService.cs`, `AiSidecar/inference.py`, or `ScanService.cs`.
 
 **Phase 11 — Photo of the Day — is BUILT (2026-08-17), pending one real-bot check on prod.**
-Api tests 65 → **119**. A daily 15:00 Telegram post, as `PhotoOfTheDayScheduler : BackgroundService`
+Api tests 65 → **126**. A daily 15:00 Telegram post, as `PhotoOfTheDayScheduler : BackgroundService`
 in the Api (**not** an n8n job, not a queue/consumer) — `src/Api/Features/PhotoOfTheDay/` +
 `src/Api/Services/PhotoOfTheDayScheduler.cs`, new `potd_sends` table via `AddPotdSends`.
 The pick falls through three tiers (`person` ≥ 0.5 conf → geotagged → any non-video), random

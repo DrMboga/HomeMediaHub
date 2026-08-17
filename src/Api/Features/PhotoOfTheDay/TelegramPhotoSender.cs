@@ -39,7 +39,7 @@ public sealed class TelegramPhotoSender
         content.Add(photo, "photo", Path.GetFileName(filePath));
 
         var client = _httpFactory.CreateClient(HttpClientName);
-        using var response = await client.PostAsync($"bot{botToken}/sendPhoto", content, ct);
+        using var response = await client.PostAsync(BuildSendPhotoUri(client.BaseAddress!, botToken), content, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
@@ -55,6 +55,22 @@ public sealed class TelegramPhotoSender
 
         _log.LogInformation("Photo of the Day posted to Telegram chat {ChatId}", chatId);
     }
+
+    /// <summary>
+    /// <c>https://api.telegram.org/bot{token}/sendPhoto</c>.
+    /// </summary>
+    /// <remarks>
+    /// The leading slash is load-bearing. A bot token is <c>{id}:{secret}</c>, so passing
+    /// <c>$"bot{token}/sendPhoto"</c> to <c>PostAsync</c> makes <see cref="Uri"/> read the colon as
+    /// a scheme delimiter: the whole thing parses as an <i>absolute</i> URI named
+    /// <c>bot123456789:</c> and never touches the base address. That failed on prod with
+    /// "The 'bot…' scheme is not supported." A string starting with <c>/</c> cannot match the
+    /// absolute-URI grammar — a scheme must begin with a letter — so it is unambiguously an
+    /// absolute-path reference and combines with the base address as intended. Colons are legal
+    /// in a path segment (RFC 3986 <c>pchar</c>), so the token survives unescaped.
+    /// </remarks>
+    internal static Uri BuildSendPhotoUri(Uri baseAddress, string botToken) =>
+        new(baseAddress, $"/bot{botToken}/sendPhoto");
 
     private static bool IsOk(string body)
     {
