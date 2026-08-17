@@ -1399,15 +1399,15 @@ confirming rather than trusting.
 
 ---
 
-## Phase 11 — Photo of the Day ✅ BUILT (2026-08-17)
+## Phase 11 — Photo of the Day ✅ COMPLETE (2026-08-17)
 
-> **Specified 2026-08-14, built 2026-08-17.** All seven steps are implemented and the code is on
-> `main`; **Steps 3 and 4 still need their against-the-real-bot verification on prod**, which needs
-> `POTD_BOT_TOKEN`/`POTD_CHAT_ID` in `.env.prod`. See "Built — 2026-08-17" at the end of this phase
-> for what was done, what was measured, and exactly what is left.
+> **Specified 2026-08-14, built, deployed and verified on prod the same day.** All seven steps
+> shipped, the manual trigger was exercised against the real bot, and **the scheduled 15:00 run
+> fired on its own and posted to the family channel.** Nothing is outstanding.
 >
-> Design and rationale: `architecture.md` §14 — it settles the "why a BackgroundService and not a
-> queue" question and lists five ways this differs from `ScanScheduler`.
+> Read "Built — 2026-08-17" for the implementation and the prod measurements, then "Fixed on the
+> first real send" for the two bugs that verification flushed out, then "Verified on prod" for the
+> outcome. Design and rationale: `architecture.md` §14.
 
 **Goal:** a daily 15:00 post of one random `person`-tagged photo from On This Day to the family
 Telegram channel — the n8n Workflow 3 behaviour, rebuilt as our own scheduled worker.
@@ -1700,6 +1700,38 @@ plus one hardening the second exposed. **Api tests 119 → 126** (`TelegramPhoto
    The failing exception quoted part of the URL back — which is where the token lives — so
    `SendPhotoOfTheDayHandler.Redact` strips the token from the message, including each half of it
    on its own, since splitting on the colon is exactly how that message was shaped.
+
+Separately, Mike asked for the caption timestamp as `dd.MM.yyyy HH:mm` (was `d MMMM yyyy`, no
+time). It is formatted **as stored, with no timezone conversion** — `taken_at` is the camera's
+naive wall-clock time, so converting to `Potd:TimeZone` would reintroduce the +2h stage error.
+No "exactly midnight means a path-year fallback, hide the time" guard, which
+`formatGridDate`/`formatDetailDate` carry: only **2 of 187,369** dated files on prod are
+midnight-exact, so it would never fire.
+
+### Verified on prod — 2026-08-17
+
+**The scheduled run fired on its own and posted to the channel. Phase 11 is closed.**
+
+```
+13:00:00.176Z  tier=person, 477 candidates, picked 823c51a8…
+13:00:02.494Z  PhotoOfTheDayScheduler: 2026-08-17 sent 823c51a8… (tier person)
+```
+
+| Check | Result |
+|---|---|
+| Fired at the right instant | **13:00:00.176 UTC = 15:00:00 CEST**, 176 ms past the target |
+| `Potd:TimeZone` resolved in the container | yes — `PhotoOfTheDayScheduler enabled — 15:00:00 Europe/Berlin` at startup. **This is the check no unit test can make**; tzdata + ICU are present in `aspnet:10.0-noble` and `InvariantGlobalization` is not set |
+| Tier | `person`, 477 candidates for 17 Aug — consistent with the 366-day survey (min 31, mean 281) |
+| `potd_sends` | exactly one row, `sent_on = 2026-08-17` |
+| Claim row filled in | yes — `media_file_id` is the real photo, not the `Guid.Empty` placeholder, so the write-claim-then-fill-in path works |
+| Elapsed pick → sent | 2.3 s (HEIC→JPEG conversion + upload) |
+| Manual sends left no rows | confirmed — `potd_sends` was empty before 15:00 despite several test posts |
+
+The photo that went out was taken 2025-08-17 11:09 in Saarbrücken, so the caption read
+`17.08.2025 11:09 · Am Schwarzenbergbad, Rotenbühl, St. Johann, …, Deutschland`.
+
+The scheduler's log line carries no `RequestId`/trace context, unlike the manual ones — which is
+how to tell a scheduled run from an admin-triggered one in the logs.
 
 ---
 

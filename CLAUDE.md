@@ -226,8 +226,10 @@ sampled from `processing_jobs` by `FailedJobsCollector` every 30 s, live since 2
 (all six error buckets, measured on prod, with what was ruled out as well as what was found).
 Read it before touching `FileConvertService.cs`, `AiSidecar/inference.py`, or `ScanService.cs`.
 
-**Phase 11 — Photo of the Day — is BUILT (2026-08-17), pending one real-bot check on prod.**
-Api tests 65 → **126**. A daily 15:00 Telegram post, as `PhotoOfTheDayScheduler : BackgroundService`
+**Phase 11 — Photo of the Day — is COMPLETE, verified on prod 2026-08-17.** The scheduled run
+fired on its own at **13:00:00.176 UTC = 15:00:00 CEST** and posted to the family channel; one
+`potd_sends` row, claim filled in, tier `person` from 477 candidates.
+Api tests 65 → **128**. A daily 15:00 Telegram post, as `PhotoOfTheDayScheduler : BackgroundService`
 in the Api (**not** an n8n job, not a queue/consumer) — `src/Api/Features/PhotoOfTheDay/` +
 `src/Api/Services/PhotoOfTheDayScheduler.cs`, new `potd_sends` table via `AddPotdSends`.
 The pick falls through three tiers (`person` ≥ 0.5 conf → geotagged → any non-video), random
@@ -239,15 +241,22 @@ ignores `Potd:Enabled` and the already-sent guard and **never writes `potd_sends
 so tiers 2 and 3 never fire on this library and `Potd:MinConfidence = 0.5` is settled — do not
 re-litigate it without new data. `Potd:TimeZone` defaults to `Europe/Berlin`.
 
-**What is left:** the against-the-real-bot send. It needs `POTD_BOT_TOKEN`/`POTD_CHAT_ID` in
-`.env.prod` and a rebuilt `api`; the six-step order is at the end of `docs/delivery-plan.md` →
-Phase 11 → "Built — 2026-08-17". `POTD_ENABLED` **must stay false in stage** — stage and prod share
-one compose file and stage must never post to the family channel.
+`POTD_ENABLED` **must stay false in stage** — stage and prod share one compose file and stage must
+never post to the family channel.
 
-Two implementation notes that are not obvious from the code: the `potd_sends` claim row is
-**released if the send fails** (so a Telegram outage does not burn the day or record a phantom
-send), and the pick's month/day boundary is pinned to **UTC** like `OnThisDayHandler`'s — which is
-a different thing from `Potd:TimeZone`, that only decides which calendar day it is *now*.
+**Three implementation notes that are not obvious from the code:**
+- The `potd_sends` claim row is **released if the send fails**, so a Telegram outage neither burns
+  the day nor records a phantom send. A `media_file_id` of all zeros would mean that path broke.
+- The pick's month/day boundary is pinned to **UTC** like `OnThisDayHandler`'s. That is a different
+  thing from `Potd:TimeZone`, which only decides which calendar day it is *now*.
+- The caption timestamp (`dd.MM.yyyy HH:mm`) is formatted **as stored, never converted** —
+  `taken_at` is the camera's naive wall-clock time, so converting it to `Potd:TimeZone` would
+  reintroduce the +2h stage error. Same reason `Frontend/src/utils/mediaDate.ts` uses UTC getters.
+
+**`dryRun` proves the pick, the HEIC conversion and the caption — and nothing at all about
+reaching Telegram.** The request URI is only built on a real send; that is how a bot token's colon
+made every preview pass while the first real send 500'd (`docs/delivery-plan.md` → Phase 11 →
+"Fixed on the first real send").
 
 Phases 1–7.5 are complete: full React frontend (8 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + video transcoding.
