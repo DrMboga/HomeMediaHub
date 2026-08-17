@@ -103,7 +103,7 @@ The same thing over HTTP, if you prefer:
 curl -X POST http://192.168.0.192/api/admin/potd/send \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"month":8,"day":17,"dryRun":true}'
-# → {"sent":false,"tier":"person","mediaFileId":"…","caption":"17 August 2019 · Berlin, Deutschland","skippedReason":"dryRun"}
+# → {"sent":false,"tier":"person","mediaFileId":"…","caption":"17.08.2019 14:32 · Berlin, Deutschland","skippedReason":"dryRun"}
 ```
 
 `mediaFileId` is also accepted, which skips the pick and sends one exact photo — the quickest way

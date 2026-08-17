@@ -644,6 +644,13 @@ implementation's hand-rolled convert/thumbnail code. Prefer this over the stored
 Caption = `TakenAt` + `MediaMetadata.Address` when present. Simpler than the Pi version, which
 assembled locality/region/country separately — `Address` here is one formatted string.
 
+**Built:** `dd.MM.yyyy HH:mm · Address`, e.g. `17.08.2019 14:32 · Berlin, Deutschland`. The
+timestamp is formatted **as stored, with no timezone conversion** — `taken_at` holds the camera's
+naive wall-clock time (`MetadataService` tags EXIF `DateTimeOriginal` as UTC without shifting it),
+so a photo taken at 17:00 in Crete must read 17:00. Converting to `Potd:TimeZone` here would
+reintroduce the +2h error found on stage; it is the same reason
+`Frontend/src/utils/mediaDate.ts` reads everything through UTC getters.
+
 **Telegram's `sendPhoto` caps uploads at 10 MB** (and 10,000px combined width+height). A q90 JPEG
 off a 12 MP iPhone HEIC lands well inside both, but full-size originals from other sources can
 exceed 10 MB. Check length before posting and downscale rather than letting the API reject it.

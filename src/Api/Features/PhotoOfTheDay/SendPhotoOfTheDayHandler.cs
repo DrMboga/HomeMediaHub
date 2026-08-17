@@ -197,13 +197,22 @@ public sealed class SendPhotoOfTheDayHandler : IRequestHandler<SendPhotoOfTheDay
     }
 
     /// <summary>
-    /// "17 August 2019 · Berlin, Deutschland". <c>Address</c> is already one formatted string —
+    /// "17.08.2019 14:32 · Berlin, Deutschland". <c>Address</c> is already one formatted string —
     /// unlike the old Pi version, which assembled locality/region/country separately.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="takenAt"/> is formatted <b>as stored, with no timezone conversion</b>.
+    /// <c>taken_at</c> holds the camera's naive wall-clock time from EXIF <c>DateTimeOriginal</c>,
+    /// which <c>MetadataService</c> tags as UTC without shifting it — so a photo taken at 17:00 in
+    /// Crete reads 17:00. Calling <c>ToLocalTime</c> here, or converting to <c>Potd:TimeZone</c>,
+    /// would put every caption out by the offset. That is the same +2h error found on stage
+    /// (delivery-plan.md, "Stage validation backlog — 2026-08-08" item 2), and the reason
+    /// <c>Frontend/src/utils/mediaDate.ts</c> reads everything through UTC getters.
+    /// </remarks>
     internal static string BuildCaption(DateTime? takenAt, string? address)
     {
         var parts = new List<string>(2);
-        if (takenAt is { } t) parts.Add(t.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("en-GB")));
+        if (takenAt is { } t) parts.Add(t.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture));
         if (!string.IsNullOrWhiteSpace(address)) parts.Add(address.Trim());
         return parts.Count == 0 ? "Photo of the Day" : string.Join(" · ", parts);
     }
