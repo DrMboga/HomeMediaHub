@@ -1984,3 +1984,94 @@ so it is a separate cleanup, not part of this phase.
    each year, in descending order. This is the check that the sort stayed on the page and did not
    leak into the handler.
 6. A day with nothing → the existing empty state, not a spinner.
+
+### Built — 2026-08-17
+
+Steps 1–4 are implemented. Step 5 (verify on prod) is **not yet run against a deployed build** —
+what has been checked on prod so far is the query itself, read-only, from psql (below).
+
+`dotnet test` green across the solution (Api **65** · GeoService 12 · MediaWorker 79 — Api was 51);
+`tsc -b && vite build` green.
+
+**API** — `OnThisDayHandler.cs` rewritten:
+
+- `OnThisDayRequest` gains `Limit` (default `0` = unlimited); `.Take(200)` is gone.
+- The query moved into an `internal static BuildQuery(db, month, day, limit)` so the translation
+  test can render it to SQL. `Include(Thumbnail) + Include(Metadata)` + `ToListItemDto()` became a
+  `.Select(...)` projection straight into `MediaListItemDto`.
+- The month/day boundary is pinned to UTC with
+  `TimeZoneInfo.ConvertTimeBySystemTimeZoneId(f.TakenAt!.Value, "UTC")`, which Npgsql 10 translates
+  to `AT TIME ZONE 'UTC'`. That was the one shape here that had to be proven rather than assumed —
+  see the translation test.
+- `OrderByDescending(TakenAt)` stays: it is the *selection* order (what makes `limit` mean "the
+  most recent N"), not the display order.
+- `GET /api/media/on-this-day` gains `?limit=`, passed straight through.
+
+The generated SQL, for the record:
+
+```sql
+SELECT m.id, m.mime_type, m0.thumbnail_path, m.taken_at, m.is_favorite,
+       m.duration_sec IS NOT NULL, m.origin_class, m.origin_confidence, m1.address
+FROM public.media_files AS m
+LEFT JOIN public.media_thumbnails AS m0 ON m.id = m0.media_file_id
+LEFT JOIN public.media_metadata   AS m1 ON m.id = m1.media_file_id
+WHERE NOT (m.is_deleted)
+  AND (m.origin_class <> 'meme' OR m.origin_class IS NULL)
+  AND m.taken_at IS NOT NULL
+  AND date_part('month', m.taken_at AT TIME ZONE 'UTC')::int = @month
+  AND date_part('day',   m.taken_at AT TIME ZONE 'UTC')::int = @day
+ORDER BY m.taken_at DESC
+```
+
+**Tests** — `Api.Tests/Features/Media/OnThisDayHandlerTests.cs` (9) and
+`OnThisDayQueryTranslationTests.cs` (5). The regression guard the plan asked for seeds 450 rows
+across five years and asserts all 450 come back grouped, newest year first; the rest cover the
+limit (positive → most recent N, zero → unlimited), descending selection order, the
+deleted/meme/other-day/undated filters, 29 February matching only leap years, and the projection
+resolving both navigations *and* tolerating their absence. The translation tests exist for the
+same reason the tag ones do — the in-memory provider evaluates client-side and would have passed a
+UTC pin that Npgsql cannot translate.
+
+**Frontend** —
+
+- `api/media.ts`: `getOnThisDay(month, day, limit?)`, `limit` omitted from the querystring entirely
+  when not passed.
+- `DashboardPage.tsx`: passes `200`, and **`200` is in its query key**. Without that the two pages
+  would share one TanStack cache entry under `['otd', month, day]` and whichever mounted first
+  would decide whether the other got 200 rows or all of them.
+- `OnThisDayPage.tsx`: rewritten. Native `<input type="date">` plus prev/next-day `pager-btn`
+  arrows; selection held in the URL as `?d=YYYY-MM-DD` via `useSearchParams`, absent → today;
+  `month`/`day` in the query key; header carries the total ("783 photos across 16 years").
+  Photos sort ascending inside each year block via an explicit `takenAt` comparator; year blocks
+  stay newest-first. The sort is on the page, not in the handler, so the dashboard keeps getting
+  the four *most recent* photos per year.
+- Two date traps handled explicitly rather than by round-tripping through `Date`: `?d=` is parsed
+  with a regex (`new Date('2026-08-16')` is UTC midnight, and `getDate()` on it can answer with the
+  previous day west of Greenwich), and `sectionLabel()` only trusts a constructed `Date` when it
+  round-trips — `new Date(2023, 1, 29)` rolls to 1 March, so a non-round-tripping date drops the
+  weekday instead of naming the wrong one. The "16 August" header label is formatted through leap
+  year 2024 so 29 February renders at all.
+- `PhotoCard` gains `decoding="async"` next to the existing `loading="lazy"`, with a comment
+  recording *why* the fixed-size card classes must stay fixed-size.
+- New `.otd-toolbar` / `.otd-date-input` / `.otd-total` in `global.css`, built from the darkroom
+  tokens. `::-webkit-calendar-picker-indicator` needs `filter: invert(1)` or the native glyph
+  renders near-black on the dark surface.
+
+**Step 4 — nothing built for it, deliberately.** The plan says measure 02 May before building
+progressive reveal, and that measurement needs the deployed page. `decoding="async"` and the
+fixed-size-box comment are in; the `IntersectionObserver` year-section reveal is not.
+
+**Measured on prod, read-only (2026-08-17).** Session `TimeZone` is `Etc/UTC`, so the UTC pin
+changes no result today — it just stops the answer depending on that.
+
+- **17 August: 783 photos across 16 years** (2025: 94 · 2024: 155 · 2023: 56 · 2022: 26 ·
+  2021: 192 · 2020: 61 · 2019: 142 · 2018: 15 · 2017: 8 · 2016: 5 · 2015: 3 · 2014: 1 · 2013: 10 ·
+  2012: 2 · 2011: 6 · 2006: 7). The old cap would have rendered 94 from 2025 plus the newest 106 of
+  2024 and stopped — **two year sections out of sixteen**.
+- **02 May, the worst day: 2,252 rows, `EXPLAIN (ANALYZE)` 108 ms** on the projected query with
+  both LEFT JOINs (parallel seq scan on `media_files`, 27 ms, then PK index scans for the two
+  navigations). Confirms the plan's call: no index, and dropping the cap costs nothing.
+
+**Not yet done: Step 5.** Nothing is deployed — prod still runs `4ef4ce1`. The six checks in Step 5
+all need the built page, and items 2 and 4 (scroll behaviour at 2,252 cards; both ordering levels
+at once) cannot be settled any other way.

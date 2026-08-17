@@ -54,9 +54,12 @@ export async function getStats(): Promise<StatsDto> {
   return data
 }
 
-export async function getOnThisDay(month: number, day: number): Promise<OtdGroupDto[]> {
+// `limit` is optional and the API's default is unlimited — the On This Day page wants every
+// photo of the date (a busy day is ~1,000, worst case ~2,250). Callers that only render a
+// strip should pass one.
+export async function getOnThisDay(month: number, day: number, limit?: number): Promise<OtdGroupDto[]> {
   const { data } = await client.get<OtdGroupDto[]>('/media/on-this-day', {
-    params: { month, day },
+    params: limit ? { month, day, limit } : { month, day },
   })
   return data
 }

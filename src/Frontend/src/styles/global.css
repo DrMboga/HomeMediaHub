@@ -295,6 +295,22 @@ body {
 }
 
 /* ── OTD full ─────────────────────── */
+.otd-toolbar { display: flex; align-items: center; gap: 10px; }
+.otd-toolbar .pager-btn { padding: 8px 12px; }
+.otd-date-input {
+  background: var(--s3); border: 1px solid var(--line-18); color: var(--ink);
+  border-radius: 999px; padding: 8px 14px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em;
+  cursor: pointer; transition: border-color .15s;
+}
+.otd-date-input:hover, .otd-date-input:focus { border-color: var(--accent); outline: none; }
+/* The native picker glyph renders near-black on the dark surface without this. */
+.otd-date-input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: .55; cursor: pointer; }
+.otd-date-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+.otd-total {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: .16em; color: var(--ink-45); text-transform: uppercase;
+}
 .otd-section { display: flex; flex-direction: column; gap: 10px; }
 .otd-section-title { font-size: 18px; font-weight: 400; }
 .otd-count { font-size: 13px; color: var(--label3); margin-left: 8px; }

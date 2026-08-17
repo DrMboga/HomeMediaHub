@@ -99,12 +99,15 @@ public static class MediaEndpoints
             IMediator m,
             CancellationToken ct,
             [FromQuery] int month = 0,
-            [FromQuery] int day = 0) =>
+            [FromQuery] int day = 0,
+            // Unlimited by default — see OnThisDayRequest.Limit.
+            [FromQuery] int limit = 0) =>
         {
             var now = DateTime.UtcNow;
             var groups = await m.Send(new OnThisDayRequest(
                 month > 0 ? month : now.Month,
-                day   > 0 ? day   : now.Day), ct);
+                day   > 0 ? day   : now.Day,
+                limit), ct);
             return Results.Ok(groups);
         });
 

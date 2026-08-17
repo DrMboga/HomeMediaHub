@@ -21,7 +21,10 @@ export function PhotoCard({ item, className = 'gallery-card', durationSec }: Pro
 
   return (
     <div className={`photo-card ${className}`} onClick={() => open(item.id)}>
-      <img src={thumbnailUrl(item.id)} alt="" loading="lazy" />
+      {/* loading="lazy" only works because every card class is a fixed-size box — the layout
+          is stable before any image loads, so the browser fetches just what is on screen.
+          On This Day renders up to ~2,250 of these on one page. Do not make them intrinsic. */}
+      <img src={thumbnailUrl(item.id)} alt="" loading="lazy" decoding="async" />
       <div className="photo-card-grad" />
       {(item.isVideo || durationSec != null) && (
         <div className="video-badge">

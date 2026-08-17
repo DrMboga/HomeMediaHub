@@ -32,9 +32,14 @@ export function DashboardPage() {
     staleTime: 60_000,
   })
 
+  // The endpoint is unlimited by default; this strip renders four photos per year, so it asks
+  // for the 200 most recent matches — byte-for-byte what it used to get from the handler's old
+  // hardcoded cap. (200 is an arbitrary carry-over, not a considered number — revisit when
+  // Phase 11 replaces the home-grown POTD pick below.) The limit is part of the query key so
+  // this never shares a cache entry with the unlimited /on-this-day page.
   const { data: otdGroups } = useQuery({
-    queryKey: ['otd', today.getMonth() + 1, today.getDate()],
-    queryFn: () => getOnThisDay(today.getMonth() + 1, today.getDate()),
+    queryKey: ['otd', today.getMonth() + 1, today.getDate(), 200],
+    queryFn: () => getOnThisDay(today.getMonth() + 1, today.getDate(), 200),
     staleTime: 60_000,
   })
 
