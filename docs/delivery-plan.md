@@ -2101,3 +2101,7 @@ visible native input.
 
 `toParam()` (the `?d=` / input value, `YYYY-MM-DD`) and `toDisplay()` (`dd.mm.yyyy`) are now
 separate functions — the URL format is unchanged, only the rendering.
+
+**Mike confirmed the reformatted picker on prod the same day. Phase 13 is closed** — all five steps
+done, nothing deferred out of it except Step 4's progressive reveal, which the 02 May measurement
+retired rather than postponed.
