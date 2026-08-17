@@ -413,6 +413,28 @@ namespace Api.Data.Migrations
                     b.ToTable("photo_series", "public");
                 });
 
+            modelBuilder.Entity("Data.Entities.PotdSend", b =>
+                {
+                    b.Property<DateOnly>("SentOn")
+                        .HasColumnType("date")
+                        .HasColumnName("sent_on");
+
+                    b.Property<Guid>("MediaFileId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("media_file_id");
+
+                    b.Property<DateTime>("SentAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("SentOn")
+                        .HasName("pk_potd_sends");
+
+                    b.ToTable("potd_sends", "public");
+                });
+
             modelBuilder.Entity("Data.Entities.ProcessingJob", b =>
                 {
                     b.Property<Guid>("Id")

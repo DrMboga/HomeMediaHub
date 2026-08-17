@@ -130,5 +130,14 @@ public static class MediaModelConfiguration
             e.HasKey(x => x.MediaFileId);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("NOW()");
         });
+
+        builder.Entity<PotdSend>(e =>
+        {
+            e.ToTable("potd_sends", schema: "public", Table<PotdSend>());
+            // The key is the idempotency guard — see PotdSend. No extra index: the table
+            // gains one row a day and is only ever read by PK or "the last few, newest first".
+            e.HasKey(x => x.SentOn);
+            e.Property(x => x.SentAt).HasDefaultValueSql("NOW()");
+        });
     }
 }

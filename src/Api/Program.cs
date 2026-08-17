@@ -2,6 +2,7 @@ using System.Text;
 using Api.Data;
 using Api.Endpoints;
 using Api.Features.Auth;
+using Api.Features.PhotoOfTheDay;
 using Api.Models;
 using Api.Services;
 using Contracts.Messages;
@@ -91,6 +92,15 @@ try
         client.Timeout = TimeSpan.FromSeconds(30);
     });
 
+    // Photo of the Day — the Api's only outbound internet call (architecture.md §14).
+    builder.Services.AddHttpClient(TelegramPhotoSender.HttpClientName, client =>
+    {
+        client.BaseAddress = new Uri("https://api.telegram.org/");
+        // Generous: this uploads a multi-MB photo once a day, not a request in a hot path.
+        client.Timeout = TimeSpan.FromMinutes(2);
+    });
+    builder.Services.AddSingleton<TelegramPhotoSender>();
+
     builder.Services.AddSingleton<JwtTokenService>();
 
     builder.Services.AddMediatR(cfg =>
@@ -131,6 +141,7 @@ try
     });
 
     builder.Services.AddHostedService<ScanScheduler>();
+    builder.Services.AddHostedService<PhotoOfTheDayScheduler>();
     builder.Services.AddHostedService<FailedJobsCollector>();
 
     // MassTransit v8 emits instrumentation as OTel Meters.

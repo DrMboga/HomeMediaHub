@@ -123,3 +123,20 @@ export interface JobDto {
   errorMessage: string | null
   retryCount: number
 }
+
+/** Response of POST /api/admin/potd/send. `sent` is false for a dryRun, a skip, or a failure. */
+export interface PotdSendResult {
+  sent: boolean
+  tier: string | null
+  mediaFileId: string | null
+  filePath: string | null
+  caption: string | null
+  skippedReason: string | null
+}
+
+/** A row of `potd_sends` — written only by the scheduler, never by the manual trigger. */
+export interface PotdSendDto {
+  sentOn: string
+  mediaFileId: string
+  sentAt: string
+}

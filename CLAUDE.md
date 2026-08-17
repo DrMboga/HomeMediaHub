@@ -194,7 +194,7 @@ spot-checks, and the `CHIP_FLOOR` re-judgement are all done. Nothing is outstand
 
 **What does NOT exist yet (do not assume it does):** full per-page visual redesign beyond the
 Step 10 pilot pages; the CLIP + tag hybrid *ranking* (tags are browsable now, but semantic search
-still ignores them); Photo of the Day (Phase 11, specified only).
+still ignores them).
 
 **Phase 13 — On This Day uncap + date picker — is COMPLETE, validated on prod 2026-08-17.**
 Api tests 51 → **65**. The `.Take(200)` is gone —
@@ -226,14 +226,28 @@ sampled from `processing_jobs` by `FailedJobsCollector` every 30 s, live since 2
 (all six error buckets, measured on prod, with what was ruled out as well as what was found).
 Read it before touching `FileConvertService.cs`, `AiSidecar/inference.py`, or `ScanService.cs`.
 
-**Phase 11 — Photo of the Day — is specified, not built.** A daily 15:00 Telegram post of a random
-`person`-tagged photo from On This Day. It is **not** an n8n job and not a queue/consumer: it is a
-`PhotoOfTheDayScheduler : BackgroundService` in the Api, built like the existing `ScanScheduler`.
-Design in `docs/architecture.md` §14, steps in `docs/delivery-plan.md` → Phase 11. The spec is
-complete — both open questions were answered 2026-08-14, so nothing blocks implementation.
-The pick falls back through three tiers (`person` ≥ 0.5 conf → geotagged → any non-video) so
-something goes out every day. It is **not** schedule-only: `POST /api/admin/potd/send` (optional
-date / mediaFileId / dryRun) fires it on demand, with a Send Now card on `/admin`.
+**Phase 11 — Photo of the Day — is BUILT (2026-08-17), pending one real-bot check on prod.**
+Api tests 65 → **119**. A daily 15:00 Telegram post, as `PhotoOfTheDayScheduler : BackgroundService`
+in the Api (**not** an n8n job, not a queue/consumer) — `src/Api/Features/PhotoOfTheDay/` +
+`src/Api/Services/PhotoOfTheDayScheduler.cs`, new `potd_sends` table via `AddPotdSends`.
+The pick falls through three tiers (`person` ≥ 0.5 conf → geotagged → any non-video), random
+**inside** whichever tier matched. `POST /api/admin/potd/send` (optional month/day / mediaFileId /
+dryRun) fires it on demand and is wired to a Send Now card on `/admin`; that path deliberately
+ignores `Potd:Enabled` and the already-sent guard and **never writes `potd_sends`**.
+
+**Measured on prod 2026-08-17: all 366 calendar days clear tier 1** (min 31 candidates, mean 281),
+so tiers 2 and 3 never fire on this library and `Potd:MinConfidence = 0.5` is settled — do not
+re-litigate it without new data. `Potd:TimeZone` defaults to `Europe/Berlin`.
+
+**What is left:** the against-the-real-bot send. It needs `POTD_BOT_TOKEN`/`POTD_CHAT_ID` in
+`.env.prod` and a rebuilt `api`; the six-step order is at the end of `docs/delivery-plan.md` →
+Phase 11 → "Built — 2026-08-17". `POTD_ENABLED` **must stay false in stage** — stage and prod share
+one compose file and stage must never post to the family channel.
+
+Two implementation notes that are not obvious from the code: the `potd_sends` claim row is
+**released if the send fails** (so a Telegram outage does not burn the day or record a phantom
+send), and the pick's month/day boundary is pinned to **UTC** like `OnThisDayHandler`'s — which is
+a different thing from `Potd:TimeZone`, that only decides which calendar day it is *now*.
 
 Phases 1–7.5 are complete: full React frontend (8 pages + Review), JWT auth, semantic search,
 albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + video transcoding.
@@ -262,7 +276,7 @@ albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + vi
 | Mobile ingestion | Immich (iPhone backup endpoint only, no Immich UI) |
 | Message broker | RabbitMQ 4 (`rabbitmq:4-management-alpine`) |
 | Orchestration | MassTransit **8.5.x** (pinned `[8.*,9.0)` — v9 is commercial) — consumers + saga in `src/MediaWorker/` |
-| API | .NET 10 ASP.NET Core minimal APIs + MediatR — frontend queries, JWT auth, admin/scan endpoints, owns media schema via EF migrations |
+| API | .NET 10 ASP.NET Core minimal APIs + MediatR — frontend queries, JWT auth, admin/scan endpoints, Photo-of-the-Day scheduler, owns media schema via EF migrations |
 | Media worker | .NET 10 Worker Service — ingest consumers, enrichment saga, all file processing (hash/convert/metadata/thumbnail) |
 | Shared libs | `src/Contracts` (message records, zero deps), `src/Data` (entity POCOs + shared EF mapping) |
 | Frontend | React 18 + TypeScript + Vite + TanStack Query + react-leaflet |
@@ -317,7 +331,7 @@ Key invariants (full detail in `docs/architecture.md`):
 
 | Database | Host | Purpose |
 |----------|------|---------|
-| `homemediahub_db` | postgres:5432 | media, tags, embeddings, jobs, identity, `enrichment_sagas` |
+| `homemediahub_db` | postgres:5432 | media, tags, embeddings, jobs, identity, `enrichment_sagas`, `potd_sends` |
 | Immich DB | immich-postgres:5433 | Immich internal — never accessed by custom services |
 | `geoservice_db` | geoservice-postgres:5434 | reverse-geocode cache (lat/lon rounded 4dp) |
 
@@ -351,6 +365,8 @@ read them from there rather than assuming, and note stage's are a *sibling* of `
 
 Shared temp for conversions: `/tmp/homemediahub-{stage|prod}/` → `/shared-temp`.
 Env vars incl. `RABBITMQ_USER`, `RABBITMQ_PASS`, `GRAFANA_PASSWORD` (Phase 8); `SERVER_IP` removed.
+`POTD_ENABLED` / `POTD_BOT_TOKEN` / `POTD_CHAT_ID` / `POTD_TIMEZONE` (Phase 11) — **`POTD_ENABLED`
+must be `false` in stage.**
 
 ## Common Commands
 
@@ -370,6 +386,10 @@ curl -X POST http://192.168.0.192/api/admin/scan -H "Authorization: Bearer $TOKE
 
 # pipeline progress
 curl http://192.168.0.192/api/admin/pipeline/status -H "Authorization: Bearer $TOKEN"
+
+# Photo of the Day — preview the pick without posting (also a card on /admin)
+curl -X POST http://192.168.0.192/api/admin/potd/send -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"dryRun":true}'
 # RabbitMQ mgmt UI: http://192.168.0.192:15672   Grafana: http://192.168.0.192:3001
 # Watching an import (which tool for what, metric-name cookbook): docs/monitoring.md
 
@@ -403,6 +423,11 @@ public by design (`<img>`/`<video>` can't send JWT; GUID URLs, LAN-only).
   the API/AI sidecar with uncontrolled parallelism). This is the AWS-learning analogue:
   queues ≈ SQS/SNS, saga ≈ Step Functions, consumers ≈ Lambda.
 - **Save-early, enrich-later.** Gallery never waits for AI.
+- **Photo of the Day is a `BackgroundService`, not a message.** One timer, one row, one HTTPS POST
+  a day — no pipeline work and nothing to back-pressure. `ScanScheduler` publishes a message only
+  because the *scan* belongs to MediaWorker; here the work belongs where the data (and the
+  on-demand HEIC conversion) already is. Note this is the Api's **first outbound internet call** —
+  "LAN-only" in these docs has always meant inbound.
 - **MassTransit pinned to v8** (Apache-2.0); v9 is commercial.
 - **EF Core over raw SQL.** EF navigation + `SaveChangesAsync` for persistence; `AsTracking()`
   or `ExecuteUpdateAsync` for mutations (global NoTracking!). Raw SQL only where EF can't
@@ -440,9 +465,10 @@ public by design (`<img>`/`<video>` can't send JWT; GUID URLs, LAN-only).
 Face/people recognition · remote access (LAN only) · browser upload (Samba + scan) ·
 RAW files (CR2/ARW/NEF) · per-user library separation · Telegram dead-letter/error alerts.
 
-**No longer out of scope:** Photo-of-the-Day. Dropped with n8n, but Mike asked for it back on
-2026-08-14 and it is now specified as Phase 11 — a scheduled `BackgroundService` in the Api,
-**not** a resurrected workflow. See `docs/architecture.md` §14 and `docs/delivery-plan.md`.
+**No longer out of scope:** Photo-of-the-Day. Dropped with n8n, asked for again on 2026-08-14, and
+**built as Phase 11 on 2026-08-17** — a scheduled `BackgroundService` in the Api, **not** a
+resurrected workflow. See `docs/architecture.md` §14, `docs/telegram-potd-setup.md`, and
+`docs/delivery-plan.md`.
 
 ## Prior Art
 

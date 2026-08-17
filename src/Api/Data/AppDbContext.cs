@@ -24,6 +24,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<PhotoSeries>     PhotoSeries       => Set<PhotoSeries>();
     public DbSet<SeriesMedia>     SeriesMedia       => Set<SeriesMedia>();
     public DbSet<VideoTranscode>  VideoTranscodes   => Set<VideoTranscode>();
+    public DbSet<PotdSend>        PotdSends         => Set<PotdSend>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

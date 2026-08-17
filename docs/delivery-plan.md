@@ -1399,19 +1399,15 @@ confirming rather than trusting.
 
 ---
 
-## Phase 11 — Photo of the Day
+## Phase 11 — Photo of the Day ✅ BUILT (2026-08-17)
 
-> **Specified 2026-08-14, not started.** Design and rationale: `architecture.md` §14 — read it
-> first, it settles the "why a BackgroundService and not a queue" question and lists five ways
-> this differs from `ScanScheduler`.
+> **Specified 2026-08-14, built 2026-08-17.** All seven steps are implemented and the code is on
+> `main`; **Steps 3 and 4 still need their against-the-real-bot verification on prod**, which needs
+> `POTD_BOT_TOKEN`/`POTD_CHAT_ID` in `.env.prod`. See "Built — 2026-08-17" at the end of this phase
+> for what was done, what was measured, and exactly what is left.
 >
-> **Phase 9 finished 2026-08-16, so this is unblocked.** The pick query wanted real tag confidence
-> data to calibrate `Potd:MinConfidence` — that data now exists (146,767 of 188,300 files carry at
-> least one tag).
->
-> **Phase 12 is complete as of 2026-08-16, so the library has stopped moving** — the 125 recovered
-> files (116 of them videos) have landed and the dead files are gone. Tier-1 calibration now reads
-> a stable tag distribution: re-measure it rather than reusing the pre-Phase-12 numbers.
+> Design and rationale: `architecture.md` §14 — it settles the "why a BackgroundService and not a
+> queue" question and lists five ways this differs from `ScanScheduler`.
 
 **Goal:** a daily 15:00 post of one random `person`-tagged photo from On This Day to the family
 Telegram channel — the n8n Workflow 3 behaviour, rebuilt as our own scheduled worker.
@@ -1572,6 +1568,109 @@ The one thing still worth measuring after the archive import: **how often tier 1
 If most days fall through to tier 2 or 3, either the floor is too high or `person` coverage is
 thinner than the stage sample suggested. The tier log line from Step 2 answers this without any
 extra instrumentation.
+
+### Built — 2026-08-17
+
+All seven steps implemented in one pass. **Api tests 65 → 119**; full solution
+Api 119 · GeoService 12 · MediaWorker 79, all green. `tsc -b && vite build` clean.
+
+**Measured on prod first, before writing the pick** (read-only, over SSH — this is the
+"re-judge `Potd:MinConfidence` against the real distribution" the spec asked for):
+
+| | |
+|---|---|
+| Calendar days with any postable photo | **366 / 366** |
+| Days where **tier 1** fires (`person` ≥ 0.5) | **366** — min 31 candidates, mean 281 |
+| Days falling through to tier 2 / tier 3 | **0 / 0** |
+| Base-set size per day | min 80 · mean 492 · max 2,178 |
+| `person` tags | 114,641 total · 106,549 ≥ 0.5 · 92,916 ≥ 0.7 · 58,799 ≥ 0.85 |
+
+**0.5 stands.** The confidence distribution peaks hard at 0.85–0.90 (34,724 tags), so the floor
+discards a thin ~7% tail rather than cutting into the mass; a higher floor would be equally
+defensible and would change nothing about what gets posted. **Tiers 2 and 3 never fire on this
+library** — they are insurance against a smaller one, and the tier log line will say so if that
+ever changes.
+
+`Potd:TimeZone` defaults to **`Europe/Berlin`**: 63,336 of the addressed photos are in Germany,
+more than the next three countries combined.
+
+**Per step:**
+
+- **Step 1** — `Data.Entities.PotdSend` (`sent_on date` PK · `media_file_id uuid` · `sent_at
+  timestamptz`), mapped in `MediaModelConfiguration` with the rest, so `WorkerDbContext` excludes
+  it automatically. Migration `20260817082929_AddPotdSends`. *Verified:* the idempotent script
+  applied to a throwaway `pgvector/pgvector:pg16` container three ways — onto the existing
+  prod-shaped schema (what will happen on deploy), onto a fresh database, and re-run over itself —
+  all clean. `dotnet ef migrations has-pending-model-changes --project src/MediaWorker` reports
+  none, so the two-migrator invariant holds.
+- **Step 2** — `Features/PhotoOfTheDay/PickPhotoOfTheDayHandler.cs`. Three `internal static`
+  `IQueryable<Guid>` builders over one `BuildBaseQuery`, walked lazily; ids only, then
+  `Random.Shared.Next(0, count)` in memory. Returns `(MediaFileId, Tier, CandidateCount)` and logs
+  the tier. **The base filter pins month/day to UTC** the same way `OnThisDayHandler` does, so the
+  pick is drawn from the set `/on-this-day` shows — that is a different thing from `Potd:TimeZone`,
+  which only decides which calendar day it is *now*.
+- **Step 3** — `TelegramPhotoSender` (named `HttpClient` `TelegramBotApi`, 2-minute timeout).
+  Treats a 200 with `{"ok":false}` as a failure and lifts Telegram's own `description` into the
+  message — the token is never in it, because that string reaches the admin UI. The image comes
+  from `DisplayMediaRequest` in-process (HEIC→JPEG + caching for free). Size handling is
+  `Image.IdentifyAsync` header-only first, so the common case never decodes; only a file over 10 MB
+  or 10,000px combined gets a full load, a resize into a 2560 box at q85, and a cached
+  `{id}.potd.jpg` beside the display cache.
+- **Step 4** — `POST /api/admin/potd/send` and `GET /api/admin/potd/last?limit=`. An explicit
+  `mediaFileId` bypasses the pick, so a video can reach the sender that way — guarded with a
+  content-type check that says so, rather than surfacing as an ImageSharp decode error.
+- **Step 5** — `PhotoOfTheDayScheduler`. `IServiceScopeFactory` scope per run, timezone resolved
+  **once** at startup (a bad id is a config error — it logs and declines to schedule rather than
+  failing identically every day), try/catch around the per-run body, `internal static NextRunTime`.
+  **`ScanScheduler` got the same try/catch**, as the plan asked.
+- **Step 6** — Photo of the Day card on `/admin`: `dd.mm` date field (the endpoint takes a month
+  and a day, never a year, so a date picker would be the wrong control), **Dry run ticked by
+  default**, and a result block showing the picked thumbnail, the tier and the exact caption.
+  `POTD_*` into all three env examples and onto `Potd__*` in compose. The new button is inside a
+  card body, where `.btn-primary`'s `width: 100%` is correct — the Step 8 bug was in a section
+  header. *Verified:* `docker compose config` on the server renders `Potd__Enabled: "false"` from
+  `.env.stage.example`.
+- **Step 7** — `telegram-potd-setup.md` rewritten from section 4 on and the superseded banner
+  dropped (1–3 kept); `architecture.md` §14 marked built with the two implementation deltas
+  flagged inline; `CLAUDE.md` updated.
+
+**Two places the implementation departs from §14, both deliberate:**
+
+1. **The claim row is released if the send fails.** §14 says insert-before-send and let 23505 mean
+   "already sent". Taken literally that leaves a row asserting a send that never happened, and
+   burns the day across a restart. The claim is written first (so a concurrent run or a restart
+   *during* the send cannot double-post) and deleted if the send fails or throws — the guard is
+   against a double *successful* send, not against retrying a Telegram outage.
+2. **`Random.Shared.Next(0, count)` is covered by a statistical test.** 400 draws from 6
+   candidates asserting every one is reachable — the old Pi implementation's `Next(0, len - 1)`
+   could never pick the last element, and that is the kind of bug no example-based test finds.
+   P(flake) ≈ 1e-32.
+
+**Test inventory (54 new):** `PickPhotoOfTheDayHandlerTests` (12 — tier order, the 0.5 floor and a
+configured override, video/deleted/meme/undated exclusion, 29 Feb, last-candidate reachability),
+`PickPhotoOfTheDayQueryTranslationTests` (9 — every tier rendered through the **real Npgsql
+provider**: `AT TIME ZONE` + `date_part` present, tier 1 becomes an `EXISTS` over `media_tags`,
+and no tier emits `ORDER BY` or `LIMIT`, which is what keeps the sample uniform),
+`PhotoOfTheDaySchedulerTests` (9 — before/after the slot, exactly at it, day/month/year rollover,
+**both** Berlin DST boundaries holding the local hour while the UTC instant shifts, and a
+`SendAtLocal` inside the spring-forward gap), `PotdConfigTests` (19 — blank-is-absent on every
+getter, `Enabled` defaulting off for malformed values), `SendPhotoOfTheDayCaptionTests` (5).
+
+**What is left — the real-bot verification.** Steps 3 and 4 both say "against the real bot", and
+that cannot happen from here: it needs `POTD_BOT_TOKEN` and `POTD_CHAT_ID` in `.env.prod` (§4 of
+`telegram-potd-setup.md`) and a rebuilt `api`. The order to run it in:
+
+1. Add the four `POTD_*` vars, `docker compose --env-file .env.prod up -d --build api`.
+2. `docker compose --env-file .env.prod logs api | grep PhotoOfTheDay` → expect
+   `PhotoOfTheDayScheduler enabled — 15:00:00 Europe/Berlin`. **This is the check no unit test can
+   make**: `FindSystemTimeZoneById` throws without tzdata/ICU in the container. Both are present in
+   `hmh-prod-api-1` today (`/usr/share/zoneinfo/Europe/Berlin` exists, `libicuuc.so.74` is
+   installed, `InvariantGlobalization` is not set), so this should pass — confirm it anyway,
+   because a failure here is silent apart from that log line.
+3. `/admin` → Photo of the Day → **Preview Pick** with the date blank. Expect `tier: person`.
+4. Preview again with `mediaFileId` set to a known HEIC — proves the `DisplayMediaRequest` path.
+5. Untick Dry run → **Send Now** → check the channel.
+6. Then leave it to fire at 15:00 and check `potd_sends` has exactly one row for the day.
 
 ---
 

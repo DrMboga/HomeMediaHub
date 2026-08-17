@@ -36,14 +36,29 @@ public sealed class ScanScheduler : BackgroundService
                 await Task.Delay(delay, stoppingToken);
 
             var path = _config["Scan:DefaultPath"] ?? "/photo";
-            await _publish.Publish(new ScanRequested(
-                ScanId:      Guid.NewGuid(),
-                Path:        path,
-                Source:      "scheduled",
-                TriggeredBy: "scheduler",
-                RequestedAt: DateTimeOffset.UtcNow), stoppingToken);
 
-            _log.LogInformation("ScanScheduler: published ScanRequested for {Path}", path);
+            // An exception escaping ExecuteAsync stops the whole Api host — the default
+            // BackgroundServiceExceptionBehavior is StopHost. A broker hiccup at 02:00 on the 1st
+            // must cost a scan, not the API. (Same exposure PhotoOfTheDayScheduler handles.)
+            try
+            {
+                await _publish.Publish(new ScanRequested(
+                    ScanId:      Guid.NewGuid(),
+                    Path:        path,
+                    Source:      "scheduled",
+                    TriggeredBy: "scheduler",
+                    RequestedAt: DateTimeOffset.UtcNow), stoppingToken);
+
+                _log.LogInformation("ScanScheduler: published ScanRequested for {Path}", path);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "ScanScheduler: failed to publish ScanRequested for {Path}", path);
+            }
         }
     }
 

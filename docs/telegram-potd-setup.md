@@ -1,16 +1,13 @@
 # Telegram Photo of the Day Setup
 
-> **Partly superseded (Phase 8, 2026-08-01).** n8n — and with it Workflow 3 (Photo of the Day) and
-> Workflow 4 (Error Handler/Telegram alerts) — is fully removed. **Sections 1–3 below (create the
-> bot, create the channel, get the chat ID) are still accurate** and are the setup a rebuilt
-> Photo-of-the-Day would need. Sections 4–6 are n8n UI steps and no longer apply to anything.
->
-> Photo-of-the-Day was requested again on 2026-08-14 and is specified as **Phase 11**: a
-> `PhotoOfTheDayScheduler : BackgroundService` in the Api, built like `ScanScheduler`. Nothing
-> about it is workflow-shaped any more. Design in `architecture.md` §14, steps in
-> `delivery-plan.md`. Rewrite sections 4–6 and drop this banner when it ships.
+HomeMediaHub posts one photo a day to a private Telegram channel at 15:00 local time. This guide
+covers creating the bot, creating the channel, and configuring the Api.
 
-Workflow 3 ran daily at 15:00 and sent a photo to a Telegram channel. This guide covers creating the bot, creating the channel, and wiring them into n8n.
+> Sections 1–3 date from the original n8n implementation and are unchanged — the bot and the
+> channel are the same thing. Everything from section 4 on was rewritten for **Phase 11**
+> (2026-08-17), which rebuilt the feature as `PhotoOfTheDayScheduler : BackgroundService` inside
+> the Api. There is no workflow, no webhook, no queue and no consumer.
+> Design: [`architecture.md`](architecture.md) §14.
 
 ---
 
@@ -48,60 +45,109 @@ The bot needs the channel's numeric chat ID (not its name).
 
 **Option B — via @username:**
 
-If your channel has a public username (e.g. `@familyphotos`), use that string directly as the chat ID in n8n.
+If your channel has a public username (e.g. `@familyphotos`), use that string directly as the
+chat ID.
 
 ---
 
-## 4. Add credentials to n8n
+## 4. Configure the Api
 
-Open n8n at `http://192.168.0.192:5678`.
+Four variables, in the env file for the environment that should post — **`.env.prod`, not
+`.env.stage`**:
 
-1. Go to **Settings** → **Credentials** → **Add Credential**
-2. Search for **Telegram**
-3. Paste your bot token
-4. Save as e.g. `Telegram Bot`
+| Variable | Meaning | Default |
+|---|---|---|
+| `POTD_ENABLED` | Gates the **scheduler** only. Must be literally `true`. | `false` |
+| `POTD_BOT_TOKEN` | From section 1. | — |
+| `POTD_CHAT_ID` | From section 3, including the leading `-100`. | — |
+| `POTD_TIMEZONE` | An IANA zone id — what "15:00" means. | `Europe/Berlin` |
 
----
+```bash
+POTD_ENABLED=true
+POTD_BOT_TOKEN=7123456789:AAF...
+POTD_CHAT_ID=-1001234567890
+POTD_TIMEZONE=Europe/Berlin
+```
 
-## 5. Configure Workflow 3
+Then recreate the Api so it picks them up:
 
-Open **W3 Photo of the Day** in n8n:
+```bash
+docker compose --env-file .env.prod up -d --force-recreate api
+docker compose --env-file .env.prod logs api | grep PhotoOfTheDay
+# → "PhotoOfTheDayScheduler enabled — 15:00:00 Europe/Berlin"
+```
 
-1. Click the **Telegram: Send Photo** node
-2. Set **Credential** → select the credential you just created
-3. Set **Chat ID** → enter the channel chat ID (e.g. `-100xxxxxxxxxx`)
-4. Save the workflow
+**Keep `POTD_ENABLED=false` in `.env.stage`.** Stage and prod share ports and run from one compose
+file; stage must never post to the family channel. The Admin button below still works on stage —
+it deliberately ignores this flag, because a button press is not an accident.
 
----
-
-## 6. Test it
-
-Trigger W3 manually to confirm it works before waiting for the 15:00 cron:
-
-1. Open W3 in n8n
-2. Click **Execute Workflow** (top right)
-3. Check your Telegram channel — a photo should appear within a few seconds
-
-If the execution fails, check the node output in n8n's execution detail view. Common issues:
-
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| `chat not found` | Chat ID wrong | Re-check chat ID format (negative number for channels) |
-| `bot is not a member` | Bot not added to channel | Add bot as administrator |
-| No photos in query result | DB empty or no photos with `taken_at` | Run Library Scanner first |
-| `Forbidden: bot can't initiate conversation` | Bot tried to message a user, not a channel | Use channel chat ID, not a personal user ID |
+Two further settings exist in `appsettings.json` and are rarely worth changing:
+`Potd:SendAtLocal` (`15:00`) and `Potd:MinConfidence` (`0.5`, the tier-1 `person` floor — see §14).
 
 ---
 
-## What W3 does
+## 5. Test it
+
+Go to **`/admin`** → the **Photo of the Day** card. It holds your JWT already, so there is no curl
+and no hand-copied token.
+
+1. Leave the date blank (or type a `dd.mm` — the year is ignored, it looks at that calendar date
+   across every year), keep **Dry run** ticked, press **Preview Pick**.
+   You get the photo, the tier it came from, and the exact caption — without posting anything.
+2. Untick **Dry run** and press **Send Now**. The photo should appear in the channel within a
+   few seconds.
+
+The same thing over HTTP, if you prefer:
+
+```bash
+curl -X POST http://192.168.0.192/api/admin/potd/send \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"month":8,"day":17,"dryRun":true}'
+# → {"sent":false,"tier":"person","mediaFileId":"…","caption":"17 August 2019 · Berlin, Deutschland","skippedReason":"dryRun"}
+```
+
+`mediaFileId` is also accepted, which skips the pick and sends one exact photo — the quickest way
+to confirm the HEIC→JPEG path works end to end.
+
+The manual trigger differs from the 15:00 run in three deliberate ways: it ignores
+`POTD_ENABLED`, it ignores the already-sent-today guard so you can run it repeatedly, and it
+**does not write `potd_sends`** — a test at 11:00 will not make the real 15:00 run skip the day.
+
+### When it doesn't work
+
+The response's `skippedReason` names the problem; these are the ones worth recognising.
+
+| `skippedReason` / symptom | Cause | Fix |
+|---|---|---|
+| `Potd:BotToken not configured` | Variable missing or blank in the env file | Section 4, then `--force-recreate api` |
+| `chat not found` | Chat ID wrong | Negative `-100…` number for channels, not a username or user id |
+| `bot was kicked` / `not enough rights` | Bot is not a channel admin | Section 2, step 3 |
+| `No postable photo for dd.mm in any tier` | Nothing on that calendar date | Only possible on an empty library — on prod all 366 days have candidates |
+| `Not an image (video/…)` | An explicit `mediaFileId` pointed at a video | `sendPhoto` takes a still; the automatic pick already excludes videos |
+| Nothing at 15:00, no error | Scheduler never started | `docker compose logs api \| grep PhotoOfTheDay` — it logs `disabled` or the resolved timezone at startup |
+
+---
+
+## What it does
 
 ```
-Daily cron 15:00
-  → Postgres: SELECT photo with high-confidence tags or is_favorite = true
-              ORDER BY md5(id || current_date)  ← deterministic daily pick
-              LIMIT 1
-  → Read thumbnail from disk
+PhotoOfTheDayScheduler (Api)  — 15:00 in POTD_TIMEZONE, daily
+  → claim the day in potd_sends (PK on sent_on = the idempotency guard)
+  → pick one photo at random from today's calendar date across all years:
+        tier 1  a `person` tag at ≥ 0.5 confidence
+        tier 2  else, geotagged
+        tier 3  else, any non-video
+  → DisplayMediaRequest in-process (handles HEIC→JPEG + caching)
   → POST https://api.telegram.org/bot{TOKEN}/sendPhoto
 ```
 
-The query excludes `origin_class = 'meme'` items. If no high-confidence or favorite photos exist, it falls back to a random photo from On This Day (same calendar date, any year).
+The base set is the On This Day set minus what can't be posted: no deleted files, no memes, no
+videos. The random choice happens **inside whichever tier matched**, so a geotagged photo never
+competes with a person photo, and the tier is written to the log — a channel running on tier 3
+most days would mean `person` coverage is worse than assumed.
+
+Measured on prod 2026-08-17: every one of the 366 calendar days has at least 31 tier-1 candidates
+(mean 281), so tiers 2 and 3 are insurance rather than everyday behaviour.
+
+If the send fails, the claim row is released, so a restart before midnight retries the day rather
+than silently skipping it.

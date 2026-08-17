@@ -662,6 +662,27 @@ body.lb-open { overflow: hidden; }
 .admin-table-path { font-family: var(--font-mono); font-size: 12px; color: var(--label); word-break: break-all; }
 .admin-table-error { color: var(--danger); max-width: 320px; }
 
+.admin-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--label2); cursor: pointer;
+}
+.admin-check input { accent-color: var(--accent); cursor: pointer; }
+
+/* The dry-run preview is the card's whole reason for existing — show the photo that would go
+   out, not just its id. */
+.potd-admin-result { display: flex; gap: 12px; align-items: flex-start; }
+.potd-admin-result img {
+  width: 72px; height: 72px; flex: none;
+  object-fit: cover; border-radius: var(--rsm); background: var(--s3);
+}
+.potd-admin-result-text {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--label2); font-family: var(--font-mono);
+  min-width: 0; word-break: break-word;
+}
+.potd-admin-ok { color: var(--accent); }
+.potd-admin-warn { color: var(--label3); }
+
 @media (max-width: 900px) {
   .admin-grid { grid-template-columns: 1fr; }
 }

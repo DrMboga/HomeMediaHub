@@ -106,6 +106,12 @@ services:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASS: ${RABBITMQ_PASS}
+      # Photo of the Day. Off unless POTD_ENABLED is literally true — stage must never post to
+      # the family channel. :- (not -) so a variable present but blank still falls back.
+      Potd__Enabled: ${POTD_ENABLED:-false}
+      Potd__BotToken: ${POTD_BOT_TOKEN:-}
+      Potd__ChatId: ${POTD_CHAT_ID:-}
+      Potd__TimeZone: ${POTD_TIMEZONE:-Europe/Berlin}
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Production
     volumes:

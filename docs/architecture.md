@@ -346,8 +346,8 @@ src/
 │                         MediaModelConfiguration.ConfigureMediaEntities(builder, excludeFromMigrations)
 ├── Api/                  frontend-facing REST + JWT auth + admin endpoints + ScanScheduler
 │   │                     AppDbContext (Identity + media entities) — OWNS media schema migrations
-│   ├── Services/         ScanScheduler, PhotoOfTheDayScheduler (planned, §14)
-│   └── Features/         …, PhotoOfTheDay/ (planned: pick handler + Telegram client)
+│   ├── Services/         ScanScheduler, PhotoOfTheDayScheduler (§14), FailedJobsCollector
+│   └── Features/         …, PhotoOfTheDay/ (pick handler, send handler, Telegram client)
 ├── MediaWorker/          Worker Service: consumers, saga, ported processing services
 │   ├── Services/         FileHashService, DedupService, FileConvertService,
 │   │                     MetadataService, ThumbnailService, ScanService
@@ -383,7 +383,8 @@ are deleted; the database itself is created by `POSTGRES_DB=homemediahub_db`):
 - **Api's `AppDbContext`** owns Identity (existing `CreateIdentitySchema` migration) **and** the
   media schema (new `AddMediaSchema` migration): `media_files`, `media_metadata`, `media_tags`,
   `media_embeddings` (`vector(512)` via `HasPostgresExtension("vector")` + Pgvector), `media_thumbnails`,
-  `albums`, `album_media`, `photo_series`, `series_media`, `video_transcodes`, `processing_jobs`.
+  `albums`, `album_media`, `photo_series`, `series_media`, `video_transcodes`, `processing_jobs`,
+  and `potd_sends` (added later by `AddPotdSends`, Phase 11 — §14).
   Notable in `AddMediaSchema`:
   - **unique** `media_files(file_path)` and `media_files(file_hash)`
   - `processing_jobs`: `n8n_execution_id` dropped; `scan_id`, `media_file_id` added; indexes on
@@ -420,11 +421,12 @@ directly via EF Core.
 | `GET /api/admin/jobs/{id}` | job detail |
 | `POST /api/admin/jobs/{id}/retry` | reset to `queued`, `retry_count++`, publish `FileDiscovered(Reprocess: true)` |
 | `POST /api/admin/jobs/retry-failed` | bulk retry of all failed jobs |
-| `POST /api/admin/potd/send` `{month?, day?, mediaFileId?, dryRun?}` | **(planned, §14)** run the Photo-of-the-Day pick + send once, now. Ignores the schedule, `Potd:Enabled`, and the already-sent guard; does **not** write `potd_sends`. → `{ sent, tier, mediaFileId, caption }` |
-| `GET /api/admin/potd/last` | **(planned, §14)** most recent rows from `potd_sends` — what the Admin card shows |
+| `POST /api/admin/potd/send` `{month?, day?, mediaFileId?, dryRun?}` | (§14) run the Photo-of-the-Day pick + send once, now. Ignores the schedule, `Potd:Enabled`, and the already-sent guard; does **not** write `potd_sends`. → `{ sent, tier, mediaFileId, filePath, caption, skippedReason }` |
+| `GET /api/admin/potd/last?limit=` | (§14) most recent rows from `potd_sends` — what the Admin card shows |
 
 The frontend `/admin` page consumes these: scan trigger, polling progress card
-(5 s `refetchInterval`), failed-jobs table with retry.
+(5 s `refetchInterval`), failed-jobs table with retry, and the Photo of the Day card
+(dry-run preview with the picked thumbnail, tier and caption; Send Now; last-send date).
 
 ## 11. Observability
 
@@ -460,8 +462,10 @@ Env vars (examples in `.env.stage.example` / `.env.prod.example`): `COMPOSE_PROJ
 `DISPLAY_CACHE_DIR`, `WORK_DIR`, `DATA_DIR`, **`RABBITMQ_USER`, `RABBITMQ_PASS`,
 `GRAFANA_PASSWORD`** (new). `SERVER_IP` is removed (only n8n's webhook URL used it).
 
-Planned for Photo of the Day (§14): `POTD_ENABLED` (**`false` in `.env.stage`** — stage must never
-post to the family channel), `POTD_BOT_TOKEN`, `POTD_CHAT_ID`, `POTD_TIMEZONE`.
+Photo of the Day (§14): `POTD_ENABLED` (**`false` in `.env.stage`** — stage must never post to the
+family channel), `POTD_BOT_TOKEN`, `POTD_CHAT_ID`, `POTD_TIMEZONE`. All four map onto `Potd__*`
+in compose with `:-` defaults, so a variable that is *present but blank* still falls back —
+the trap that made the `RABBITMQ_*` vars dead in Program.cs.
 
 ## 13. Design Decisions
 
@@ -491,10 +495,12 @@ post to the family channel), `POTD_BOT_TOKEN`, `POTD_CHAT_ID`, `POTD_TIMEZONE`.
 - **Separate Postgres per concern** (app, Immich, geo cache). **Samba native**, not
   containerized. **All AI local**, CPU-only; face recognition out of scope.
 
-## 14. Photo of the Day — scheduled Telegram post (planned)
+## 14. Photo of the Day — scheduled Telegram post
 
-> **Status: specified, not built.** Requested by Mike 2026-08-14. Implementation steps and
-> verification live in [`delivery-plan.md`](delivery-plan.md) → Phase 11.
+> **Status: built 2026-08-17 (Phase 11).** The design below is what shipped; the two places the
+> implementation departs from it are flagged inline as **Built**. Setup and troubleshooting:
+> [`telegram-potd-setup.md`](telegram-potd-setup.md). Step-by-step record and the prod
+> measurements: [`delivery-plan.md`](delivery-plan.md) → Phase 11.
 
 Once a day at **15:00 local time**, post one randomly-chosen `person`-tagged photo from the
 current calendar day across all years ("On This Day") to a private Telegram channel.
@@ -592,8 +598,14 @@ Measured against prod 2026-08-14: `person` = 16,876 rows and **no `people` tag e
 **`Potd:MinConfidence` starts at 0.5** and applies to tier 1 only. A daily single-photo pick is a
 precision problem, not a recall one — the opposite of Phase 10's tag browsing, which deliberately
 rejected a confidence floor because it thinned an already-starved dataset. Here, dropping a
-marginal `person` hit costs nothing: tier 2 catches the day anyway. Re-judge the number against
-the real post-import distribution.
+marginal `person` hit costs nothing: tier 2 catches the day anyway.
+
+**Measured on prod 2026-08-17, post-Phase-12 (the re-judgement this section asked for): 0.5 stands,
+and the fallback never fires.** All **366** calendar days clear tier 1 — minimum **31** candidates,
+mean **281** — so tiers 2 and 3 are insurance against a smaller library, not everyday behaviour.
+The floor is also cheap: of 114,641 `person` tags, 106,549 are ≥ 0.5 and the distribution peaks
+hard at 0.85–0.90 (34,724), so 0.5 discards a thin 7% tail rather than cutting into the mass. A
+higher floor would be defensible on this data; it would not change what gets posted.
 
 Select **ids only**, then pick in memory. A single calendar day's slice is small (hundreds of rows
 even at full archive scale), and it sidesteps translating `random()` — this codebase has been
@@ -609,8 +621,15 @@ actually earning its place: a channel running on tier 3 most days means `person`
 than assumed.
 
 `OnThisDayHandler` (`src/Api/Features/Media/OnThisDay/`) is **not** reusable for any tier: no tag
-filter, no video exclusion, and it `Take(200)`s after ordering by date, so it is not a uniform
-sample. Write a sibling handler — do not widen it, `/on-this-day` depends on its current shape.
+filter, no video exclusion, and it orders by date, so it is not a uniform sample. Write a sibling
+handler — do not widen it, `/on-this-day` depends on its current shape. (Its `Take(200)` is gone as
+of Phase 13, which does not change the conclusion.)
+
+**Built:** the base filter pins the month/day boundary to UTC with
+`TimeZoneInfo.ConvertTimeBySystemTimeZoneId(…, "UTC")`, exactly as `OnThisDayHandler` does — so the
+pick is drawn from the same set the `/on-this-day` page shows, and neither depends on the session
+`TimeZone`. Note this is *not* `Potd:TimeZone`: that decides which calendar day it is **now**, the
+UTC pin decides which photos belong to that day.
 
 ### The send
 
@@ -642,6 +661,12 @@ One new table, owned by the Api's `AppDbContext` like every other media table (�
 The primary key *is* the guard: insert before/with the send and let a 23505 mean "already sent
 today", the same duplicate-as-control-flow idiom the ingest consumers use. It also gives a send
 history, which makes "don't repeat a photo across years" cheap to add later.
+
+**Built:** the row is inserted *before* the send as a claim (with `media_file_id` = `Guid.Empty`),
+then filled in with the chosen photo once Telegram accepts it. If the send fails or throws, the
+claim is **released** — otherwise a Telegram outage would leave a row asserting a send that never
+happened, and would burn the day even across a restart. The guard exists to prevent a double
+*successful* send, not to spend the day on the first failure.
 
 ### Config
 

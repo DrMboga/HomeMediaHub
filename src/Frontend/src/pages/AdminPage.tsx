@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getJobs, getPipelineStatus, retryFailedJobs, retryJob, triggerScan } from '../api/admin'
+import {
+  getJobs, getLastPotdSends, getPipelineStatus, retryFailedJobs, retryJob,
+  sendPhotoOfTheDay, triggerScan,
+} from '../api/admin'
+import { thumbnailUrl } from '../api/media'
 import type { JobDto } from '../types/api'
 
 const JOBS_PAGE_SIZE = 20
@@ -21,11 +25,32 @@ function formatDate(iso: string | null): string {
   })
 }
 
+/**
+ * The POTD endpoint takes a month and a day, never a year — it looks at that calendar date
+ * across every year — so this is a `dd.mm` field, not a date picker. Blank means today in
+ * `Potd:TimeZone`, which is what the scheduler would use.
+ */
+function parseDayMonth(value: string): { month: number; day: number } | null {
+  const m = /^\s*(\d{1,2})[.\-/](\d{1,2})\s*$/.exec(value)
+  if (!m) return null
+  const [day, month] = [Number(m[1]), Number(m[2])]
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  return { month, day }
+}
+
+/** `2026-08-17` (a .NET DateOnly on the wire) → `17.08.2026`, without going through Date. */
+function formatDateOnly(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return m ? `${m[3]}.${m[2]}.${m[1]}` : value
+}
+
 export function AdminPage() {
   const queryClient = useQueryClient()
   const [scanPath, setScanPath] = useState('')
   const [scanResult, setScanResult] = useState<string | null>(null)
   const [jobsPage, setJobsPage] = useState(1)
+  const [potdDate, setPotdDate] = useState('')
+  const [potdDryRun, setPotdDryRun] = useState(true)
 
   const { data: status } = useQuery({
     queryKey: ['pipeline-status'],
@@ -60,6 +85,24 @@ export function AdminPage() {
   const { mutate: doRetryAll, isPending: retryingAll } = useMutation({
     mutationFn: retryFailedJobs,
     onSuccess: invalidateAll,
+  })
+
+  const { data: potdSends } = useQuery({
+    queryKey: ['potd-sends'],
+    queryFn: () => getLastPotdSends(5),
+    staleTime: 60_000,
+  })
+
+  const potdDateParsed = potdDate.trim() === '' ? null : parseDayMonth(potdDate)
+  const potdDateInvalid = potdDate.trim() !== '' && potdDateParsed === null
+
+  const {
+    mutate: doSendPotd, isPending: sendingPotd, data: potdResult, error: potdError,
+  } = useMutation({
+    mutationFn: () => sendPhotoOfTheDay({ ...potdDateParsed, dryRun: potdDryRun }),
+    // A real send does not write potd_sends either (only the scheduler does), but refreshing
+    // costs nothing and keeps the card honest if the scheduler fired while this page was open.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['potd-sends'] }),
   })
 
   const counts = status?.counts
@@ -130,6 +173,80 @@ export function AdminPage() {
               </>
             ) : (
               <div className="loading">No scans yet</div>
+            )}
+          </div>
+        </div>
+
+        {/* Photo of the Day */}
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">Photo of the Day</span>
+            <span className="card-action" style={{ cursor: 'default', color: 'var(--label3)' }}>
+              {potdSends && potdSends.length > 0
+                ? `last ${formatDateOnly(potdSends[0].sentOn)}`
+                : 'never sent'}
+            </span>
+          </div>
+          <div className="admin-card-body">
+            <div className="form-field" style={{ marginBottom: 0 }}>
+              <label className="form-label">Date (optional) — dd.mm, any year</label>
+              <input
+                className="form-input"
+                type="text"
+                placeholder="today"
+                value={potdDate}
+                onChange={e => setPotdDate(e.target.value)}
+              />
+            </div>
+
+            {/* Defaults to checked: the point of this card is to exercise the pick and the
+                caption without posting to the family channel. */}
+            <label className="admin-check">
+              <input
+                type="checkbox"
+                checked={potdDryRun}
+                onChange={e => setPotdDryRun(e.target.checked)}
+              />
+              Dry run — pick and report, don&apos;t post
+            </label>
+
+            <button
+              className="btn-primary"
+              onClick={() => doSendPotd()}
+              disabled={sendingPotd || potdDateInvalid}
+            >
+              {sendingPotd ? 'Working…' : potdDryRun ? 'Preview Pick' : 'Send Now'}
+            </button>
+
+            {potdDateInvalid && (
+              <div className="admin-scan-result" style={{ color: 'var(--danger)' }}>
+                Enter a date as dd.mm — or leave it blank for today
+              </div>
+            )}
+
+            {potdError && (
+              <div className="admin-scan-result" style={{ color: 'var(--danger)' }}>
+                {(potdError as Error).message}
+              </div>
+            )}
+
+            {potdResult && (
+              <div className="potd-admin-result">
+                {potdResult.mediaFileId && (
+                  <img src={thumbnailUrl(potdResult.mediaFileId)} alt="" />
+                )}
+                <div className="potd-admin-result-text">
+                  <div className={potdResult.sent ? 'potd-admin-ok' : 'potd-admin-warn'}>
+                    {potdResult.sent
+                      ? 'Sent to Telegram'
+                      : potdResult.skippedReason === 'dryRun'
+                        ? 'Dry run — nothing posted'
+                        : potdResult.skippedReason}
+                  </div>
+                  {potdResult.tier && <div>tier: {potdResult.tier}</div>}
+                  {potdResult.caption && <div>“{potdResult.caption}”</div>}
+                </div>
+              </div>
             )}
           </div>
         </div>
