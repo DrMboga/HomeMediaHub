@@ -1,72 +1,138 @@
 # Immich iPhone Setup
 
-Immich runs on the server as the iPhone backup endpoint. It receives photos directly from the iOS app and writes them to `/mnt/storage/Photo/iPhone/`. HomeMediaHub's Library Scanner (W2) picks them up from there.
+Immich runs on the server purely as the **iPhone backup endpoint**. The iOS app uploads to it, it
+writes the originals under `/mnt/storage/Photo/iPhone/`, and HomeMediaHub's scan picks them up from
+there. You do not use the Immich web UI day-to-day.
 
-You do not use the Immich web UI day-to-day — it is purely an ingest mechanism.
+**State as of 2026-08-17:** container up and healthy (`v3.1.0`), reachable on `:2283`, storage tree
+created — and **0 users, 0 assets**. Nothing has been set up yet.
 
 ---
 
-## One-time server setup
+## ⚠️ Read this before you back anything up
 
-### 1. Create the Immich admin account
+**A scan of `/photo` today would ingest Immich's own derivative files as if they were photos.**
 
-Open the Immich web UI in a browser (from a device on your LAN):
+`ScanService.DiscoverAsync` (`src/MediaWorker/Services/ScanService.cs`) walks
+`SearchOption.AllDirectories` from `/photo` and filters on three things only: file extension, the
+AppleDouble `._` prefix, and zero length. **There is no directory exclusion.** Immich's media root
+is bind-mounted *inside* the scanned tree:
+
+```
+/mnt/storage/Photo/iPhone/          ← ${PHOTO_DIR}/iPhone, mounted as Immich's /usr/src/app/upload
+├── library/                        ← the originals. These are what we want.
+├── thumbs/                         ← Immich's own previews — JPEG by default
+├── encoded-video/                  ← Immich's H.264 transcodes, .mp4
+├── upload/                         ← in-flight uploads
+├── profile/                        ← avatars
+└── backups/                        ← .sql.gz, harmless (extension not supported)
+```
+
+`.mp4` and `.jpeg` are both in `SupportedExtensions`, so every transcode and every preview would be
+queued as a new media file. **Dedup will not save you** — a preview is a different image at a
+different resolution, so it hashes differently and becomes a genuine second row. The result is
+roughly one junk photo per photo and one junk video per video.
+
+*(Certain: the directory layout above, the scan's lack of directory filtering, and that
+`encoded-video` holds `.mp4`. The preview extension is Immich's documented default of JPEG, which
+I could not verify inside the running image — worth confirming after your first backup.)*
+
+**You are not at risk right now.** `Scan:Enabled=false` on prod, so nothing scans on a timer; the
+only way a scan starts is you pressing **Trigger Scan** on `/admin`. So:
+
+> **Safe order: set Immich up and back up your phone freely. Do not run a scan until the directory
+> exclusion is in.** Backing up is harmless on its own — the files just sit on disk.
+
+The fix is a directory exclusion in `ScanService` (skip `thumbs`, `encoded-video`, `upload`,
+`profile`, `backups`), so the scan sees only `library/`.
+
+---
+
+## 1. Create the Immich admin account
+
+From any browser on the LAN:
 
 ```
 http://192.168.0.192:2283
 ```
 
-On first visit, Immich prompts you to create an admin account. Use any name/email/password — this account is only used for Immich administration, not for HomeMediaHub login.
+First visit prompts you to create an admin account. Any name / email / password — this is Immich's
+own account, unrelated to your HomeMediaHub login.
 
-### 2. Verify the storage template
+**Use `:2283` directly, not `http://192.168.0.192/immich/`.** The nginx proxy for `/immich/` exists
+but sets no `client_max_body_size`, so nginx's 1 MB default would reject every photo upload with a
+413. The port is published by compose on all interfaces, so the phone can reach it directly.
 
-Immich should already be configured via the env file to write uploads to `/mnt/storage/Photo/iPhone/`. To confirm:
+## 2. Turn off what we don't use
 
-Admin → Server Settings → Storage Template — verify it shows:
+Immich ships its own machine-learning stack; we deliberately don't run that container, because
+HomeMediaHub does its own YOLO + CLIP work. The server logs
+`Machine learning server became unhealthy` on a loop as a result — harmless, but you can silence it:
+
+**Administration → Settings → Machine Learning → disable.**
+
+Also worth turning off, since nothing reads them and they cost CPU and disk on the same box that
+runs the pipeline: **Video transcoding** (Immich's `encoded-video/` output is never used by us —
+HomeMediaHub transcodes on demand at `/api/media/{id}/stream`).
+
+## 3. Check the storage template
+
+**Administration → Settings → Storage Template.** The default
 
 ```
 {{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}
 ```
 
-This produces paths like `iPhone/2026/2026-05-31/IMG_1234.HEIC`.
+is what we want. It applies *beneath* `library/<userId>/`, so a photo lands at roughly
+
+```
+/mnt/storage/Photo/iPhone/library/<userId>/2026/2026-08-17/IMG_1234.HEIC
+```
+
+Confirm the real path after your first upload rather than trusting this line — the `library/<userId>/`
+prefix is Immich's, not something the template controls.
 
 ---
 
-## iPhone app setup
+## 4. iPhone app
 
-### 1. Install the Immich app
+1. Install **Immich** from the App Store (free, open-source).
+2. Open it → **Get Started** → Server URL `http://192.168.0.192:2283` → log in with the admin
+   account.
+3. **Profile → Backup** → enable **Background backup**.
+4. Select albums — **Recents** is the whole camera roll.
+5. Enable **Require Wi-Fi** unless you want it running on cellular.
 
-Search for **Immich** in the App Store (it's free, open-source).
-
-### 2. Connect to the server
-
-- Open the app → **Get Started**
-- Server URL: `http://192.168.0.192:2283`
-- Log in with the admin account you created above (or create a separate user in Immich Admin → Users if you want per-person accounts)
-
-### 3. Enable automatic backup
-
-- Go to **Profile** (bottom right) → **Backup**
-- Enable **Background backup**
-- Select the albums to back up (typically **Recents** = entire photo library)
-- Optionally enable **Require Wi-Fi** to avoid mobile data usage
+The first backup of a full camera roll takes a while and the phone must stay on Wi-Fi and
+(realistically) on charge. iOS background execution is unreliable — leaving the app in the
+foreground is much faster.
 
 ---
 
-## What happens after backup
+## 5. Getting the photos into HomeMediaHub
 
-1. Immich receives the photo and writes the original file to `/mnt/storage/Photo/iPhone/{y}/{y-MM-dd}/`
-2. The file sits there until Library Scanner runs
-3. To ingest immediately: open n8n (`http://192.168.0.192:5678`) → find **W2 Library Scanner** → click **Execute Workflow**
-4. The monthly cron (`0 2 1 * *`) catches any backups automatically
+Once the exclusion above is in place:
 
-The photo will appear in HomeMediaHub's gallery once W2 processes it.
+- **`/admin` → Library Scan → Trigger Scan** (leave the path blank for `/photo`), or
+  `POST /api/admin/scan`.
+- Watch progress on the same page, or with `docs/monitoring.md`.
+
+There is no automatic scan: `Scan:Enabled=false`, and `ScanScheduler` logs
+`ScanScheduler disabled` at startup. Turning it on would run monthly at 02:00 on the 1st.
+
+> The old version of this document told you to trigger the scan from n8n's **W2 Library Scanner**.
+> n8n was removed entirely in Phase 8 Step 7 — there is no workflow, and no `:5678`.
 
 ---
 
 ## Notes
 
-- **HEIC files**: iPhone photos are HEIC format. W1 converts them to JPEG for metadata extraction and thumbnails; the original HEIC is never modified.
-- **Videos**: iPhone `.mov` (HEVC/H.265) files are processed similarly. The `/api/media/{id}/stream` endpoint transcodes them to H.264 on first play and caches the result.
-- **Duplicate detection**: W1 hashes every file before inserting. Running W2 twice processes each file only once.
-- **Immich UI**: You can use the Immich web UI at `:2283` to see backed-up photos, but the HomeMediaHub gallery at port 80 is the primary UI.
+- **HEIC**: iPhone photos are HEIC. The pipeline converts a copy for metadata and thumbnails, and
+  the API converts on demand for display; the original HEIC is never modified.
+- **Videos**: iPhone `.mov` (HEVC) is handled the same way. `/api/media/{id}/stream` transcodes to
+  H.264 on first play and caches it — which is why Immich's own transcoding is redundant here.
+- **Duplicates**: ingest hashes every file before insert, so scanning twice processes each file
+  once. Note the known wrinkle in `docs/backlog.md` — files already recorded as
+  `skipped_duplicate` are re-hashed on every scan.
+- **Immich's own UI** at `:2283` will show the backed-up photos, but HomeMediaHub on port 80 is the
+  library.

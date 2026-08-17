@@ -11,6 +11,42 @@ Ordered newest first.
 
 ---
 
+## The scan would ingest Immich's own thumbnails and transcodes — 2026-08-17
+
+**Blocks the first iPhone backup from being scanned.** Found while writing
+`docs/immich-iphone-setup.md`; Immich has 0 users and 0 assets so far, so nothing is broken yet.
+
+Immich's media root is bind-mounted *inside* the scanned tree
+(`${PHOTO_DIR}/iPhone:/usr/src/app/upload`), and it keeps derivatives beside the originals:
+
+```
+/mnt/storage/Photo/iPhone/{library,thumbs,encoded-video,upload,profile,backups}/
+```
+
+`ScanService.DiscoverAsync` walks `SearchOption.AllDirectories` and filters on **extension, the
+`._` prefix, and zero length only — there is no directory exclusion.** `.mp4` and `.jpeg` are both
+in `SupportedExtensions`, so `encoded-video/*.mp4` (Immich's H.264 transcodes) and `thumbs/*`
+(previews, JPEG by Immich's default) would each be queued as new media.
+
+**Dedup does not help:** a preview is a different image at a different resolution, so it hashes
+differently and earns a genuine `media_files` row. Expect roughly one junk photo per photo and one
+junk video per video.
+
+**The fix:** a directory-name exclusion in `ScanService`, skipping `thumbs`, `encoded-video`,
+`upload`, `profile` and `backups` so only `library/` is visible. Prefer excluding by directory
+name over hardcoding the Immich path — the same shape of problem returns for any tool that drops
+derivatives into the library.
+
+**Not urgent yet, but sequence it:** `Scan:Enabled=false` on prod, so nothing scans on a timer and
+backing the phone up is harmless on its own. The exclusion only has to land before the next
+**Trigger Scan**.
+
+Related: nginx's `/immich/` location sets no `client_max_body_size`, so uploads through it die at
+nginx's 1 MB default. The phone should use `:2283` directly, which compose publishes. Either fix
+the proxy or drop the location — today it is a trap rather than a feature.
+
+---
+
 ## `MediaListItemDto.ThumbnailPath` is dead weight on every list row — 2026-08-17
 
 `MediaListItemDto` (`src/Api/Features/Media/MediaDtos.cs:8`) carries `string? ThumbnailPath`, and
