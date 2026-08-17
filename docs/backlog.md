@@ -11,6 +11,46 @@ Ordered newest first.
 
 ---
 
+## `MediaListItemDto.ThumbnailPath` is dead weight on every list row — 2026-08-17
+
+`MediaListItemDto` (`src/Api/Features/Media/MediaDtos.cs:8`) carries `string? ThumbnailPath`, and
+`src/Frontend/src/types/api.ts:4` mirrors it — but **no component reads it.** Every thumbnail in
+the UI is built from the id instead, via `thumbnailUrl(item.id)`, because the file is served
+through nginx `X-Accel-Redirect` rather than by path.
+
+So each list row ships a filesystem path nothing consumes. It also forces a `LEFT JOIN` onto
+`media_thumbnails` in every list projection that includes it.
+
+Cheap to remove — drop the field, the frontend type line, and the `f.Thumbnail!.ThumbnailPath`
+term from each projection — but it touches every list handler (`GetMediaList`, `OnThisDay`,
+`Tags`, `Search`, `GeoMedia`, `Review`), so it wants doing in one deliberate pass with the tests
+green, not opportunistically. Noticed during Phase 13, confirmed during Phase 11.
+
+Worth doing mainly because `/on-this-day` is now uncapped: a busy anniversary renders ~2,250 rows,
+each carrying an unused ~60-character path.
+
+---
+
+## `Potd:SendAtLocal` and `Potd:MinConfidence` are not reachable from the env file — 2026-08-17
+
+Phase 11 mapped four of the six `Potd:*` settings into compose (`POTD_ENABLED`, `POTD_BOT_TOKEN`,
+`POTD_CHAT_ID`, `POTD_TIMEZONE`). The other two exist in `appsettings.json` and are read correctly,
+but there is no `Potd__SendAtLocal` / `Potd__MinConfidence` line in the `api` service, so changing
+either means editing `docker-compose.yml` or rebuilding the image.
+
+**The practical cost is testing the scheduler.** Once 15:00 has passed, the loop sleeps until
+tomorrow — deleting the `potd_sends` row does *not* re-arm it, and neither does restarting the
+Api, because `NextRunTime` from any instant after the slot lands on the next day. Moving the send
+time a few minutes ahead and recreating `api` is the only way to watch a scheduled run on demand,
+and today that takes a compose edit.
+
+Two lines in the `api` `environment:` block (`Potd__SendAtLocal: ${POTD_SEND_AT:-}` and
+`Potd__MinConfidence: ${POTD_MIN_CONFIDENCE:-}`) plus the matching entries in the three env
+examples. Use `:-` and leave the default blank, so an unset variable falls through to
+`appsettings.json` — `PotdConfig` already treats blank as absent for exactly this reason.
+
+---
+
 ## Every scan rediscovers all 992 duplicates — 2026-08-16
 
 Found by the Phase 12 confirmation scan on prod, which logged `discovered 992 new files` on a
@@ -220,9 +260,10 @@ ImageMagick as a one-off — a different HEIF parser may be more forgiving than 
 > **Done and deployed 2026-08-16 as Phase 12 Steps 1–3 and 5 — A1–A4, B5 and C6 are all live on
 > prod.** The retry recovered **all 125** files: buckets 1 and 3 are empty, failed went 171 → 32,
 > and `media_files` = `media_embeddings` = 188,416. The 14 AppleDouble rows (buckets 2 and 5) were
-> deleted and are filtered at scan now. What remains is buckets 4 and 6 plus the 13 zero-byte/XML
-> files — dead source data, pending Mike's Step 4 call. Numbers in `docs/delivery-plan.md` →
-> Phase 12 → "Deployed and verified on prod".
+> deleted and are filtered at scan now. **Step 4 was then settled the same day: buckets 4 and 6
+> plus the 13 zero-byte/XML files were deleted from disk with their rows** (manifest at
+> `/opt/homemediahub/phase12-deleted-2026-08-16.txt`), leaving **0 failed jobs**. Numbers in
+> `docs/delivery-plan.md` → Phase 12 → "Deployed and verified on prod".
 > The evidence below stands unchanged and is still the reference for what each bucket was.
 
 **A. `src/MediaWorker/Services/FileConvertService.cs`** — recovers the 116 videos.
@@ -260,10 +301,10 @@ hygiene. Fixes 3 and 4 are the reason this cost time to diagnose, twice.
 
 ---
 
-## Photo of the Day — Telegram bot
+## Photo of the Day — Telegram bot ✅ DONE (2026-08-17)
 
-**Specified 2026-08-14, not started.** Promoted out of this backlog into the specs — it is planned
-work now, not a loose note:
+**Built, deployed and verified on prod as Phase 11.** The scheduled 15:00 run fires and posts to
+the family channel. Nothing here is outstanding — kept only as the pointer trail:
 
 - **Design & rationale:** `docs/architecture.md` §14 — why a `BackgroundService` in the Api rather
   than a queue and consumer, the pick query, the `potd_sends` table, config, and the five ways it
@@ -271,6 +312,9 @@ work now, not a loose note:
 - **Implementation steps & verification:** `docs/delivery-plan.md` → Phase 11.
 
 Prior art is the old Raspberry Pi solution at `C:\Users\Mike\Projects\PhotoLibrary\backend`;
-file-by-file pointers are in the delivery-plan section. Both open questions were answered by Mike
-on 2026-08-14 (three-tier fallback so a photo goes out every day; confidence floor 0.5), so the
-spec is complete and nothing blocks implementation.
+file-by-file pointers are in the delivery-plan section.
+
+Measured on prod during the build: all **366** calendar days clear tier 1, so the confidence floor
+of 0.5 is settled and tiers 2–3 never fire on this library. The one bug worth remembering is in
+"Fixed on the first real send" — a bot token's colon made the request URI parse as absolute, and
+**every dry run passed anyway**, because the URI is only built on a real send.
