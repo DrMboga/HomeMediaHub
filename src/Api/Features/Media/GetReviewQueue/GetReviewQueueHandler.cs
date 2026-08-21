@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Features.Media.GetReviewQueue;
 
-public record GetReviewQueueRequest(int Page = 1, int PageSize = 50) : IRequest<PagedReviewQueueResult>;
+public record GetReviewQueueRequest(int Page = 1, int PageSize = 100) : IRequest<PagedReviewQueueResult>;
 public record PagedReviewQueueResult(IReadOnlyList<MediaListItemDto> Items, int Total);
 
 public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueRequest, PagedReviewQueueResult>
