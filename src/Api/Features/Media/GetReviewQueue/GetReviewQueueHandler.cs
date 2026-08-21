@@ -19,6 +19,7 @@ public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueReques
         var q = _db.MediaFiles
             .Where(f => !f.IsDeleted &&
                         !f.OriginReviewed &&
+                        f.MimeType == "image/png" &&
                         (f.OriginClass == "screenshot" || f.OriginClass == "document" ||
                          f.OriginClass == "artwork"    || f.OriginClass == "reference"));
 
@@ -27,7 +28,8 @@ public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueReques
         var items = await q
             .Include(f => f.Thumbnail)
             .Include(f => f.Metadata)
-            .OrderByDescending(f => f.OriginConfidence)
+            // .OrderByDescending(f => f.OriginConfidence)
+            .OrderByDescending(f => f.TakenAt)
             .Skip((req.Page - 1) * req.PageSize)
             .Take(req.PageSize)
             .ToListAsync(ct);
