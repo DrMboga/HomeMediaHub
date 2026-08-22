@@ -19,7 +19,6 @@ public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueReques
         var q = _db.MediaFiles
             .Where(f => !f.IsDeleted &&
                         !f.OriginReviewed &&
-                        f.MimeType == "image/png" &&
                         (f.OriginClass == "screenshot" || f.OriginClass == "document" ||
                          f.OriginClass == "artwork"    || f.OriginClass == "reference"));
 
