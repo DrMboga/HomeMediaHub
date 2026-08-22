@@ -29,7 +29,7 @@ export function SearchPage() {
 
   const { data: results, isFetching } = useQuery({
     queryKey: ['search', debouncedQuery, dateFrom, dateTo, originClass],
-    queryFn: () => semanticSearch(debouncedQuery, dateFrom || undefined, dateTo || undefined, 15, originClass || undefined),
+    queryFn: () => semanticSearch(debouncedQuery, dateFrom || undefined, dateTo || undefined, 50, originClass || undefined),
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,
   })

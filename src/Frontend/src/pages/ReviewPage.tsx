@@ -5,7 +5,7 @@ import { getReviewQueue, confirmReview, bulkDeleteMedia, thumbnailUrl } from '..
 import type { MediaListItem } from '../types/api'
 import { formatShortDate } from '../utils/mediaDate'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 100
 
 export function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams()
