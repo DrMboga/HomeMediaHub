@@ -167,6 +167,11 @@ from disk with their rows — manifest at `/opt/homemediahub/phase12-deleted-202
 `skipped 14 AppleDouble sidecar(s) and 0 zero-length file(s)`. Numbers and the full record in
 `docs/delivery-plan.md` → Phase 12 → "Deployed and verified".
 
+**Those totals are a 2026-08-16 snapshot, not the current library size.** Photos have been deleted
+through the Review page since: as of **2026-08-22** `media_files` is **183,820**, with
+`media_embeddings` tracking it 1:1. Expect it to keep drifting down — query the DB rather than
+trusting this line whenever the exact count matters.
+
 **Every scan rediscovers all 992 duplicates** (found by that confirmation scan). `DiscoverAsync`
 excludes files in `media_files` or holding an *active* job; a duplicate has neither, since
 `skipped_duplicate` is terminal. Each scan therefore re-hashes all 992 and writes 992 more job
@@ -461,7 +466,22 @@ public by design (`<img>`/`<video>` can't send JWT; GUID URLs, LAN-only).
 - **Linux has no reliable creation time** — use `LastWriteTimeUtc` (mtime) only;
   `CreationTimeUtc` on Linux is min(atime,mtime,ctime).
 - **Stale Docker bind mounts**: a directory created on the host after container start may be
-  invisible — `docker compose --env-file .env.stage up -d --force-recreate <service>`.
+  invisible — `docker compose --env-file .env.stage up -d --force-recreate <service>`. A plain
+  `restart` is **not** enough — a container's mount namespace is fixed at creation.
+- **Docker must not start before `/mnt/storage`.** After an unclean reboot, ext4 journal recovery
+  can delay the HDD mount past Docker's start; Docker then auto-creates the missing bind-mount
+  sources as empty dirs on the SSD, and every container sees an empty library — thumbnails,
+  originals, display and video all 404 site-wide while metadata and counts render fine (the DB
+  lives on the SSD) and Samba still shows every file, because it reads the host. Telltale journal
+  line: `Directory /mnt/storage to mount over is not empty, mounting anyway`. Prevented by
+  `/etc/systemd/system/docker.service.d/wait-for-storage.conf` (`RequiresMountsFor=/mnt/storage`);
+  recover with `up -d --force-recreate`. Hit for real on 2026-08-22.
+- **The host self-recovers from a freeze** (since 2026-08-22, after an 8 h 40 m silent lockup):
+  the Intel PCH TCO hardware watchdog is armed by `itco-watchdog.service`, which runs a bare
+  `modprobe iTCO_wdt` — Ubuntu deny-lists that module per kernel, so `modules-load.d` and
+  `/etc/initramfs-tools/modules` both silently skip it and only an explicit modprobe works. With
+  `kernel.panic=10`, `panic_on_oops=1`, `hardlockup_panic=1` and kdump, a hung kernel now resets in
+  ~90 s and a panic leaves a vmcore in `/var/crash`.
 - **`docker compose down -v` does not wipe bind mounts** — delete the data dirs manually for a
   clean slate.
 - **Npgsql on Docker bridge**: keep `Keepalive=30;Connection Idle Lifetime=300` +
