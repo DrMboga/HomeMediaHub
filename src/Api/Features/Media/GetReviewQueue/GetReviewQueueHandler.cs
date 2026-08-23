@@ -20,7 +20,8 @@ public sealed class GetReviewQueueHandler : IRequestHandler<GetReviewQueueReques
             .Where(f => !f.IsDeleted &&
                         !f.OriginReviewed &&
                         (f.OriginClass == "screenshot" || f.OriginClass == "document" ||
-                         f.OriginClass == "artwork"    || f.OriginClass == "reference"));
+                         f.OriginClass == "artwork"    || f.OriginClass == "reference") &&
+                        f.Metadata.Latitude == null));
 
         var total = await q.CountAsync(ct);
 
