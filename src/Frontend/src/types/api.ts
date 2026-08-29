@@ -99,6 +99,7 @@ export interface JobStatusCounts {
   completed: number
   failed: number
   skippedDuplicate: number
+  skippedDeleted: number
 }
 
 export interface PipelineStatusDto {

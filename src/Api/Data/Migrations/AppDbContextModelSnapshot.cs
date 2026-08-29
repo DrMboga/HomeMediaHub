@@ -166,6 +166,28 @@ namespace Api.Data.Migrations
                     b.ToTable("album_media", "public");
                 });
 
+            modelBuilder.Entity("Data.Entities.DeletedHash", b =>
+                {
+                    b.Property<string>("FileHash")
+                        .HasColumnType("text")
+                        .HasColumnName("file_hash");
+
+                    b.Property<DateTime>("DeletedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("LastFilePath")
+                        .HasColumnType("text")
+                        .HasColumnName("last_file_path");
+
+                    b.HasKey("FileHash")
+                        .HasName("pk_deleted_hashes");
+
+                    b.ToTable("deleted_hashes", "public");
+                });
+
             modelBuilder.Entity("Data.Entities.MediaEmbedding", b =>
                 {
                     b.Property<Guid>("MediaFileId")

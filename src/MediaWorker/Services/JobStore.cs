@@ -22,6 +22,7 @@ public interface IJobStore
     Task MarkProcessingAsync(Guid jobId, CancellationToken ct);
     Task MarkEnrichingAsync(Guid jobId, Guid mediaFileId, CancellationToken ct);
     Task MarkSkippedDuplicateAsync(Guid jobId, Guid duplicateMediaFileId, CancellationToken ct);
+    Task MarkSkippedDeletedAsync(Guid jobId, CancellationToken ct);
     Task MarkCompletedAsync(Guid jobId, CancellationToken ct);
     Task MarkFailedAsync(Guid jobId, string failedStep, string? error, CancellationToken ct);
 }
@@ -52,6 +53,15 @@ public sealed class JobStore : IJobStore
         {
             job.Status      = "skipped_duplicate";
             job.MediaFileId = duplicateMediaFileId;
+            job.CompletedAt = DateTime.UtcNow;
+        }, ct);
+
+    // No MediaFileId: the photo this file duplicates was deleted, so there is nothing to point
+    // at. That absence is the difference from skipped_duplicate, and why it is its own status.
+    public Task MarkSkippedDeletedAsync(Guid jobId, CancellationToken ct) =>
+        UpdateAsync(jobId, job =>
+        {
+            job.Status      = "skipped_deleted";
             job.CompletedAt = DateTime.UtcNow;
         }, ct);
 

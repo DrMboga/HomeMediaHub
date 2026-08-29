@@ -18,4 +18,12 @@ public sealed class DedupService
             .Where(f => f.FileHash == hash)
             .Select(f => (Guid?)f.Id)
             .FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// True if this content was deliberately deleted from the library. Checked after
+    /// <see cref="FindByHashAsync"/>, because a live photo with the same hash is the stronger
+    /// answer: it means the content is present, whatever was deleted before.
+    /// </summary>
+    public Task<bool> WasDeletedAsync(string hash, CancellationToken ct) =>
+        _db.DeletedHashes.AnyAsync(d => d.FileHash == hash, ct);
 }

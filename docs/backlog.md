@@ -11,7 +11,7 @@ Ordered newest first.
 
 ---
 
-## Deleting a photo in Review resurrects its duplicate on the next scan — 2026-08-29
+## Deleting a photo in Review resurrects its duplicate — FIXED 2026-08-29
 
 **Measured, not theorised: 167 photos came back during the Phase 14 Step 4 scan.**
 
@@ -31,7 +31,10 @@ earlier `skipped_duplicate` job for the same path** — all 167, not a subset.
 **The mismatch is in what "delete" means.** Review deletes *a file*; the person clicking it means
 *this photo*. Nothing in the pipeline is malfunctioning.
 
-Options, none obviously right — this wants a decision rather than a hotfix:
+**Mike chose option 2 the same day and it is built** — `deleted_hashes`, a table `DedupService`
+consults before ingest, written by `BulkDeleteMediaHandler`. See `docs/delivery-plan.md` → Phase 14
+→ "Step 4b". The 167 that already came back stop coming back once they are re-deleted through
+Review with that code live. The four options that were weighed:
 
 1. **Delete every copy.** On delete, find all files sharing the hash and remove them too. Needs the
    hash of the deleted row (available) and a path list, which we do not keep — `processing_jobs`
@@ -44,10 +47,12 @@ Options, none obviously right — this wants a decision rather than a hotfix:
    the file on disk.
 4. **Accept it**, and clean up in Review when it recurs.
 
-Option 2 is the one that matches the user's intent without touching disk twice.
+Option 2 won because it matches the user's intent without touching disk twice, and because it is
+the only one that also covers a copy added to the library *later*.
 
-**Not urgent** — the 167 are ordinary photos, not corruption, and Review can remove them again.
-But every future scan repeats this for whatever was deleted since, so it compounds quietly.
+**Still outstanding:** the fix is on `main` but **not deployed** — it needs the `AddDeletedHashes`
+migration plus a rebuild of api, media-worker and frontend. Until then, every scan keeps promoting
+whatever has been deleted since.
 
 Related: the 992-duplicate rediscovery below is what makes this reachable at all.
 

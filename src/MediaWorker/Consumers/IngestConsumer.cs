@@ -80,6 +80,19 @@ public sealed class IngestConsumer : IConsumer<FileDiscovered>
                 return;
             }
 
+            // 3. deliberately deleted? Checked after the duplicate lookup, because a live photo
+            // with this hash is the stronger answer — the content is in the library regardless of
+            // what was deleted before. Reprocess is not exempt: a retry of a deleted photo must
+            // stay deleted. The file itself is left on disk, so every scan rediscovers it and
+            // lands here again — the same harmless churn the 992 known duplicates already cause.
+            if (await _dedup.WasDeletedAsync(hash, ct))
+            {
+                _log.LogInformation(
+                    "Skipping {Path}: its content was deleted from the library", msg.FilePath);
+                await _jobs.MarkSkippedDeletedAsync(msg.JobId, ct);
+                return;
+            }
+
             var mediaFileId = Guid.NewGuid();
             var (analyzePath, workPath) = await ConvertIfNeededAsync(msg.FilePath, mediaFileId, ct);
             savedMediaId = mediaFileId;

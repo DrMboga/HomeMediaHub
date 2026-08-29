@@ -2712,3 +2712,63 @@ harmless; not chased.
 
 **Still to do:** Step 5 (deletion reconciliation), Step 6 (docs), plus the UI spot-checks in Step 4
 item 5 — HEIC display, video playback, a geo pin and a semantic search hit against the new photos.
+
+### Step 4b — `deleted_hashes`, so a deleted photo stays deleted — built 2026-08-29
+
+Mike's call, after the Step 4 scan brought 167 deleted photos back. Chosen from the four options in
+`docs/backlog.md`: remember the deletion by content, rather than chase every copy on disk. It is
+the only option that also covers a copy added to the library *later*.
+
+Api 128 → **134** · MediaWorker 97 → **100** · GeoService 12. `tsc -b` and `vite build` clean.
+
+**New table `deleted_hashes`** (`AddDeletedHashes`, Api migration — the media schema is the Api's):
+`file_hash` PK, `last_file_path`, `deleted_at default NOW()`. The hash is the key so re-deleting a
+photo that came back is idempotent, and ingest's only query is an exact lookup, so the PK index is
+the whole access plan. `last_file_path` is never read by the pipeline — it is there so a row can be
+explained months later without joining to jobs that may themselves be gone.
+
+**Write side — `DeletedHashRecorder`** (`src/Api/Services/`), called by `BulkDeleteMediaHandler`
+before it touches the disk. `SoftDeleteMediaHandler` deliberately does **not** call it: it leaves
+the `media_files` row in place, and that row already shadows every duplicate by hash.
+
+It is a separate class for a test reason worth recording: `BulkDeleteMediaHandler` ends in
+`ExecuteDeleteAsync`, which the InMemory provider the suite runs on does not implement — which is
+why that handler has never had a single test. Extracting the new behaviour makes it coverable
+without downgrading the bulk delete to `RemoveRange`, which would contradict the `ExecuteDelete`-
+for-bulk rule in CLAUDE.md and turn one statement into N.
+
+**Read side — `DedupService.WasDeletedAsync`**, consulted by `IngestConsumer` **after**
+`FindByHashAsync`. Order matters: a live photo with the same hash is the stronger answer, because
+the content *is* in the library whatever was deleted before. That ordering also makes the delete
+sequence safe if it half-fails — hashes are recorded before the rows are dropped, so a failed
+`ExecuteDeleteAsync` leaves photos that are recorded as deleted but still present, and the live-row
+check keeps them behaving as ordinary duplicates.
+
+**New terminal job status `skipped_deleted`**, rather than reusing `skipped_duplicate`:
+
+- `MarkSkippedDuplicateAsync` needs a `MediaFileId` to point at, and here there is nothing to point
+  at — the photo is gone. `MediaFileId` stays null, and that absence *is* the distinction.
+- "Why isn't this photo in my library?" should answer "you deleted it", not "it's a duplicate".
+
+Plumbed through `JobStatusCounts.SkippedDeleted`, the frontend type, the Admin page's status
+labels, and — the one that would otherwise bite — `doneCount`, which drives the progress bar and
+previously summed only `completed + skippedDuplicate`. Without that the bar would stall short of
+100% on any scan that rediscovers deleted content.
+
+**The file is left on disk.** Every scan rediscovers it and lands on `skipped_deleted` again, the
+same harmless churn the 992 known duplicates already cause. Deleting from disk at ingest time was
+rejected: the user deleted one file, and a background job erasing others is not what they asked
+for.
+
+**Tests.** `DeletedHashRecorderTests` (6) covers the re-delete no-op, the same hash twice in one
+batch, an empty batch, and rows with a blank hash. `IngestConsumerTests` gains three: a deleted
+hash marks `skipped_deleted` and saves **no** media row; `Reprocess: true` does not smuggle a
+deleted photo back in; and a live duplicate beats a deleted hash for the same content.
+
+**Not deployed.** Needs `dotnet ef database update` (or the Api's startup migration) plus a rebuild
+of api, media-worker and frontend. Once it is live, re-deleting the 167 through Review records
+their hashes and they stop coming back.
+
+**Not built, deliberately:** any way to *un*-delete a hash. If Mike ever wants a photo back after
+deleting it, the row has to be removed by hand — `delete from deleted_hashes where file_hash = …`.
+Worth a UI only if it turns out to be needed.

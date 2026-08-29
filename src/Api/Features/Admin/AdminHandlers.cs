@@ -15,7 +15,8 @@ public record JobDto(
     string? FailedStep, string? ErrorMessage, int RetryCount);
 
 public record JobStatusCounts(
-    int Queued, int Processing, int Enriching, int Completed, int Failed, int SkippedDuplicate);
+    int Queued, int Processing, int Enriching, int Completed, int Failed, int SkippedDuplicate,
+    int SkippedDeleted);
 
 public record PipelineStatusDto(
     Guid? ScanId, DateTime? StartedAt, JobStatusCounts Counts, int Total,
@@ -91,7 +92,7 @@ public sealed class GetPipelineStatusHandler : IRequestHandler<GetPipelineStatus
         if (latestScanId is null)
         {
             return new PipelineStatusDto(
-                null, null, new JobStatusCounts(0, 0, 0, 0, 0, 0), 0, completedLastHour, staleCount);
+                null, null, new JobStatusCounts(0, 0, 0, 0, 0, 0, 0), 0, completedLastHour, staleCount);
         }
 
         var scanJobs = _db.ProcessingJobs.Where(j => j.ScanId == latestScanId);
@@ -110,7 +111,8 @@ public sealed class GetPipelineStatusHandler : IRequestHandler<GetPipelineStatus
             Enriching:        statusCounts.GetValueOrDefault("enriching"),
             Completed:        statusCounts.GetValueOrDefault("completed"),
             Failed:           statusCounts.GetValueOrDefault("failed"),
-            SkippedDuplicate: statusCounts.GetValueOrDefault("skipped_duplicate"));
+            SkippedDuplicate: statusCounts.GetValueOrDefault("skipped_duplicate"),
+            SkippedDeleted:   statusCounts.GetValueOrDefault("skipped_deleted"));
 
         return new PipelineStatusDto(latestScanId, startedAt, counts, total, completedLastHour, staleCount);
     }

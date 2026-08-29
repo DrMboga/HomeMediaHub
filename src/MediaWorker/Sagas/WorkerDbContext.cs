@@ -25,6 +25,7 @@ public class WorkerDbContext : DbContext
     public DbSet<MediaTag>        MediaTags       => Set<MediaTag>();
     public DbSet<MediaEmbedding>  MediaEmbeddings => Set<MediaEmbedding>();
     public DbSet<ProcessingJob>   ProcessingJobs  => Set<ProcessingJob>();
+    public DbSet<DeletedHash>     DeletedHashes   => Set<DeletedHash>();
 
     public DbSet<EnrichmentState> EnrichmentSagas => Set<EnrichmentState>();
 

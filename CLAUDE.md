@@ -227,13 +227,22 @@ directories, and left **zero** rows under `thumbs/`, `encoded-video/` or `upload
 GPS rows addressed. Without the exclusion that scan would have queued 721 files from the iPhone
 tree instead of 350. **Step 5 (deletion reconciliation) and Step 6 (docs) are outstanding.**
 
-**That scan also proved a live bug that is not about Immich: deleting a photo in Review resurrects
+**That scan also proved a live bug that is not about Immich: deleting a photo in Review resurrected
 its duplicate.** 167 of the 515 completed jobs were archive files that had each been
 `skipped_duplicate` before — `BulkDeleteMediaHandler` removes the indexed copy's file and row, so
-its twin elsewhere on disk stops matching any hash and ingests as a new photo. Dedup is behaving as
-defined; "delete" in Review means *this file*, the user means *this photo*. **Every scan repeats
-this for whatever was deleted since.** Options and the measurement are in `docs/backlog.md` — it
-needs a decision, not a hotfix.
+its twin elsewhere on disk stopped matching any hash and ingested as a new photo. Dedup was
+behaving as defined; "delete" in Review means *this file*, the user means *this photo*.
+
+**Fixed the same day by `deleted_hashes` — on `main`, NOT DEPLOYED.** A table keyed by
+`file_hash`, written by `BulkDeleteMediaHandler` (via `DeletedHashRecorder`) and read by
+`DedupService.WasDeletedAsync`, which `IngestConsumer` consults **after** the live-duplicate lookup
+— a live photo with that hash is the stronger answer. A match becomes the new terminal status
+**`skipped_deleted`** (no `MediaFileId`: there is nothing to point at, and that absence is the
+distinction from `skipped_duplicate`). `SoftDeleteMediaHandler` deliberately does not record —
+its row stays and already shadows duplicates. The file is left on disk, so every scan rediscovers
+it and lands on `skipped_deleted` again. **Deploying needs the `AddDeletedHashes` migration plus a
+rebuild of api, media-worker and frontend**; after that, re-deleting the 167 through Review makes
+them stay gone. There is no un-delete UI — remove the row by hand if a photo is ever wanted back.
 
 `${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
 (`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding

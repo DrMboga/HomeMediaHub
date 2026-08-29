@@ -48,6 +48,106 @@ public sealed class IngestConsumerTests : IDisposable
     }
 
     [Fact]
+    public async Task DeletedHash_MarksJobSkippedDeleted_AndSavesNoMediaRow()
+    {
+        // The Phase 14 finding: deleting a photo in Review used to un-shadow its duplicate, and
+        // the next scan ingested that copy as a brand-new photo. 167 came back that way on prod.
+        var dbName = Guid.NewGuid().ToString();
+        var file = await SaveJpegAsync("resurrected.jpg");
+        var hash = await new FileHashService().HashAsync(file, CancellationToken.None);
+
+        var jobId = Guid.NewGuid();
+        using (var seed = TestDbContextFactory.CreateShared(dbName))
+        {
+            seed.DeletedHashes.Add(new DeletedHash { FileHash = hash, LastFilePath = "/photo/gone.jpg" });
+            seed.ProcessingJobs.Add(new ProcessingJob { Id = jobId, FilePath = file, Status = "queued" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var provider = BuildProvider(_ => TestDbContextFactory.CreateShared(dbName));
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        await harness.Bus.Publish(new FileDiscovered(jobId, Guid.NewGuid(), file, "scan", false, DateTimeOffset.UtcNow));
+        Assert.True(await harness.Consumed.Any<FileDiscovered>());
+
+        using var check = TestDbContextFactory.CreateShared(dbName);
+        var job = await check.ProcessingJobs.FirstAsync(j => j.Id == jobId);
+        Assert.Equal("skipped_deleted", job.Status);
+        Assert.Null(job.MediaFileId);          // nothing to point at — the photo is gone
+        Assert.Empty(check.MediaFiles);        // and nothing came back into the library
+
+        await harness.Stop();
+    }
+
+    [Fact]
+    public async Task DeletedHash_WithReprocess_StaysDeleted()
+    {
+        // Retry must not be a way back in: a deleted photo stays deleted even on an explicit
+        // FileDiscovered(Reprocess: true), because the reprocess shortcut only applies when a
+        // media row already exists for the path.
+        var dbName = Guid.NewGuid().ToString();
+        var file = await SaveJpegAsync("retry-deleted.jpg");
+        var hash = await new FileHashService().HashAsync(file, CancellationToken.None);
+
+        var jobId = Guid.NewGuid();
+        using (var seed = TestDbContextFactory.CreateShared(dbName))
+        {
+            seed.DeletedHashes.Add(new DeletedHash { FileHash = hash });
+            seed.ProcessingJobs.Add(new ProcessingJob { Id = jobId, FilePath = file, Status = "failed" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var provider = BuildProvider(_ => TestDbContextFactory.CreateShared(dbName));
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        await harness.Bus.Publish(new FileDiscovered(jobId, Guid.NewGuid(), file, "retry", true, DateTimeOffset.UtcNow));
+        Assert.True(await harness.Consumed.Any<FileDiscovered>());
+
+        using var check = TestDbContextFactory.CreateShared(dbName);
+        var job = await check.ProcessingJobs.FirstAsync(j => j.Id == jobId);
+        Assert.Equal("skipped_deleted", job.Status);
+
+        await harness.Stop();
+    }
+
+    [Fact]
+    public async Task LiveDuplicateWins_OverADeletedHash()
+    {
+        // Both records exist for one hash: a live photo and an older deletion. The live photo is
+        // the stronger answer — the content IS in the library — so the job is a duplicate of it,
+        // not a resurrection attempt.
+        var dbName = Guid.NewGuid().ToString();
+        var file = await SaveJpegAsync("both.jpg");
+        var hash = await new FileHashService().HashAsync(file, CancellationToken.None);
+
+        var liveId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        using (var seed = TestDbContextFactory.CreateShared(dbName))
+        {
+            seed.MediaFiles.Add(new MediaFile { Id = liveId, FilePath = "/photo/live.jpg", FileHash = hash });
+            seed.DeletedHashes.Add(new DeletedHash { FileHash = hash });
+            seed.ProcessingJobs.Add(new ProcessingJob { Id = jobId, FilePath = file, Status = "queued" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var provider = BuildProvider(_ => TestDbContextFactory.CreateShared(dbName));
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        await harness.Bus.Publish(new FileDiscovered(jobId, Guid.NewGuid(), file, "scan", false, DateTimeOffset.UtcNow));
+        Assert.True(await harness.Consumed.Any<FileDiscovered>());
+
+        using var check = TestDbContextFactory.CreateShared(dbName);
+        var job = await check.ProcessingJobs.FirstAsync(j => j.Id == jobId);
+        Assert.Equal("skipped_duplicate", job.Status);
+        Assert.Equal(liveId, job.MediaFileId);
+
+        await harness.Stop();
+    }
+
+    [Fact]
     public async Task DuplicateByHash_MarksJobSkippedDuplicate()
     {
         var dbName = Guid.NewGuid().ToString();

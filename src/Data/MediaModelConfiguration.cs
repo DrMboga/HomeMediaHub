@@ -131,6 +131,15 @@ public static class MediaModelConfiguration
             e.Property(x => x.CreatedAt).HasDefaultValueSql("NOW()");
         });
 
+        builder.Entity<DeletedHash>(e =>
+        {
+            e.ToTable("deleted_hashes", schema: "public", Table<DeletedHash>());
+            // The hash is the key: re-deleting a photo that came back must be idempotent, and
+            // ingest's only query is an exact lookup, so the PK index is the whole access plan.
+            e.HasKey(x => x.FileHash);
+            e.Property(x => x.DeletedAt).HasDefaultValueSql("NOW()");
+        });
+
         builder.Entity<PotdSend>(e =>
         {
             e.ToTable("potd_sends", schema: "public", Table<PotdSend>());

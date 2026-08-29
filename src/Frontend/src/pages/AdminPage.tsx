@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<keyof import('../types/api').JobStatusCounts, string
   completed: 'Completed',
   failed: 'Failed',
   skippedDuplicate: 'Duplicates',
+  skippedDeleted: 'Deleted',
 }
 
 function formatDate(iso: string | null): string {
@@ -107,7 +108,10 @@ export function AdminPage() {
 
   const counts = status?.counts
   const total = status?.total ?? 0
-  const doneCount = (counts?.completed ?? 0) + (counts?.skippedDuplicate ?? 0)
+  // Every terminal-but-not-failed status counts as done, or the bar stalls short of 100%
+  // whenever a scan rediscovers content the user deleted.
+  const doneCount =
+    (counts?.completed ?? 0) + (counts?.skippedDuplicate ?? 0) + (counts?.skippedDeleted ?? 0)
   const progressPct = total > 0 ? Math.round((doneCount / total) * 100) : 0
 
   return (

@@ -25,6 +25,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<SeriesMedia>     SeriesMedia       => Set<SeriesMedia>();
     public DbSet<VideoTranscode>  VideoTranscodes   => Set<VideoTranscode>();
     public DbSet<PotdSend>        PotdSends         => Set<PotdSend>();
+    public DbSet<DeletedHash>     DeletedHashes     => Set<DeletedHash>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

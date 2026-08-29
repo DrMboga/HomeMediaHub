@@ -102,6 +102,8 @@ try
     builder.Services.AddSingleton<TelegramPhotoSender>();
 
     builder.Services.AddSingleton<JwtTokenService>();
+    // Scoped: it writes through the request's AppDbContext.
+    builder.Services.AddScoped<DeletedHashRecorder>();
 
     builder.Services.AddMediatR(cfg =>
         cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
