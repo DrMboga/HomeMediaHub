@@ -2265,3 +2265,292 @@ separate functions — the URL format is unchanged, only the rendering.
 **Mike confirmed the reformatted picker on prod the same day. Phase 13 is closed** — all five steps
 done, nothing deferred out of it except Step 4's progressive reveal, which the 02 May measurement
 retired rather than postponed.
+
+---
+
+## Phase 14 — Immich ingestion: make the library scan safe
+
+> **Specified 2026-08-29**, after Mike's first real iPhone backup (350 photos) landed on prod.
+> Promoted from `docs/backlog.md` → "The scan would ingest Immich's own thumbnails and transcodes
+> — 2026-08-17", which predicted the derivative problem from reading the code. That entry was
+> right about the derivatives and **wrong about the storage layout** — measurement below.
+> Two further problems it did not anticipate.
+>
+> **Nothing is broken yet.** `Scan:Enabled=false` on prod and no scan has run since Immich started
+> writing, so `media_files` holds **0** rows under `/photo/iPhone` and `processing_jobs` holds 0.
+> Every step here has to land **before the next Trigger Scan**.
+
+### What is actually on disk — measured 2026-08-29
+
+`${PHOTO_DIR}/iPhone` is not a folder of photos. It is Immich's whole media root
+(`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`), and it sits inside our scan root:
+
+| Subfolder | Files | Size | Dirs | What it is |
+|---|---:|---:|---:|---|
+| `upload/93ca7a27…/<xx>/<yy>/<uuid>.EXT` | 350 | 2.1 G | 528 | **the real originals** |
+| `thumbs/…/<uuid>_preview.jpeg` + `_thumbnail.webp` | 701 | 135 M | 552 | Immich's derivatives |
+| `encoded-video/…/<uuid>.mp4` | 22 | 1.1 G | 44 | Immich's H.264 transcodes of the 21 MOVs |
+| `backups/immich-db-backup-*.sql.gz` | 14 | 231 M | 1 | weekly Immich DB dumps |
+| `library/` · `profile/` | 1 each | 8 K | 1 each | just Immich's `.immich` marker — **empty** |
+
+3.5 G total for 2.1 G of originals — a 1.67× multiplier. `/mnt/storage` has 928 G free, so space
+is not the constraint; the layout is.
+
+Upload composition: **283 HEIC · 21 MOV · 16 JPG · 13 PNG · 12 jpeg · 5 heic**. Two-level hex
+fan-out (`a9/e1/`), 528 directories for 350 files — at a 190 K-asset camera roll that is roughly
+65 K leaf directories per folder.
+
+**`library/` is empty, and that is the whole surprise.** The 2026-08-17 backlog entry and
+`docs/immich-iphone-setup.md` §3 both assume originals land under `library/<userId>/<template>`.
+They do not, because **Immich's storage template ships disabled**:
+
+```js
+// server/dist/config.js, Immich v3.1.0 (confirmed in the running container)
+storageTemplate: {
+    enabled: false,
+    hashVerificationEnabled: true,
+    template: '{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}',
+},
+```
+
+`docs/immich-iphone-setup.md` §3 says "the default … is what we want" and never says the feature
+must be switched on. Mike followed it, and the originals are sitting in the staging folder under
+GUID names. **Step 1 fixes the setting; Step 6 fixes the document that caused it.**
+
+### What survives the ingest filters
+
+Simulated on the real tree with the exact `SupportedExtensions` set from `ScanService.cs:26`,
+plus the `._` and zero-length filters:
+
+```
+encoded-video   21   ← junk
+thumbs         350   ← junk
+upload         350   ← wanted
+```
+
+**721 files queued, 371 of them garbage — a 106% junk rate**, and it scales linearly forever:
+one preview per photo, one transcode per video.
+
+Three things worth being precise about:
+
+- The 350 `_thumbnail.webp` files are spared **only because `.webp` is absent from
+  `SupportedExtensions`.** That is luck, not design. Add WebP support for any reason and the junk
+  rate doubles overnight.
+- The `_preview.jpeg` files are **1440×1920, 218 kB**. They are not obviously thumbnails. They
+  would get thumbnails, YOLO tags and CLIP embeddings, and land in the gallery, search and Tags
+  page as plausible near-duplicates of every single photo.
+- **Hash dedup catches none of it.** A preview is a different image at a different resolution, and
+  an H.264 transcode is different bytes from its HEVC source. Every one earns a real
+  `media_files` row.
+
+### The good news, also measured
+
+Nothing about the *originals* is a problem — verified before designing around them:
+
+- **Byte-identical, EXIF intact.** `DateTimeOriginal`, `GPSLatitude` and `Model: iPhone 16e` all
+  present on sampled HEIC and JPG; `DateTimeOriginal` present on the sampled PNG and jpeg too. So
+  `taken_at` and the geo lookup behave exactly as they do for the USB-imported archive.
+- **mtime is preserved, not upload time.** Immich `utimes` each file to the phone-reported
+  `fileModifiedAt` after the upload completes. Checked one file end to end: disk mtime
+  `2026-04-21 20:14:05 UTC`, `asset.fileModifiedAt` `2026-04-21 20:14:05+00`. The `taken_at`
+  mtime fallback therefore still means something.
+- **No timezone regression.** Same file: EXIF `DateTimeOriginal 2026:04:21 16:05:44` (naive local,
+  CEST) against `fileCreatedAt 14:05:44+00`. Consistent with the rest of the library — we keep
+  storing the camera's naive wall clock, per the Phase 11 note.
+- **These are genuinely new photos.** 20 sampled uploads hashed with `sha256sum`: **zero** match
+  any `file_hash` in `media_files`. April–May 2026, i.e. after the last manual USB dump
+  (`iPhoneMike2026-04-10`). Nothing here is a re-import.
+
+### Problem 1 — the scan can hash a half-written file
+
+**The one that leaves permanent damage, and the one the backlog entry missed.**
+
+Immich streams an upload **directly to its final path**. `asset-media.service.js:75`:
+
+```js
+getUploadFolder({ auth, fieldName, file }) {
+    let folder = StorageCore.getNestedFolder(StorageFolder.Upload, auth.user.id, file.uuid);
+```
+
+with the filename `${file.uuid}${extension}` — the final name, from the first byte. There is a
+`StorageCore.getTempPathInDir` (`storage.core.js:249`, a `randomUUID().tmp` name) but it is used
+for thumbnails and transcodes, **not for asset data**.
+
+So a scan overlapping a phone backup will:
+
+1. hash a partially-written HEIC,
+2. write a `media_files` row with that bogus hash, a truncated thumbnail and wrong dimensions,
+3. and **never revisit it** — `DiscoverAsync` excludes any path already in `media_files`, so when
+   the upload finishes and the bytes change, the stale row wins forever.
+
+Silent, permanent, and invisible in the "failed jobs" panels because nothing fails. Note this
+exposure is **not Immich-specific**: a Samba copy into the library is written in place too, and has
+always had this hole. Immich just makes the overlap routine instead of theoretical.
+
+### Problem 2 — deleted assets leave dangling rows
+
+Immich's trash is 30 days by default; after that the file is removed from disk. Our row stays, and
+`/thumbnail`, `/original`, `/display` and `/stream` all 404 for it.
+
+**The scan is add-only — there is no reconciliation pass anywhere in the system.** That is a
+pre-existing gap, not a new bug, but until now files never disappeared from the library on their
+own. Now they will, on a 30-day timer, without anyone touching HomeMediaHub. Currently 350 assets,
+**0 with `deletedAt` set** — so nothing is dangling yet.
+
+### Problem 3 — GUID filenames
+
+`a9e1715e-d6aa-4dcc-b3bf-9c550ed348cc.HEIC`. The real name (`IMG_5536.HEIC`) exists **only** in
+Immich's `asset.originalFileName`, and this project commits to never reading Immich's database.
+`Lightbox.tsx:267` renders `filePath` verbatim, so the lightbox would show the full GUID path.
+
+`MediaFile.ImmichAssetId` (`src/Data/Entities/MediaFile.cs:9`) exists in the schema and is
+**written by nothing** — grep finds it only in migrations and the model snapshot. It is not a
+solution to this; leave it dead or drop it in a later cleanup.
+
+---
+
+### Step 1 — fix Immich's side first (no code)
+
+**Do this before anything else: it rewrites every `originalPath`.** With 0 rows ingested that is
+free. After a scan it would be a migration.
+
+Administration → Settings, on `http://192.168.0.192:2283`:
+
+1. **Storage Template → enable it.** Keep the default `{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}`.
+2. **Set the user's Storage Label to `mike`** (Administration → Users). `StorageCore.getLibraryFolder`
+   joins mediaLocation + `library` + `user.storageLabel || user.id` — without a label the folder is
+   the raw user GUID.
+3. **Run Administration → Jobs → Storage Migration** to move the existing 350 assets.
+4. **Video Transcoding → disable.** `docs/immich-iphone-setup.md` §2 already says to, and it was
+   not done — hence 1.1 G of `encoded-video/` for 21 clips (52 MB each) that nothing reads, burnt
+   on the same 4-core box that runs YOLO and CLIP. Existing output stays; delete
+   `iPhone/encoded-video/*` by hand afterwards if you want the space back.
+5. **Machine Learning → disable**, if it still isn't (same doc, same reason).
+
+Originals then live at:
+
+```
+/mnt/storage/Photo/iPhone/library/mike/2026/2026-04-11/IMG_5181.HEIC
+```
+
+Human-readable names, date folders matching the archive's own convention, **and Problem 3 is
+gone without us reading Immich's DB.**
+
+**This also structurally kills Problem 1.** With the template on, `upload/` becomes pure staging:
+a file reaches `library/` only via an atomic same-filesystem `rename(2)` after the upload
+completes. A scan can no longer observe a partial file *there*. Step 3 still gets built, for the
+Samba path.
+
+*Verify:* `find /mnt/storage/Photo/iPhone/library -type f | wc -l` → **350**, and
+`find /mnt/storage/Photo/iPhone/upload -type f ! -name '.immich' | wc -l` → **0**. Spot-check that
+a filename reads `IMG_####.HEIC`. Re-check `asset.originalPath` in Immich's DB shows
+`/usr/src/app/upload/library/mike/…`.
+
+### Step 2 — directory exclusion in `ScanService`
+
+`ScanService.DiscoverAsync` filters on extension, `._` prefix and zero length only — there is no
+directory exclusion at all.
+
+Add `Scan:ExcludeDirs`: a list of **absolute container paths to prune**, bound from config, with
+the prod default being Immich's five internal folders:
+
+```
+/photo/iPhone/upload
+/photo/iPhone/thumbs
+/photo/iPhone/encoded-video
+/photo/iPhone/backups
+/photo/iPhone/profile
+```
+
+leaving `/photo/iPhone/library` as the only visible part of the tree.
+
+**Prune at the directory level, not per file.** That means replacing
+`new DirectoryInfo(path).EnumerateFiles("*", SearchOption.AllDirectories)` with an explicit
+stack-based walk, because .NET's enumerator has no prune callback. Filtering per file would work
+and is a smaller diff, but at a full camera roll it makes every monthly scan walk ~380 K thumbnail
+entries off the HDD purely to throw them away. The walker is perhaps 20 lines.
+
+Extend `ScanDiscovery` with `SkippedExcluded` and log it beside the sidecar and zero-length counts,
+for the reason already recorded in `ScanConsumer.cs`: a silent filter is indistinguishable from a
+scan that never saw the file.
+
+**Absolute paths, not directory names.** A name-based rule (`thumbs`, `upload`, …) is what the
+backlog entry proposed and it is tempting, but it would silently swallow a real
+`Photo/2019/upload/` if one ever existed, and it hides *which* tree was skipped in the log line.
+Config-driven absolute paths are explicit, greppable, and per-environment.
+
+*Verify:* `MediaWorker.Tests` cases over a temp tree — a file under an excluded dir is not
+returned and increments `SkippedExcluded`; a file under a *sibling* dir with the same leaf name is
+returned; an excluded dir that does not exist is not an error; empty/absent config excludes
+nothing (so stage, which has no Immich, is unaffected).
+
+### Step 3 — in-flight file guard
+
+Skip any file whose `LastWriteTimeUtc` is newer than `now - Scan:MinFileAge` (default **2
+minutes**), count it as `SkippedTooRecent`, log it.
+
+`DirectoryInfo.EnumerateFiles` already yields `FileInfo`, so `LastWriteTimeUtc` costs no extra
+syscall — the same argument the zero-length check is built on.
+
+This is belt-and-braces for Immich after Step 1, and the **only** protection the Samba/USB import
+path has ever had against being scanned mid-copy. It is safe in the direction that matters: a file
+skipped for being too fresh is picked up by the next scan, whereas a file ingested too early is
+wrong forever.
+
+The measurement that makes this correct rather than a guess: Immich backdates mtime to
+`fileModifiedAt` **after** the write completes (verified above), so a completed file is never
+"too recent" and a file being written always is.
+
+*Verify:* a test with a just-touched file (skipped, counted) and one with a backdated mtime
+(returned).
+
+### Step 4 — first real scan
+
+Only after Steps 1–3 are deployed to prod.
+
+1. `/admin` → Trigger Scan, path blank (`/photo`).
+2. Expect **350 new files discovered** and a log line naming the excluded directories.
+3. `media_files` grows by ≤ 350 — some may dedup against the archive, though the 20-file hash
+   sample says none will.
+4. Confirm **zero** rows match `file_path LIKE '%/thumbs/%'` or `'%/encoded-video/%'`.
+5. Spot-check a HEIC and a MOV end to end: gallery thumbnail, lightbox display, video stream, tags,
+   a geo pin, and semantic search hitting one of them.
+
+Baseline for the diff: `media_files` = **173,635** on 2026-08-29 (down from the Phase 12 snapshot
+of 188,416 — the Review page has been used since; query it fresh rather than trusting the number).
+
+### Step 5 — deletion reconciliation (report only)
+
+Problem 2. Deliberately the smallest possible version: at the end of a scan, count `media_files`
+rows whose `file_path` is under the scanned root but no longer exists on disk, log the count, and
+export it as a gauge alongside `homemediahub_processing_jobs_failed` so it gets a Grafana panel.
+
+**No automatic deletion or `is_deleted` flip in this step.** The failure mode of getting it wrong
+is mass-hiding a library after a bind-mount goes stale — which has already happened once on this
+host (2026-08-22, `/mnt/storage` mounted late and every container saw an empty library). A number
+on a dashboard is enough to notice the 30-day trash expiry doing its work; deciding what to do
+about it is a separate call with real data behind it.
+
+*Verify:* the count is 0 immediately after Step 4, and non-zero after deleting one file from disk
+and rescanning.
+
+### Step 6 — documentation
+
+- **`docs/immich-iphone-setup.md` §3 is actively wrong** and caused this phase — it presents the
+  default template as already in effect. Rewrite it to say the feature is off by default, name the
+  Storage Label step, and give the *measured* resulting path. §2's transcoding instruction should
+  say it must be turned off before the first backup, not after.
+- **`docs/architecture.md` §2** gains the exclusion and file-age rules as part of the scan
+  contract, since "the scan sees everything under `/photo`" is no longer true.
+- **`CLAUDE.md`** — record that `Photo/iPhone` is Immich's media root, that only `library/` is
+  scanned, and that the storage template must stay enabled.
+- **`docs/backlog.md`** — replace the 2026-08-17 entry with a pointer here, per the file's own
+  graduation rule, noting what it got right and what it got wrong.
+
+### Out of scope for this phase
+
+- Reading Immich's DB for `originalFileName` — Step 1 puts the name on disk instead.
+- Populating or dropping `MediaFile.ImmichAssetId`.
+- The nginx `/immich/` 1 MB `client_max_body_size` trap — separate entry, still open in
+  `docs/backlog.md`, and unrelated to scanning.
+- Adding `.webp` to `SupportedExtensions`. If that ever happens, Step 2 must already be in place.

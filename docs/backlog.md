@@ -11,39 +11,43 @@ Ordered newest first.
 
 ---
 
-## The scan would ingest Immich's own thumbnails and transcodes — 2026-08-17
+## Immich ingestion — graduated to Phase 14 on 2026-08-29
 
-**Blocks the first iPhone backup from being scanned.** Found while writing
-`docs/immich-iphone-setup.md`; Immich has 0 users and 0 assets so far, so nothing is broken yet.
+**Moved out of the backlog.** Steps live in `docs/delivery-plan.md` → "Phase 14 — Immich ingestion:
+make the library scan safe", written against the real tree after Mike's first iPhone backup (350
+photos) landed on prod.
 
-Immich's media root is bind-mounted *inside* the scanned tree
-(`${PHOTO_DIR}/iPhone:/usr/src/app/upload`), and it keeps derivatives beside the originals:
+This entry (written 2026-08-17 from the code, before Immich had any assets) was **right that the
+scan would ingest Immich's derivatives** — measured at 721 files discovered, 371 of them junk: 350
+`_preview.jpeg` at 1440×1920 plus 21 H.264 transcodes, none of which hash dedup can catch.
 
-```
-/mnt/storage/Photo/iPhone/{library,thumbs,encoded-video,upload,profile,backups}/
-```
+It was **wrong about the layout**. It assumed originals land under `library/`, so it proposed
+excluding `upload/` along with the rest. In fact Immich's storage template ships `enabled: false`,
+`library/` is empty, and **the originals are in `upload/`** under GUID names. Excluding by that
+list as written would have skipped the entire camera roll.
 
-`ScanService.DiscoverAsync` walks `SearchOption.AllDirectories` and filters on **extension, the
-`._` prefix, and zero length only — there is no directory exclusion.** `.mp4` and `.jpeg` are both
-in `SupportedExtensions`, so `encoded-video/*.mp4` (Immich's H.264 transcodes) and `thumbs/*`
-(previews, JPEG by Immich's default) would each be queued as new media.
+Two problems it did not anticipate, both in the phase:
 
-**Dedup does not help:** a preview is a different image at a different resolution, so it hashes
-differently and earns a genuine `media_files` row. Expect roughly one junk photo per photo and one
-junk video per video.
+- Immich streams uploads **straight to their final path** with no `.tmp` staging, so a scan
+  overlapping a phone backup hashes a half-written file — and never revisits it, because the path
+  is then in `media_files`. The same hole has always existed for Samba copies.
+- Immich's 30-day trash deletes files from disk, and the scan is add-only — no reconciliation pass
+  exists anywhere in the system.
 
-**The fix:** a directory-name exclusion in `ScanService`, skipping `thumbs`, `encoded-video`,
-`upload`, `profile` and `backups` so only `library/` is visible. Prefer excluding by directory
-name over hardcoding the Immich path — the same shape of problem returns for any tool that drops
-derivatives into the library.
+The nginx `/immich/` `client_max_body_size` note from this entry is **still open** — see below.
 
-**Not urgent yet, but sequence it:** `Scan:Enabled=false` on prod, so nothing scans on a timer and
-backing the phone up is harmless on its own. The exclusion only has to land before the next
-**Trigger Scan**.
+---
 
-Related: nginx's `/immich/` location sets no `client_max_body_size`, so uploads through it die at
-nginx's 1 MB default. The phone should use `:2283` directly, which compose publishes. Either fix
-the proxy or drop the location — today it is a trap rather than a feature.
+## nginx `/immich/` has no `client_max_body_size` — 2026-08-17
+
+The `/immich/` location in `infra/nginx/nginx.conf` proxies to `immich-server` but sets no
+`client_max_body_size`, so nginx's 1 MB default rejects every photo upload with a 413. The phone
+should use `:2283` directly, which compose publishes on all interfaces —
+`docs/immich-iphone-setup.md` §1 says so.
+
+Today the location is a trap rather than a feature: it looks like a supported path and is not one.
+Either give it a body-size limit large enough for a video (Immich's own default is unlimited) or
+delete the location. Unrelated to scanning, so deliberately left out of Phase 14.
 
 ---
 

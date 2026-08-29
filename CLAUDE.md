@@ -220,6 +220,34 @@ in the browser's locale and cannot be made to read `dd.mm.yyyy`, so it is hidden
 (`opacity: 0`, *not* `display: none`) and supplies only the calendar popup via `showPicker()`.
 Details in `docs/delivery-plan.md` → Phase 13 → "Built — 2026-08-17" and the note after it.
 
+**Phase 14 — Immich ingestion — is PLANNED, NOT BUILT (specified 2026-08-29).** Mike's first real
+iPhone backup put **350 photos** on prod. **Do not trigger a library scan until Steps 1–3 of
+`docs/delivery-plan.md` → Phase 14 are done** — measured on the real tree, a scan today discovers
+**721 files, 371 of them junk**.
+
+`${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
+(`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding
+`upload/` · `thumbs/` · `encoded-video/` · `backups/` · `library/` · `profile/`. `ScanService` has
+**no directory exclusion at all**, and `.jpeg`/`.mp4` are supported extensions, so Immich's 350
+1440×1920 `_preview.jpeg` files and 21 H.264 transcodes would each earn a real `media_files` row —
+hash dedup cannot catch them, they are different bytes. The `_thumbnail.webp` files are spared only
+because `.webp` is not in `SupportedExtensions`; that is luck, not design.
+
+**Immich's storage template ships `enabled: false`**, so `library/` is empty and the originals sit
+in the staging folder under GUID names (`a9e1715e-….HEIC`). Enabling it (Step 1, no code) moves
+them to `library/mike/2026/2026-04-11/IMG_5181.HEIC` **and** makes `upload/` pure staging — which
+also closes the worst bug: Immich streams uploads **straight to their final path** with no `.tmp`,
+so a scan overlapping a backup hashes a half-written file, writes a row with a bogus hash, and
+never revisits it because the path is then indexed. Silent, permanent, and invisible in the failed
+jobs panels. Same hole has always existed for Samba copies.
+
+Also open: Immich's 30-day trash deletes files from disk and **the scan is add-only** — no
+reconciliation pass exists anywhere in the system. Phase 14 Step 5 makes it a reported number only.
+
+The originals themselves are fine — verified byte-identical, EXIF (`DateTimeOriginal`, GPS) intact,
+mtime backdated to the phone's `fileModifiedAt`, no timezone regression, and 0 of 20 sampled hashes
+collide with the existing library.
+
 **Former blind spot — now covered.** File-level processing failures still do not fault a consumer:
 `IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than rethrowing, so
 MassTransit records a successful consume and the "consume faults" / "error queue depth" panels
