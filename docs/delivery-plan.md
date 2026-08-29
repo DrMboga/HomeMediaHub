@@ -2421,10 +2421,13 @@ Administration → Settings, on `http://192.168.0.192:2283`:
    joins mediaLocation + `library` + `user.storageLabel || user.id` — without a label the folder is
    the raw user GUID.
 3. **Run Administration → Jobs → Storage Migration** to move the existing 350 assets.
-4. **Video Transcoding → disable.** `docs/immich-iphone-setup.md` §2 already says to, and it was
-   not done — hence 1.1 G of `encoded-video/` for 21 clips (52 MB each) that nothing reads, burnt
-   on the same 4-core box that runs YOLO and CLIP. Existing output stays; delete
-   `iPhone/encoded-video/*` by hand afterwards if you want the space back.
+4. **Video Transcoding → Transcode Policy → "Don't transcode any videos"** (`ffmpeg.transcode:
+   "disabled"`; the default is `required`). `docs/immich-iphone-setup.md` §2 already said to, and
+   it was not done — hence 1.1 G of `encoded-video/` for 21 clips (52 MB each) that nothing reads,
+   burnt on the same 4-core box that runs YOLO and CLIP. Then run **Jobs → Transcode Videos →
+   All** to clear the existing output: `media.service.js:434` deletes the encoded file *and* its
+   `asset_file` row once the policy no longer requires it. **Do not `rm` the folder** — that would
+   leave 21 rows pointing at nothing.
 5. **Machine Learning → disable**, if it still isn't (same doc, same reason).
 
 Originals then live at:

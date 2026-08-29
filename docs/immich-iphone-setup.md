@@ -91,8 +91,15 @@ HomeMediaHub transcodes on demand at `/api/media/{id}/stream`).
 
 > **Correction (2026-08-29): this was not done before the first backup, and it cost 1.1 GB** —
 > 21 clips transcoded at ~52 MB each, on the same 4-core box that runs YOLO and CLIP. Turn both off
-> *before* backing anything up. Existing output stays on disk; delete
-> `/mnt/storage/Photo/iPhone/encoded-video/*` by hand to reclaim the space.
+> *before* backing anything up.
+>
+> "Turn off" means **Video Transcoding Settings → Transcode Policy → "Don't transcode any videos"**
+> — there is no on/off switch. The default is `required`, which still transcodes every HEVC clip an
+> iPhone produces.
+>
+> To clear transcodes already made, run **Jobs → Transcode Videos → All** afterwards. Immich then
+> deletes each encoded file *and* its `asset_file` row (`media.service.js:434`). **Do not delete
+> `encoded-video/` by hand** — the files would go but the rows would remain, pointing at nothing.
 
 ## 3. Enable the storage template
 
