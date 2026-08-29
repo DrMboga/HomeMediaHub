@@ -4,61 +4,45 @@ Immich runs on the server purely as the **iPhone backup endpoint**. The iOS app 
 writes the originals under `/mnt/storage/Photo/iPhone/`, and HomeMediaHub's scan picks them up from
 there. You do not use the Immich web UI day-to-day.
 
-**State as of 2026-08-29:** container up and healthy (`v3.1.0`), one user, **350 assets backed up
-from the iPhone** — and deliberately **not yet scanned** into HomeMediaHub.
-
-> **This document was written against 0 assets, and §2 and §3 below turned out to be wrong.** The
-> real tree was measured on 2026-08-29; what it actually looks like, and the six steps that make a
-> scan safe, are in `docs/delivery-plan.md` → **Phase 14**. Read that first. Corrections are marked
-> inline below.
+**State as of 2026-08-29:** `v3.1.0`, one user (`mboga`, storage label `mike`), **350 assets backed
+up and ingested into HomeMediaHub**. Storage template on, video transcoding and machine learning
+off. Everything below is measured on that setup, not predicted.
 
 ---
 
-## ⚠️ Read this before you back anything up
+## Why Immich's folders are dangerous to scan
 
-**A scan of `/photo` today would ingest Immich's own derivative files as if they were photos.**
-
-`ScanService.DiscoverAsync` (`src/MediaWorker/Services/ScanService.cs`) walks
-`SearchOption.AllDirectories` from `/photo` and filters on three things only: file extension, the
-AppleDouble `._` prefix, and zero length. **There is no directory exclusion.** Immich's media root
-is bind-mounted *inside* the scanned tree:
+`${PHOTO_DIR}/iPhone` is **not a folder of photos — it is Immich's entire media root**
+(`IMMICH_MEDIA_LOCATION`, `docker-compose.yml`), and it sits inside the tree HomeMediaHub scans:
 
 ```
-/mnt/storage/Photo/iPhone/          ← ${PHOTO_DIR}/iPhone, mounted as Immich's /usr/src/app/upload
-├── upload/     350 files, 2.1 G    ← the originals ARE HERE (storage template is off)
-├── thumbs/     701 files, 135 M    ← Immich's own previews — 350 .jpeg + 350 .webp
-├── encoded-video/ 21 files, 1.1 G  ← Immich's H.264 transcodes, .mp4
-├── backups/     13 files, 231 M    ← .sql.gz, harmless (extension not supported)
-├── library/    EMPTY               ← where the originals go once §3 is done
-└── profile/    EMPTY               ← avatars
+/mnt/storage/Photo/iPhone/       ← mounted as Immich's /usr/src/app/upload
+├── library/mike/YYYY/YYYY-MM-DD/IMG_1234.heic   ← the originals. The ONLY folder we scan.
+├── upload/          staging for in-flight uploads — emptied on completion
+├── thumbs/          Immich's previews: one .jpeg + one .webp per photo
+├── encoded-video/   Immich's H.264 transcodes (empty while transcoding is off)
+├── backups/         weekly Immich DB dumps, .sql.gz
+└── profile/         avatars
 ```
 
-> **Correction (2026-08-29):** the tree above originally showed the originals under `library/`.
-> They are not there — the storage template ships **disabled**, so they sit in `upload/` under GUID
-> names. See §3. This matters: an exclusion list written against the old assumption would have
-> skipped the entire camera roll.
+`.jpeg` and `.mp4` are both in `SupportedExtensions`, so **without an exclusion every preview and
+every transcode is ingested as a photo**, and dedup cannot help — a preview is a different image at
+a different resolution, so it hashes differently and earns a real `media_files` row. Measured
+before the fix: a scan discovered **721 files, 371 of them junk**. The `_thumbnail.webp` files
+escaped only because `.webp` is not a supported extension — luck, not design.
 
-`.mp4` and `.jpeg` are both in `SupportedExtensions`, so every transcode and every preview would be
-queued as a new media file. **Dedup will not save you** — a preview is a different image at a
-different resolution, so it hashes differently and becomes a genuine second row. The result is
-roughly one junk photo per photo and one junk video per video.
+**This is handled, and must stay handled.** `SCAN_EXCLUDE_DIRS` in `.env.prod` prunes the five
+non-`library` folders, and `SCAN_MIN_FILE_AGE_SECONDS` (120) stops a scan hashing a file that is
+still being written — Immich streams uploads straight to their final path with no temp name, and so
+does a Samba copy. Both are Phase 14; see `docs/delivery-plan.md` and `docs/architecture.md` §2.
 
-*(All of this is now measured rather than predicted. A scan today discovers **721 files, 371 of
-them junk**: 350 `_preview.jpeg` at 1440×1920 and 21 transcodes, against 350 real photos. The
-`_thumbnail.webp` files escape only because `.webp` is not in `SupportedExtensions`.)*
+> **If you ever add a service that writes derivatives into the library, add its folders to
+> `SCAN_EXCLUDE_DIRS` before the next scan.** And if `.webp` is ever added to
+> `SupportedExtensions`, the exclusion is the only thing standing between you and 350 more junk
+> rows per backup.
 
-**You are not at risk right now.** `Scan:Enabled=false` on prod, so nothing scans on a timer; the
-only way a scan starts is you pressing **Trigger Scan** on `/admin`. So:
-
-> **Safe order: set Immich up and back up your phone freely. Do not run a scan until the directory
-> exclusion is in.** Backing up is harmless on its own — the files just sit on disk.
-
-The fix is a directory exclusion in `ScanService` (skip `thumbs`, `encoded-video`, `upload`,
-`profile`, `backups`), so the scan sees only `library/` — **but only after §3 has actually put the
-originals in `library/`.** Order matters. There is also a second hazard the original version of
-this document missed: Immich streams uploads **straight to their final path** with no temp name, so
-a scan overlapping a phone backup can hash a half-written file and index it permanently. Both are
-handled by `docs/delivery-plan.md` → Phase 14, Steps 1–3.
+`Scan:Enabled=false` on prod, so nothing scans on a timer — the only way a scan starts is
+**Trigger Scan** on `/admin`.
 
 ---
 
@@ -85,57 +69,55 @@ HomeMediaHub does its own YOLO + CLIP work. The server logs
 
 **Administration → Settings → Machine Learning → disable.**
 
-Also worth turning off, since nothing reads them and they cost CPU and disk on the same box that
-runs the pipeline: **Video transcoding** (Immich's `encoded-video/` output is never used by us —
-HomeMediaHub transcodes on demand at `/api/media/{id}/stream`).
+**Video transcoding must also go off, and it is not a switch.** Immich's `encoded-video/` output is
+never read by us — HomeMediaHub transcodes on demand at `/api/media/{id}/stream` — but the default
+policy is `required`, which still transcodes every HEVC clip an iPhone produces. Left on through
+the first backup it cost **1.1 GB for 21 clips**, on the same 4-core box that runs YOLO and CLIP.
 
-> **Correction (2026-08-29): this was not done before the first backup, and it cost 1.1 GB** —
-> 21 clips transcoded at ~52 MB each, on the same 4-core box that runs YOLO and CLIP. Turn both off
-> *before* backing anything up.
->
-> "Turn off" means **Video Transcoding Settings → Transcode Policy → "Don't transcode any videos"**
-> — there is no on/off switch. The default is `required`, which still transcodes every HEVC clip an
-> iPhone produces.
->
-> To clear transcodes already made, run **Jobs → Transcode Videos → All** afterwards. Immich then
-> deletes each encoded file *and* its `asset_file` row (`media.service.js:434`). **Do not delete
-> `encoded-video/` by hand** — the files would go but the rows would remain, pointing at nothing.
+**Administration → Settings → Video Transcoding Settings → Transcode Policy → "Don't transcode any
+videos".**
+
+To clear transcodes already made, run **Jobs → Transcode Videos → All** afterwards: Immich deletes
+each encoded file *and* its `asset_file` row (`media.service.js:434`). **Do not delete
+`encoded-video/` by hand** — the files would go but the rows would remain, pointing at nothing.
 
 ## 3. Enable the storage template
 
-> **Correction (2026-08-29): "check" was wrong — the feature ships switched off.** Immich v3.1.0's
-> `server/dist/config.js` reads `storageTemplate: { enabled: false, template: '{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}' }`.
-> Because it was left off, all 350 originals are in the **staging** folder
-> `upload/<userId>/<xx>/<yy>/<uuid>.HEIC` under GUID names, and `library/` is empty. You must:
->
-> 1. **enable** the template (keep the default value);
-> 2. set the user's **Storage Label** under Administration → Users — without one the folder is the
->    raw user GUID, because Immich uses `storageLabel || id`;
-> 3. run **Administration → Jobs → Storage Migration** to move the assets already uploaded.
->
-> Do this **before the first scan** — it rewrites every path, which is free while nothing is
-> indexed and a migration afterwards. Verify commands: `docs/delivery-plan.md` → Phase 14 → Step 1.
+**The template ships switched off, and this is the setting that matters most.** Immich v3.1.0's
+`server/dist/config.js` reads
+`storageTemplate: { enabled: false, template: '{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}' }` — so
+until you enable it, originals sit in the **staging** folder
+`upload/<userId>/<xx>/<yy>/<uuid>.HEIC` under GUID names and `library/` stays empty.
 
-**Administration → Settings → Storage Template.** The default
+**Administration → Settings → Storage Template**, in this order:
+
+1. **Set the user's Storage Label first** (Administration → Users → the user). Immich builds the
+   folder from `storageLabel || id`, so without one you get the raw user GUID — and it defaults to
+   `admin`, which is a poor name for a family photo folder. `mike` is what prod uses.
+2. **Enable the template.** Keep the default value and leave **Hash verification** on — it
+   checksums each file around the move.
+3. **Administration → Jobs → Storage Template Migration** to move assets already uploaded.
+
+Do all three **before the first scan.** It rewrites every `originalPath`, which is free while
+nothing is indexed and a migration afterwards. Verify commands: `docs/delivery-plan.md` → Phase 14
+→ Step 1.
+
+A photo then lands at
 
 ```
-{{y}}/{{y}}-{{MM}}-{{dd}}/{{filename}}
+/mnt/storage/Photo/iPhone/library/mike/2026/2026-04-11/IMG_5181.heic
 ```
 
-is what we want. It applies *beneath* `library/<storageLabel>/`, so with the label set to `mike` a
-photo lands at
+Note the **lowercase extension**: the template lowercases every extension and also canonicalises
+`jpeg` → `jpg`. Harmless here — every extension comparison HomeMediaHub makes is case-insensitive,
+and both `.jpg` and `.jpeg` are supported — but it means the name on disk is not byte-identical to
+the name on the phone.
 
-```
-/mnt/storage/Photo/iPhone/library/mike/2026/2026-04-11/IMG_5181.HEIC
-```
-
-Confirm the real path after the migration rather than trusting this line — the `library/<label>/`
-prefix is Immich's, not something the template controls.
-
-Two things this buys beyond tidiness: the original filename (`IMG_5181.HEIC`) reaches the disk, so
-HomeMediaHub never has to read Immich's database to get it; and `upload/` becomes pure staging, with
-files reaching `library/` only by an atomic same-filesystem rename once fully written — which is
-what makes a scan safe to run while the phone is backing up.
+Two things this buys beyond tidiness. The original filename reaches the disk, so HomeMediaHub never
+has to read Immich's database to get it — without the template the only copy of `IMG_5181.HEIC`
+lives in Immich's `asset.originalFileName`, and the lightbox would show a GUID path. And `upload/`
+becomes pure staging: a file reaches `library/` only by an atomic same-filesystem rename once fully
+written, which is what makes a scan safe to run while the phone is backing up.
 
 ---
 
@@ -156,12 +138,21 @@ foreground is much faster.
 
 ## 5. Getting the photos into HomeMediaHub
 
-Once **Phase 14 Steps 1–3** are done — the storage template enabled and migrated, the scan's
-directory exclusion and file-age guard deployed:
-
 - **`/admin` → Library Scan → Trigger Scan** (leave the path blank for `/photo`), or
   `POST /api/admin/scan`.
 - Watch progress on the same page, or with `docs/monitoring.md`.
+
+Check the scan's own log line before trusting the result — it reports every filter, even at zero:
+
+```
+Scan {id}: discovered 1342 new files under /photo
+Scan {id}: skipped 14 AppleDouble sidecar(s), 0 zero-length file(s) and 0 file(s)
+           written too recently; pruned 5 excluded director(ies)
+```
+
+**`pruned 5` is the one to look at.** If it says 0, `SCAN_EXCLUDE_DIRS` is missing from `.env.prod`
+or the worker was restarted rather than recreated, and the scan is about to ingest Immich's
+thumbnails.
 
 There is no automatic scan: `Scan:Enabled=false`, and `ScanScheduler` logs
 `ScanScheduler disabled` at startup. Turning it on would run monthly at 02:00 on the 1st.
@@ -179,6 +170,11 @@ There is no automatic scan: `Scan:Enabled=false`, and `ScanScheduler` logs
   H.264 on first play and caches it — which is why Immich's own transcoding is redundant here.
 - **Duplicates**: ingest hashes every file before insert, so scanning twice processes each file
   once. Note the known wrinkle in `docs/backlog.md` — files already recorded as
-  `skipped_duplicate` are re-hashed on every scan.
+  `skipped_duplicate` are re-hashed on every scan. A photo you deleted in Review is remembered by
+  hash in `deleted_hashes` and lands on `skipped_deleted` instead, so it cannot come back from a
+  second copy on disk.
+- **Deletions do not sync.** Immich's backup is one-way: removing a photo from the iPhone camera
+  roll leaves the server asset alone, and HomeMediaHub never sees a deletion. Nothing under
+  `library/` disappears unless someone acts in Immich's own UI (its trash is enabled, 30 days).
 - **Immich's own UI** at `:2283` will show the backed-up photos, but HomeMediaHub on port 80 is the
   library.

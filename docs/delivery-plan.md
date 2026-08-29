@@ -2772,3 +2772,51 @@ their hashes and they stop coming back.
 **Not built, deliberately:** any way to *un*-delete a hash. If Mike ever wants a photo back after
 deleting it, the row has to be removed by hand — `delete from deleted_hashes where file_hash = …`.
 Worth a UI only if it turns out to be needed.
+
+### Step 5 dropped, Step 6 done — 2026-08-29
+
+**Step 5 (deletion reconciliation) is not being built, and the plan above over-stated its case.**
+Mike's objection, checked and correct: he never opens the Immich UI, Immich's backup is one-way (a
+photo removed from the iPhone camera roll leaves the server asset alone), and **0 of the 350 assets
+are in Immich's trash**. Nothing under `library/` disappears on its own, so the 30-day trash expiry
+that motivated the step does not fire on this library.
+
+The underlying gap is real but has nothing to do with Immich: **Samba**. Mike and Badger can delete
+straight from the share, which leaves a `media_files` row whose thumbnail, original, display and
+stream all 404, and always has. The same number would also have made the 2026-08-22 bind-mount
+incident obvious, when every container saw an empty library. Re-filed in `docs/backlog.md` as a
+library-health item, motivated by drift rather than by Immich.
+
+### Step 6 — docs
+
+`architecture.md` carried the most staleness, some of it introduced today:
+
+- **§2** — the scan step in the pipeline diagram now shows both filters, and a new "Scan filters"
+  block gives the two settings, their env vars, and the three non-obvious design points (absolute
+  paths over directory names; prune rather than filter, and therefore a hand-rolled walk that does
+  not follow symlinks; the age guard being about Samba as much as Immich). It also records that the
+  skip counts describe *files that would otherwise have been queued* — the rule the year-2262 mtime
+  broke.
+- **§2 ingest + §7** — `skipped_deleted` added to the diagram, the lifecycle line and the
+  transition table, with the distinction spelled out: `skipped_duplicate` carries a
+  `media_file_id`, `skipped_deleted` cannot, because the photo it would duplicate is gone.
+- **§9** — `deleted_hashes` added to the Api-owned table list with its columns, writer and reader.
+- **§9 ivfflat, pre-existing and unrelated to Phase 14** — the note still told the reader to
+  "recreate it once after the full archive import", which the 2026-08-16 measurement reversed.
+  Replaced with the measurement and a do-not-re-add. Left in place it was a trap.
+- **Status banner** — said "in progress — Steps 1–8". Now says Phase 8 is complete and in
+  production, that Phases 9–14 amended this document in place, and which section belongs to which
+  phase.
+
+`CLAUDE.md` — lifecycle line and the pipeline summary block, both of which listed the old status
+set and an unfiltered scan.
+
+`docs/immich-iphone-setup.md` — rewritten rather than patched. The inline "Correction (2026-08-29)"
+blocks were scaffolding for a half-finished phase; with Steps 1–4 done they were harder to read
+than the truth. It now states the measured setup, keeps the folder-layout warning as a permanent
+rule (with the `.webp` trap called out), gives the storage-template steps in the order that
+actually works (**label before enable before migrate**), records the `jpeg` → `jpg` canonicalisation
+the UI does not mention, and tells the reader to check `pruned 5` in the scan log before trusting a
+scan. Two new notes: deletions do not sync from the phone, and `skipped_deleted`.
+
+**Phase 14 is complete** — Steps 1, 2, 3, 4, 4b and 6 done and deployed; Step 5 dropped with cause.

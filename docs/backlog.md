@@ -11,6 +11,40 @@ Ordered newest first.
 
 ---
 
+## Nothing notices when a file vanishes from the library — 2026-08-29
+
+**Scoped as Phase 14 Step 5, then dropped and re-filed here** once its stated motivation turned out
+not to apply.
+
+The scan is **add-only**. `DiscoverAsync` finds files that are not yet indexed; nothing anywhere in
+the system looks for `media_files` rows whose file is gone. Such a row keeps rendering in the
+gallery, on the map and in search results, and its thumbnail, original, display and stream
+endpoints all 404.
+
+**The Immich motivation was wrong.** Step 5 argued that Immich's 30-day trash would remove files on
+a timer. Checked on prod: trash is enabled with the 30-day default but **0 of 350 assets are in
+it**, and Immich's backup is one-way — deleting a photo from the iPhone camera roll leaves the
+server asset alone. Mike does not use the Immich UI, so nothing under `library/` disappears.
+
+**The real paths are two, and both predate Immich:**
+
+1. **Samba.** The library is a writable share. Deleting a file in Finder or Explorer removes it with
+   no notification to HomeMediaHub. This has always been possible and has never been detected.
+2. **A stale bind mount.** On 2026-08-22 `/mnt/storage` mounted after Docker and every container saw
+   an empty library. A reconciliation count would have read ~174,000 missing — the loudest possible
+   signal, where the actual symptom was site-wide 404s that took a while to explain.
+
+**Report only, if built.** Count `media_files` rows under the scanned root whose file no longer
+exists, log it, export it as a gauge beside `homemediahub_processing_jobs_failed` (copy
+`FailedJobsCollector`). **No automatic `is_deleted` flip or row deletion** — case 2 is exactly when
+the number is huge and exactly when acting on it would hide the whole library. Deciding what to do
+about a non-zero count wants real data first, and the count is what produces it.
+
+Cheap: one `File.Exists` per row at the end of a scan, plus a collector. The reason it is deferred
+rather than done is that its value is entirely about a case nobody has hit yet on purpose.
+
+---
+
 ## nginx caches upstream IPs, so a partial deploy 502s the whole site — 2026-08-29
 
 **Caused a real prod outage the day it was written.** `api`, `media-worker` and `frontend` were

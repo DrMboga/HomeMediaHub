@@ -11,11 +11,15 @@
 > (§5 — `worker.py`/`app.py`/`inference.py`, raw-JSON publish, always-ACK), all five services wired
 > into `docker-compose.yml` + RabbitMQ/Prometheus/Grafana added (Step 7), and the frontend Admin
 > page (Step 8, §10 — scan trigger, pipeline progress, failed-job retry). n8n is fully removed.
-> The first stage rollout ran green on **2026-08-02** — a scan ingested the full TestPhoto library
-> and the saga applied geo addresses and AI labels, so this document now describes running
-> software, not just a target. Not yet done: the checklist's failure-path and observability items,
-> and the prod/full-archive run (Phase 9). The step-by-step migration guide lives in
-> [`delivery-plan.md`](delivery-plan.md).
+>
+> **Phase 8 is complete and running in production.** The full archive import drained on
+> **2026-08-16**, and Phases 9–14 have shipped on top of it — so this document describes deployed
+> software, not a target, and the "Phase 8 Target" in its title is now historical. Later phases
+> amended it in place rather than forking it: §2's scan filters and §7's `skipped_deleted` are
+> Phase 14; §9's `deleted_hashes` is Phase 14 and `potd_sends` is Phase 11; §14 is Photo of the
+> Day. **§9's ivfflat note is the one to read twice — the index was dropped again on 2026-08-16
+> and must not come back.** The step-by-step history lives in
+> [`delivery-plan.md`](delivery-plan.md), deferred work in [`backlog.md`](backlog.md).
 
 ## 1. System Context
 
@@ -100,14 +104,16 @@ POST /api/admin/scan   or   ScanScheduler (monthly cron 0 2 1 * *, in API)
   └─ publish ScanRequested
         ▼
   ScanConsumer                                                 [queue: media-scan]
-        enumerate ${path} recursively (supported extensions);
+        enumerate ${path} recursively (supported extensions), pruning Scan:ExcludeDirs;
         exclude paths already in media_files OR with an active processing_job;
+        exclude files written within Scan:MinFileAge (may still be being written);
         INSERT processing_jobs (status=queued, scan_id) in ~1000-row batches;
         publish FileDiscovered per file
         ▼
   IngestConsumer                              [queue: media-ingest, prefetch 2/concurrency 2]
         job → processing
         SHA-256 hash → dedup by file_hash → duplicate? job → skipped_duplicate, stop
+                     → in deleted_hashes? job → skipped_deleted, stop
         convert:  HEIC → /shared-temp/{mediaFileId}.jpg (heif-convert + exiftool)
                   video → single frame JPEG (ffmpeg)
         extract metadata (ImageSharp EXIF / exiftool -json for video)
@@ -150,6 +156,33 @@ queues remain as a human-inspectable backstop, not a data path.
 
 **Ingest strategy:** No Immich webhooks. Immich writes files to disk; scans (manual or monthly)
 discover them. The API contains no processing logic — it only publishes `ScanRequested`.
+
+**Scan filters (Phase 14).** "The scan sees everything under `/photo`" stopped being true once
+Immich's media root landed *inside* the library, so `ScanService` takes two configured filters and
+reports what each one cost:
+
+| Setting | Env | Purpose |
+|---|---|---|
+| `Scan:ExcludeDirs` | `SCAN_EXCLUDE_DIRS` (`;`-separated) | Absolute container paths the walk does not descend into. Prod excludes Immich's `upload`, `thumbs`, `encoded-video`, `backups` and `profile`, leaving only `library/`. Empty on stage. |
+| `Scan:MinFileAgeSeconds` | `SCAN_MIN_FILE_AGE_SECONDS` (default 120) | A file must be untouched this long to be eligible. `0` disables it. |
+
+Three design points that are not obvious from the code:
+
+- **Absolute paths, not directory names.** A name rule would also swallow a real
+  `Photo/2019/upload/`, and the log line could not say which tree it skipped.
+- **The walk prunes rather than filters.** `EnumerateFiles(SearchOption.AllDirectories)` has no
+  prune hook, so it is a hand-rolled stack walk; filtering after enumeration would still read two
+  thumbnail entries per photo off the HDD on every scan. It also does not follow directory
+  symlinks — a hand-rolled walk has no cycle detection.
+- **The file-age guard is not only about Immich.** Immich streams uploads straight to their final
+  path with no temp name, but so does a Samba copy — this is the only thing that has ever stopped
+  a scan hashing a half-written file and indexing it permanently.
+
+`ScanDiscovery` carries `SkippedSidecars`, `SkippedEmpty`, `SkippedTooRecent` and
+`PrunedDirectories`, all logged by `ScanConsumer` even at zero. **The counts describe files that
+would otherwise have been queued** — already-indexed files leave before any counter, which is why
+a long-indexed JPEG with a corrupt year-2262 mtime stopped being reported as "written too
+recently" (Phase 14 Step 4).
 
 ## 3. Message Contracts — `src/Contracts/Messages/`
 
@@ -308,13 +341,14 @@ column), `JobId`, `WorkFilePath`, `AiDone`, `AiSuccess`, `TagsJson`, `EmbeddingJ
 The pipeline's user-facing ledger (n8n's execution list replacement). One row per discovered
 file per scan.
 
-**Lifecycle:** `queued → processing → enriching → completed | failed | skipped_duplicate`
+**Lifecycle:** `queued → processing → enriching → completed | failed | skipped_duplicate | skipped_deleted`
 
 | Transition | Written by |
 |---|---|
 | insert `queued` (+ `scan_id`) | ScanConsumer (or retry endpoint resets to `queued`) |
 | → `processing` | IngestConsumer (start) |
-| → `skipped_duplicate` | IngestConsumer (dedup hit) |
+| → `skipped_duplicate` | IngestConsumer (dedup hit — `media_file_id` points at the photo it duplicates) |
+| → `skipped_deleted` | IngestConsumer (hash found in `deleted_hashes`; **no `media_file_id`** — the photo this file would duplicate was deleted, and that absence is the distinction) |
 | → `enriching` (+ `media_file_id`) | IngestConsumer (after save + saga start) |
 | → `completed` | ApplyEnrichmentConsumer (both parts OK) |
 | → `failed` (+ `failed_step` = `ingest`/`ai`/`geo`, `error_message`) | JobFailureConsumer (ingest faults) or ApplyEnrichmentConsumer (enrichment partial failure — the media row stays visible in the gallery) |
@@ -384,14 +418,21 @@ are deleted; the database itself is created by `POSTGRES_DB=homemediahub_db`):
   media schema (new `AddMediaSchema` migration): `media_files`, `media_metadata`, `media_tags`,
   `media_embeddings` (`vector(512)` via `HasPostgresExtension("vector")` + Pgvector), `media_thumbnails`,
   `albums`, `album_media`, `photo_series`, `series_media`, `video_transcodes`, `processing_jobs`,
-  and `potd_sends` (added later by `AddPotdSends`, Phase 11 — §14).
+  `potd_sends` (added later by `AddPotdSends`, Phase 11 — §14), and `deleted_hashes`
+  (`AddDeletedHashes`, Phase 14): `file_hash` PK, `last_file_path`, `deleted_at`. Written by the
+  Api's `DeletedHashRecorder` when Review hard-deletes a photo, read by
+  `DedupService.WasDeletedAsync` so a second copy of that content on disk is never re-ingested.
   Notable in `AddMediaSchema`:
   - **unique** `media_files(file_path)` and `media_files(file_hash)`
   - `processing_jobs`: `n8n_execution_id` dropped; `scan_id`, `media_file_id` added; indexes on
     `(status)` and `(scan_id, status)`; partial unique on `(file_path)` for active statuses (raw
     `migrationBuilder.Sql`)
-  - ivfflat index on embeddings (`vector_cosine_ops, lists=100`) via `migrationBuilder.Sql` —
-    created on an empty table, so **recreate it once after the full archive import** for recall
+  - ivfflat index on embeddings (`vector_cosine_ops, lists=100`) via `migrationBuilder.Sql`.
+    **Dropped again on 2026-08-16 (`DropIvfflatEmbeddingIndex`) — semantic search runs an exact
+    scan and must keep doing so.** Measured on the full prod table: exact 354 ms with perfect
+    recall, versus 556 ms and 7/15 (image vector) or 0/15 (text query vector) for the index at its
+    live `probes = 1`. Built on an empty table, its centroids modelled nothing. Do not re-add
+    ivfflat; if ~350 ms ever hurts, use HNSW (pgvector 0.8.6 is installed).
   - `media_files.created_at` mapped (existed in old init SQL, was unmapped)
 - **MediaWorker's `WorkerDbContext`** maps the same entities via the shared
   `ConfigureMediaEntities(…, excludeFromMigrations: true)` and owns exactly one migration:

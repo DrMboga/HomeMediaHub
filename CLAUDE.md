@@ -220,12 +220,14 @@ in the browser's locale and cannot be made to read `dd.mm.yyyy`, so it is hidden
 (`opacity: 0`, *not* `display: none`) and supplies only the calendar popup via `showPicker()`.
 Details in `docs/delivery-plan.md` → Phase 13 → "Built — 2026-08-17" and the note after it.
 
-**Phase 14 — Immich ingestion — Steps 1–4 DONE and verified on prod 2026-08-29.** The first real
-iPhone backup (350 photos) is in the library: scan `d4b3b519` discovered **1,342**, pruned 5
-directories, and left **zero** rows under `thumbs/`, `encoded-video/` or `upload/`. `media_files`
-173,635 → **174,150**; the 348 new iPhone rows have 100% embedding coverage and 315/315 of their
-GPS rows addressed. Without the exclusion that scan would have queued 721 files from the iPhone
-tree instead of 350. **Step 5 (deletion reconciliation) and Step 6 (docs) are outstanding.**
+**Phase 14 — Immich ingestion — COMPLETE, verified on prod 2026-08-29.** The first real iPhone
+backup (350 photos) is in the library: scan `d4b3b519` discovered **1,342**, pruned 5 directories,
+and left **zero** rows under `thumbs/`, `encoded-video/` or `upload/`. `media_files` 173,635 →
+**174,150**; the 348 new iPhone rows have 100% embedding coverage and 315/315 of their GPS rows
+addressed. Without the exclusion that scan would have queued 721 files from the iPhone tree instead
+of 350. Steps 1, 2, 3, 4, 4b and 6 are done; **Step 5 (deletion reconciliation) was dropped** —
+Immich's backup is one-way and its trash is empty, so nothing under `library/` disappears on its
+own. Re-filed in `docs/backlog.md` motivated by Samba deletions and mount drift instead.
 
 **That scan also proved a live bug that is not about Immich: deleting a photo in Review resurrected
 its duplicate.** 167 of the 515 completed jobs were archive files that had each been
@@ -380,7 +382,8 @@ albums, videos, geo map, tags, review/meme workflow, on-demand HEIC display + vi
 ```
 POST /api/admin/scan  or  monthly ScanScheduler (API)
   → ScanRequested → ScanConsumer → FileDiscovered per file (+ processing_jobs row)
-  → IngestConsumer (prefetch 2): hash → dedup → convert → metadata → thumbnail
+      (prunes SCAN_EXCLUDE_DIRS; skips files younger than SCAN_MIN_FILE_AGE_SECONDS)
+  → IngestConsumer (prefetch 2): hash → dedup → deleted-hash check → convert → metadata → thumbnail
       → SAVE media row  ◄── photo visible in gallery immediately
       → MediaEnrichmentRequested (starts saga)
   → EnrichmentStateMachine fans out: AiAnalysisRequested + GeoLookupRequested (skipped if no GPS)
@@ -393,7 +396,8 @@ POST /api/admin/scan  or  monthly ScanScheduler (API)
 Key invariants (full detail in `docs/architecture.md`):
 - **AI failures never dead-letter**: the sidecar always publishes `AiAnalysisCompleted{success:false}` and ACKs, so the saga always completes.
 - The saga never sits on the raw-JSON endpoint; `AiResultBridgeConsumer` re-publishes Python's plain JSON as a proper envelope.
-- `processing_jobs` lifecycle: `queued → processing → enriching → completed | failed | skipped_duplicate`. Retry = republish `FileDiscovered(Reprocess: true)`.
+- `processing_jobs` lifecycle: `queued → processing → enriching → completed | failed | skipped_duplicate | skipped_deleted`. Retry = republish `FileDiscovered(Reprocess: true)`.
+- `skipped_deleted` (Phase 14) means the hash is in `deleted_hashes` — the user deleted this photo, so a second copy on disk must not be re-ingested. Unlike `skipped_duplicate` it carries **no `media_file_id`**; there is nothing to point at.
 - Idempotency: unique indexes on `media_files(file_path)` and `(file_hash)`; consumers treat 23505 as duplicate; enrichment apply is an idempotent upsert.
 - Full-library AI pass on this CPU takes **days** (~2–5 s/image × 190K files) — that is accepted; queue depth is the progress bar.
 
