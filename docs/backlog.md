@@ -11,6 +11,48 @@ Ordered newest first.
 
 ---
 
+## Deleting a photo in Review resurrects its duplicate on the next scan — 2026-08-29
+
+**Measured, not theorised: 167 photos came back during the Phase 14 Step 4 scan.**
+
+`BulkDeleteMediaHandler` (`src/Api/Features/Media/BulkDeleteMedia/BulkDeleteMediaHandler.cs`)
+deletes the file from disk and then `ExecuteDeleteAsync`s the `media_files` row. That is correct
+for the file it was given. But the library holds **992 known duplicate paths** — files whose hash
+matches an indexed photo, which every scan re-discovers and re-marks `skipped_duplicate`
+(see the entry below).
+
+Dedup is hash-against-`media_files`. Delete the indexed copy and its twin no longer matches
+anything, so the next scan ingests it as a brand-new photo. The photo is back in the gallery under
+a different path, with fresh tags and a fresh embedding.
+
+Verified on the 2026-08-29 scan: of 515 completed jobs, **167 were archive files that each had an
+earlier `skipped_duplicate` job for the same path** — all 167, not a subset.
+
+**The mismatch is in what "delete" means.** Review deletes *a file*; the person clicking it means
+*this photo*. Nothing in the pipeline is malfunctioning.
+
+Options, none obviously right — this wants a decision rather than a hotfix:
+
+1. **Delete every copy.** On delete, find all files sharing the hash and remove them too. Needs the
+   hash of the deleted row (available) and a path list, which we do not keep — `processing_jobs`
+   rows for `skipped_duplicate` do record the path, so it is recoverable.
+2. **Remember the deletion.** A `deleted_hashes` table consulted by `DedupService`, so a hash Mike
+   deleted never ingests again from any path. Cheapest to implement, and it also covers copies
+   added to the library later.
+3. **Soft-delete instead.** `SoftDeleteMediaHandler` already exists and only sets `is_deleted`;
+   the row would remain and keep shadowing the duplicate. Changes what Review means, and leaves
+   the file on disk.
+4. **Accept it**, and clean up in Review when it recurs.
+
+Option 2 is the one that matches the user's intent without touching disk twice.
+
+**Not urgent** — the 167 are ordinary photos, not corruption, and Review can remove them again.
+But every future scan repeats this for whatever was deleted since, so it compounds quietly.
+
+Related: the 992-duplicate rediscovery below is what makes this reachable at all.
+
+---
+
 ## Immich ingestion — graduated to Phase 14 on 2026-08-29
 
 **Moved out of the backlog.** Steps live in `docs/delivery-plan.md` → "Phase 14 — Immich ingestion:

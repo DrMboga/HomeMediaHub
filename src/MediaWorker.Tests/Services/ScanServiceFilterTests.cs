@@ -265,6 +265,28 @@ public sealed class ScanServiceFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task Discover_AlreadyIndexedFileWithFutureMtime_IsNotCountedAsTooRecent()
+    {
+        // Prod, first scan after Phase 14: one long-indexed JPEG carries a corrupt year-2262
+        // mtime. It is "too recent" by any cutoff, but it is also already in media_files, so it
+        // was never a candidate — counting it made the log claim a file had been held back that
+        // had not. Skip counts describe files that would otherwise have been queued.
+        var path = Path.Combine(_tempDir, "corrupt-mtime.jpg");
+        File.WriteAllText(path, "indexed already");
+        File.SetLastWriteTimeUtc(path, new DateTime(2262, 4, 12, 1, 47, 16, DateTimeKind.Utc));
+
+        using var db = CreateDb();
+        db.MediaFiles.Add(new Data.Entities.MediaFile { Id = Guid.NewGuid(), FilePath = path });
+        await db.SaveChangesAsync();
+
+        var options = ScanOptions.Create(null, TimeSpan.FromMinutes(2));
+        var result = await new ScanService(db, options).DiscoverAsync(_tempDir, CancellationToken.None);
+
+        Assert.Empty(result.Files);
+        Assert.Equal(0, result.SkippedTooRecent);
+    }
+
+    [Fact]
     public async Task Discover_FreshSidecar_IsCountedAsSidecarNotTooRecent()
     {
         // Name-based filters run before the age check: a ._ file is never going to become valid.

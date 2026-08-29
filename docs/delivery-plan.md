@@ -2642,3 +2642,73 @@ and Step 6 (docs) are untouched.
 *(Pre-existing and not from this change: `MediaWorker.Tests` emits MSB3277 over
 `Microsoft.EntityFrameworkCore.Relational` 10.0.4 vs 10.0.7 — `Npgsql.EntityFrameworkCore.PostgreSQL
 10.0.1` against `Microsoft.EntityFrameworkCore.InMemory 10.0.7`.)*
+
+### Step 4 done — first real scan on prod, 2026-08-29
+
+Scan `d4b3b519-9c76-44ca-9463-248dbaf656f3`, triggered from `/admin` after deploying `8cdd8bf` and
+adding both variables to `.env.prod`. Startup logged the resolved filters:
+
+```
+Scan filters: excluding 5 director(ies)
+  ["/photo/iPhone/upload","/photo/iPhone/thumbs","/photo/iPhone/encoded-video",
+   "/photo/iPhone/backups","/photo/iPhone/profile"]; minimum file age 120s
+```
+
+**The exclusion works.** `discovered 1342`, `pruned 5`, and
+`select count(*) from media_files where file_path like '%/thumbs/%' or '%/encoded-video/%' or
+'%/iPhone/upload/%'` returns **0**. Before Phase 14 the same scan would have queued 721 files from
+the iPhone tree instead of 350.
+
+The count was predicted before triggering, from disk: a `find` with the same extension set and
+exclusions returned **174,977 = 173,635 indexed + 992 known duplicates + 350 iPhone**. Worth doing
+again before any future first-scan — an exact match also proves no orphans, i.e. no file whose
+`media_files` row was deleted while `File.Delete` failed, which would otherwise resurrect.
+
+Enrichment on the new rows is complete: **348 rows, 0 missing embeddings**, 315 with GPS and
+**315 of 315 addressed (100%)**, 21 videos, 245 (70%) carrying ≥1 tag.
+
+**Two of the 350 iPhone photos deduped against the archive** — Mike had USB-imported them before.
+The pre-flight 20-file hash sample found none, which was luck of the draw at 0.6%.
+
+#### The split was not the predicted one: 167 duplicates were promoted
+
+Predicted 350 completed + 992 duplicates; got **515 completed + 827 duplicates** (total 1,342, as
+expected). The breakdown:
+
+| | completed | skipped_duplicate |
+|---|---:|---:|
+| iPhone | 348 | 2 |
+| archive | **167** | 825 |
+
+**All 167 archive files had an earlier `skipped_duplicate` job for the same path** — verified, not
+inferred. They are duplicates that stopped being duplicates: `BulkDeleteMediaHandler` deletes the
+indexed copy's file *and* hard-deletes its row, so the twin elsewhere on disk no longer matches any
+hash and ingests as a new photo.
+
+**So 167 photos deleted through the Review page are back in the gallery**, at a different path.
+Nothing is wrong with the pipeline — dedup is doing exactly what it is defined to do. The gap is
+that "delete" in Review means *delete this file*, while the user means *delete this photo*. Recorded
+in `docs/backlog.md`; it needs a decision, not a hotfix, and it is not specific to Immich.
+
+#### A counter bug this scan found — fixed
+
+The skip line read `Sidecars 14, Empty 0, TooRecent 1, Pruned 5`. The 14 sidecars are the
+long-standing ones (Phase 12 deleted their rows, not the files). **`TooRecent 1` was wrong.**
+
+The file was `/photo/iPhoneBadger2026-05-17/IMG_8957.JPG`, which carries a corrupt mtime of
+**2262-04-12** — "too recent" against any cutoff, forever. It has been in `media_files` since
+2026-08-14, so it was never a scan candidate; the age check simply ran before the already-indexed
+check could discard it.
+
+Fixed by moving the indexed/active test **above** all three skip counters, so they only ever
+describe files that would otherwise have been queued — the principle the sidecar counter has
+followed since Phase 12 (`Discover_NonMediaSidecars_AreNotCountedAsSkipped`). The age check still
+sits before the zero-length check, for the mid-write attribution reason. Covered by
+`Discover_AlreadyIndexedFileWithFutureMtime_IsNotCountedAsTooRecent`. MediaWorker tests 96 → **97**.
+
+The corrupt file is the only one in the library with a future mtime (`find -newermt 2027-01-01`
+returns exactly one). Its `taken_at` is `1962-01-01`, so its EXIF is bad too. Pre-existing and
+harmless; not chased.
+
+**Still to do:** Step 5 (deletion reconciliation), Step 6 (docs), plus the UI spot-checks in Step 4
+item 5 — HEIC display, video playback, a geo pin and a semantic search hit against the new photos.

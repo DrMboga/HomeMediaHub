@@ -220,11 +220,20 @@ in the browser's locale and cannot be made to read `dd.mm.yyyy`, so it is hidden
 (`opacity: 0`, *not* `display: none`) and supplies only the calendar popup via `showPicker()`.
 Details in `docs/delivery-plan.md` → Phase 13 → "Built — 2026-08-17" and the note after it.
 
-**Phase 14 — Immich ingestion — Steps 1–3 done 2026-08-29, NOT YET DEPLOYED.** Mike's first real
-iPhone backup put **350 photos** on prod. **Do not trigger a library scan until the worker is
-rebuilt with `SCAN_EXCLUDE_DIRS` set** — the code is on `main`, prod is not running it yet, and
-before the exclusion a scan discovers **721 files, 371 of them junk**. Step 4 (first real scan),
-Step 5 (deletion reconciliation) and Step 6 (docs) are outstanding.
+**Phase 14 — Immich ingestion — Steps 1–4 DONE and verified on prod 2026-08-29.** The first real
+iPhone backup (350 photos) is in the library: scan `d4b3b519` discovered **1,342**, pruned 5
+directories, and left **zero** rows under `thumbs/`, `encoded-video/` or `upload/`. `media_files`
+173,635 → **174,150**; the 348 new iPhone rows have 100% embedding coverage and 315/315 of their
+GPS rows addressed. Without the exclusion that scan would have queued 721 files from the iPhone
+tree instead of 350. **Step 5 (deletion reconciliation) and Step 6 (docs) are outstanding.**
+
+**That scan also proved a live bug that is not about Immich: deleting a photo in Review resurrects
+its duplicate.** 167 of the 515 completed jobs were archive files that had each been
+`skipped_duplicate` before — `BulkDeleteMediaHandler` removes the indexed copy's file and row, so
+its twin elsewhere on disk stops matching any hash and ingests as a new photo. Dedup is behaving as
+defined; "delete" in Review means *this file*, the user means *this photo*. **Every scan repeats
+this for whatever was deleted since.** Options and the measurement are in `docs/backlog.md` — it
+needs a decision, not a hotfix.
 
 `${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
 (`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding

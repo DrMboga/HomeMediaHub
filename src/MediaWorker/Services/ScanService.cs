@@ -87,6 +87,13 @@ public sealed class ScanService
                 continue;
             }
 
+            // Already-indexed files leave before any counter, so the skip counts only ever describe
+            // files that would otherwise have been queued — the principle the sidecar counter has
+            // followed since Phase 12. Found the hard way: the first prod scan reported one file
+            // "written too recently" that was a long-indexed JPEG carrying a corrupt year-2262
+            // mtime, which the age check saw before this line could discard it.
+            if (indexed.Contains(file.FullName) || active.Contains(file.FullName)) continue;
+
             // Age before length, deliberately: a file that is mid-write is momentarily zero bytes,
             // and counting it as dead source data would be a lie the log then carries forward.
             if (cutoff is not null && file.LastWriteTimeUtc > cutoff)
@@ -100,8 +107,6 @@ public sealed class ScanService
                 skippedEmpty++;
                 continue;
             }
-
-            if (indexed.Contains(file.FullName) || active.Contains(file.FullName)) continue;
 
             files.Add(file.FullName);
         }
