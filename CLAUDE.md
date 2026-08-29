@@ -524,6 +524,16 @@ public by design (`<img>`/`<video>` can't send JWT; GUID URLs, LAN-only).
 - **Stale Docker bind mounts**: a directory created on the host after container start may be
   invisible — `docker compose --env-file .env.stage up -d --force-recreate <service>`. A plain
   `restart` is **not** enough — a container's mount namespace is fixed at creation.
+- **Recreating `api` or `frontend` without nginx gives a site-wide 502.** `infra/nginx/nginx.conf`
+  declares `upstream frontend { server frontend:80; }` and `upstream api { server api:8080; }`;
+  nginx resolves those **once, at config load**, and the `resolver` on line 11 only serves the
+  variable-based `proxy_pass` used for `/immich/`. So `up -d api frontend` leaves nginx holding
+  IPs that Docker has already handed to different containers. Hit for real on 2026-08-29: nginx
+  proxied `/` to the frontend's old IP, which by then belonged to **api** — a 502 against a
+  container that was up and healthy. **Always finish a partial deploy with
+  `docker compose --env-file .env.prod restart nginx`**, or just use a bare `up -d`, which
+  recreates nginx too. The durable fix (variable `proxy_pass` for both upstreams, as `/immich/`
+  already does) is in `docs/backlog.md`.
 - **Docker must not start before `/mnt/storage`.** After an unclean reboot, ext4 journal recovery
   can delay the HDD mount past Docker's start; Docker then auto-creates the missing bind-mount
   sources as empty dirs on the SSD, and every container sees an empty library — thumbnails,

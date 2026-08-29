@@ -11,6 +11,50 @@ Ordered newest first.
 
 ---
 
+## nginx caches upstream IPs, so a partial deploy 502s the whole site — 2026-08-29
+
+**Caused a real prod outage the day it was written.** `api`, `media-worker` and `frontend` were
+rebuilt and recreated; nginx was not. Every page returned 502 while all fourteen containers were up
+and `api` reported healthy.
+
+`infra/nginx/nginx.conf:13-14` declares static upstreams:
+
+```nginx
+upstream frontend  { server frontend:80; }
+upstream api       { server api:8080; }
+```
+
+nginx resolves those **once, at config load**. The `resolver 127.0.0.11 valid=10s` on line 11 only
+takes effect for a `proxy_pass` that goes through a variable — which is exactly what the `/immich/`
+location already does, and the reason that one route kept working.
+
+The failure is nastier than a plain stale address: Docker had reassigned the frontend's old
+`172.18.0.5` to the **api** container, so nginx was proxying the homepage to a service that does not
+listen on port 80. The error log said `connect() failed (111: Connection refused) ... upstream:
+"http://172.18.0.5:80/"` — an IP that pointed at a perfectly healthy container.
+
+**Workaround in place:** `docker compose --env-file .env.prod restart nginx` after any partial
+deploy, recorded in CLAUDE.md's operational notes. A bare `up -d` (no service list) is also safe,
+which is why the committed deploy docs have never hit this.
+
+**The fix** is to give the two upstreams the same treatment `/immich/` already has, so DNS is
+resolved per request:
+
+```nginx
+location /api/ { set $api_upstream http://api:8080; proxy_pass $api_upstream; }
+location /     { set $fe_upstream  http://frontend:80; proxy_pass $fe_upstream; }
+```
+
+Note the missing trailing slash: with no URI component, nginx passes the original request URI
+unchanged, matching today's behaviour. `/immich/` uses `$immich_upstream/` *with* a slash precisely
+because it needs the prefix stripped — do not copy that form here. Losing the `upstream` blocks
+costs keepalive and load balancing, neither of which is used with one replica each.
+
+Wants doing with a click-through of every route afterwards (`/`, `/api/*`, `/thumbs/` internal
+redirect, `/immich/`), so it is a deliberate change rather than an opportunistic one.
+
+---
+
 ## Deleting a photo in Review resurrects its duplicate — FIXED 2026-08-29
 
 **Measured, not theorised: 167 photos came back during the Phase 14 Step 4 scan.**
