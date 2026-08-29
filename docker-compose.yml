@@ -217,6 +217,9 @@ services:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASS: ${RABBITMQ_PASS}
+      # Container paths (under /photo), ';'-separated. Empty on stage — no Immich there.
+      SCAN_EXCLUDE_DIRS: ${SCAN_EXCLUDE_DIRS:-}
+      SCAN_MIN_FILE_AGE_SECONDS: ${SCAN_MIN_FILE_AGE_SECONDS:-120}
       DOTNET_ENVIRONMENT: Production
     volumes:
       - ${PHOTO_DIR}:/photo:ro

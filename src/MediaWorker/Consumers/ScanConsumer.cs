@@ -44,8 +44,10 @@ public sealed class ScanConsumer : IConsumer<ScanRequested>
         // Logged even at zero: "the scan skipped nothing" is an answer, and a silent filter is one
         // you cannot tell apart from a scan that never saw the file.
         _log.LogInformation(
-            "Scan {ScanId}: skipped {Sidecars} AppleDouble sidecar(s) and {Empty} zero-length file(s)",
-            msg.ScanId, discovery.SkippedSidecars, discovery.SkippedEmpty);
+            "Scan {ScanId}: skipped {Sidecars} AppleDouble sidecar(s), {Empty} zero-length file(s) " +
+            "and {TooRecent} file(s) written too recently; pruned {Pruned} excluded director(ies)",
+            msg.ScanId, discovery.SkippedSidecars, discovery.SkippedEmpty,
+            discovery.SkippedTooRecent, discovery.PrunedDirectories);
 
         var batch = new List<ProcessingJob>(BatchSize);
         foreach (var file in files)

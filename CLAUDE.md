@@ -220,33 +220,43 @@ in the browser's locale and cannot be made to read `dd.mm.yyyy`, so it is hidden
 (`opacity: 0`, *not* `display: none`) and supplies only the calendar popup via `showPicker()`.
 Details in `docs/delivery-plan.md` → Phase 13 → "Built — 2026-08-17" and the note after it.
 
-**Phase 14 — Immich ingestion — is PLANNED, NOT BUILT (specified 2026-08-29).** Mike's first real
-iPhone backup put **350 photos** on prod. **Do not trigger a library scan until Steps 1–3 of
-`docs/delivery-plan.md` → Phase 14 are done** — measured on the real tree, a scan today discovers
-**721 files, 371 of them junk**.
+**Phase 14 — Immich ingestion — Steps 1–3 done 2026-08-29, NOT YET DEPLOYED.** Mike's first real
+iPhone backup put **350 photos** on prod. **Do not trigger a library scan until the worker is
+rebuilt with `SCAN_EXCLUDE_DIRS` set** — the code is on `main`, prod is not running it yet, and
+before the exclusion a scan discovers **721 files, 371 of them junk**. Step 4 (first real scan),
+Step 5 (deletion reconciliation) and Step 6 (docs) are outstanding.
 
 `${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
 (`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding
-`upload/` · `thumbs/` · `encoded-video/` · `backups/` · `library/` · `profile/`. `ScanService` has
-**no directory exclusion at all**, and `.jpeg`/`.mp4` are supported extensions, so Immich's 350
-1440×1920 `_preview.jpeg` files and 21 H.264 transcodes would each earn a real `media_files` row —
-hash dedup cannot catch them, they are different bytes. The `_thumbnail.webp` files are spared only
-because `.webp` is not in `SupportedExtensions`; that is luck, not design.
+`library/` · `upload/` · `thumbs/` · `encoded-video/` · `backups/` · `profile/`. **Only `library/`
+holds originals; everything else must stay excluded.** `.jpeg`/`.mp4` are supported extensions, so
+Immich's 350 1440×1920 `_preview.jpeg` files and 21 H.264 transcodes would otherwise each earn a
+real `media_files` row — hash dedup cannot catch them, they are different bytes. The
+`_thumbnail.webp` files are spared only because `.webp` is not in `SupportedExtensions`; that is
+luck, not design, so **Step 2 must stay in place if `.webp` is ever added**.
 
-**Immich's storage template ships `enabled: false`**, so `library/` is empty and the originals sit
-in the staging folder under GUID names (`a9e1715e-….HEIC`). Enabling it (Step 1, no code) moves
-them to `library/mike/2026/2026-04-11/IMG_5181.HEIC` **and** makes `upload/` pure staging — which
-also closes the worst bug: Immich streams uploads **straight to their final path** with no `.tmp`,
-so a scan overlapping a backup hashes a half-written file, writes a row with a bogus hash, and
-never revisits it because the path is then indexed. Silent, permanent, and invisible in the failed
-jobs panels. Same hole has always existed for Samba copies.
+**Immich's storage template ships `enabled: false`** and was enabled on 2026-08-29 — **it must stay
+enabled.** With it on, originals live at `library/mike/2026/2026-04-11/IMG_5181.heic` (readable
+names, date folders) and `upload/` is pure staging. That second part closes the worst bug: Immich
+streams uploads **straight to their final path** with no `.tmp`, so a scan overlapping a backup
+would hash a half-written file, write a row with a bogus hash, and never revisit it because the
+path is then indexed. Silent, permanent, invisible in the failed-jobs panels. The same hole has
+always existed for Samba copies, which is why `SCAN_MIN_FILE_AGE_SECONDS` (default 120) exists too.
+Note the template also lowercases extensions **and canonicalises `jpeg` → `jpg`**; all our
+extension handling is case-insensitive, verified.
 
 Also open: Immich's 30-day trash deletes files from disk and **the scan is add-only** — no
 reconciliation pass exists anywhere in the system. Phase 14 Step 5 makes it a reported number only.
 
 The originals themselves are fine — verified byte-identical, EXIF (`DateTimeOriginal`, GPS) intact,
-mtime backdated to the phone's `fileModifiedAt`, no timezone regression, and 0 of 20 sampled hashes
-collide with the existing library.
+mtime preserved through the migration (`fileModifiedAt`, not upload time), no timezone regression,
+and 0 of 20 sampled hashes collide with the existing library.
+
+**`ScanService` no longer uses `EnumerateFiles(AllDirectories)`** — it is a stack-based `Walk` that
+prunes excluded directories and no longer follows directory symlinks. Read the "Steps 2 and 3
+built" notes in `docs/delivery-plan.md` before touching it: the prune counter rides in a
+`WalkStats` object because `out`/`ref` cannot cross an iterator boundary, and the file-age check
+deliberately runs *before* the zero-length check.
 
 **Former blind spot — now covered.** File-level processing failures still do not fault a consumer:
 `IngestConsumer` catches them and publishes `MediaProcessingFailed` rather than rethrowing, so

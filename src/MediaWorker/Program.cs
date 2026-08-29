@@ -55,6 +55,24 @@ try
         return string.IsNullOrWhiteSpace(value) ? fallback : value;
     }
 
+    // Scan filters. SCAN_EXCLUDE_DIRS is one ';'-separated string rather than a config array,
+    // because these have to be settable from the compose env file — the same trap
+    // Potd:SendAtLocal fell into (docs/backlog.md).
+    var excludeRaw = builder.Configuration["SCAN_EXCLUDE_DIRS"];
+    var excludeDirs = string.IsNullOrWhiteSpace(excludeRaw)
+        ? builder.Configuration.GetSection("Scan:ExcludeDirs").Get<string[]>() ?? []
+        : excludeRaw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    var minFileAgeSeconds = builder.Configuration.GetValue<int?>("SCAN_MIN_FILE_AGE_SECONDS")
+        ?? builder.Configuration.GetValue("Scan:MinFileAgeSeconds", 120);
+
+    var scanOptions = ScanOptions.Create(excludeDirs, TimeSpan.FromSeconds(minFileAgeSeconds));
+    builder.Services.AddSingleton(scanOptions);
+
+    Log.Information(
+        "Scan filters: excluding {Count} director(ies) {Dirs}; minimum file age {Seconds}s",
+        scanOptions.ExcludeDirs.Count, scanOptions.ExcludeDirs, minFileAgeSeconds);
+
     builder.Services.AddMassTransit(x =>
     {
         x.SetKebabCaseEndpointNameFormatter();

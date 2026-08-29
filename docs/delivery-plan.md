@@ -2554,3 +2554,88 @@ and rescanning.
 - The nginx `/immich/` 1 MB `client_max_body_size` trap — separate entry, still open in
   `docs/backlog.md`, and unrelated to scanning.
 - Adding `.webp` to `SupportedExtensions`. If that ever happens, Step 2 must already be in place.
+
+### Step 1 done and verified on prod — 2026-08-29
+
+Storage label set to `mike`, template enabled, Storage Template Migration run. Measured after:
+
+- **350 files** under `library/mike/2026/2026-04-DD/IMG_####.ext`, in **19 day folders**. (`find`
+  says 351 — the extra is Immich's extensionless `.immich` marker, which no extension filter
+  matches.)
+- **`upload/` holds zero media.** 528 now-empty directories are left behind; harmless, and they
+  are excluded anyway.
+- **mtime survived the move** — `IMG_5146.heic` still reads `2026-04-11 12:34:26`, not the 14:02
+  migration time. A rename preserves it, so the `taken_at` fallback is unaffected.
+- **EXIF intact**, and Immich's `asset.originalPath` rewritten to
+  `/usr/src/app/upload/library/mike/2026/…`.
+- **Extension normalisation went further than the UI warned.** It says "convert all extensions to
+  lowercase"; it also canonicalises `jpeg` → `jpg`. Counts went `283 HEIC + 5 heic` → **288 heic**,
+  `16 JPG + 12 jpeg` → **28 jpg**, `21 MOV` → **21 mov**, `13 PNG` → **13 png**. Audited before the
+  migration and harmless: `ScanService.SupportedExtensions` and `MediaFileType` are
+  `OrdinalIgnoreCase` sets, `MetadataService` lowercases before its `switch`, and the Api's HEIC
+  branch tests the derived `MimeType` rather than the path. Both `.jpg` and `.jpeg` are supported.
+
+Two corrections to Step 1 as written above:
+
+- The label was **not** null — it was already `admin`, so the folder would have been
+  `library/admin/`, not the raw user GUID. Changed to `mike` *before* the migration, which is why
+  only one migration was needed.
+- **Video transcoding was not disabled.** `system-config` reads
+  `{"map":{...},"machineLearning":{"enabled":false},"newVersionCheck":{...},"storageTemplate":{"enabled":true},"reverseGeocoding":{"enabled":false}}`
+  — no `transcoding` key, so Immich will keep transcoding every new video into `encoded-video/`.
+  Still to do; it does not block anything, because the folder is excluded either way.
+
+### Steps 2 and 3 built — 2026-08-29
+
+Api 128 · MediaWorker **96** (was 79) · GeoService 12, all green. `docker compose config` validates
+against both env examples, with the `;`-separated value passing through intact.
+
+**New `src/MediaWorker/Services/ScanOptions.cs`** — `ExcludeDirs` (normalised absolute paths) and
+`MinFileAge`. `ScanOptions.Empty` excludes and skips nothing; a path entry the OS rejects is
+dropped rather than thrown on, so one typo in the env file cannot stop the worker booting.
+
+**`ScanService`** — `EnumerateFiles(SearchOption.AllDirectories)` replaced with a stack-based
+`Walk` that prunes. Three things worth knowing before touching it:
+
+- **`Walk` is a real iterator, and the prune counter rides in a `WalkStats` object** rather than an
+  `out`/`ref` param, which cannot cross an iterator boundary. The first draft collected into a
+  `List<FileInfo>` to dodge that and would have held ~190K `FileInfo` instances at once; yielding
+  per directory keeps it as streaming as the enumerator it replaces.
+- **The age check runs *before* the zero-length check.** A file mid-write is momentarily zero
+  bytes, and counting it as dead source data would put a number in the log nobody could later
+  explain. Name-based filters (`._`) still run first — a sidecar never becomes valid.
+- **Symlinked directories are no longer followed** (`FileAttributes.ReparsePoint`). The old
+  enumerator did follow them on Linux; a hand-rolled walk has no cycle detection and nothing in the
+  library is a link, so this closes a possible hang rather than removing a behaviour anyone uses.
+
+`ScanDiscovery` gained `SkippedTooRecent` and **`PrunedDirectories`** — the plan above called the
+latter `SkippedExcluded`, but it counts *directories*, not files: counting files would mean walking
+the tree the exclusion exists to avoid. Prod will log `pruned 5`. `ScanConsumer`'s skip line reports
+both.
+
+An exclude entry naming the **scan root itself** means "scan nothing", not "exclude nothing" — the
+root is never reached by the subdirectory check, so it is tested explicitly at the top of `Walk`.
+
+**Config** — `SCAN_EXCLUDE_DIRS` (one `;`-separated string) and `SCAN_MIN_FILE_AGE_SECONDS`,
+env-first with `Scan:ExcludeDirs` / `Scan:MinFileAgeSeconds` in `appsettings.json` behind them.
+A `;`-separated string rather than a config array specifically so it is reachable from the compose
+env file — the trap `Potd:SendAtLocal` fell into (`docs/backlog.md`). Program.cs logs the resolved
+list at startup. Prod's five paths are in `.env.prod.example`; `.env.stage.example` sets the
+variable to empty, since stage runs no Immich and empty means today's behaviour exactly.
+
+**Tests** — `ScanServiceFilterTests`, 17 cases, kept separate from `ScanServiceTests` because those
+fourteen construct a bare `ScanService(db)` and must keep running against `ScanOptions.Empty`. The
+ones that carry the reasoning: a *sibling* `2019/upload/` survives while `iPhone/upload/` is pruned
+(the whole argument for absolute paths over directory names); `/upload` does not prefix-match
+`/uploads`; a fresh zero-byte file counts as too-recent and an hour-old one as empty; a backdated
+file is returned, which is the property that makes the guard safe for Immich, since it `utimes`
+each upload back to the phone's `fileModifiedAt` once the write completes. The last test asserts
+the whole prod tree shape at once — `library/` + a real `2021/` folder in, `thumbs`/`encoded-video`/
+`upload`/`backups` out, four prunes from five configured paths because `profile/` is absent.
+
+**Not done:** Step 4 (the first real scan) needs this deployed; Step 5 (deletion reconciliation)
+and Step 6 (docs) are untouched.
+
+*(Pre-existing and not from this change: `MediaWorker.Tests` emits MSB3277 over
+`Microsoft.EntityFrameworkCore.Relational` 10.0.4 vs 10.0.7 — `Npgsql.EntityFrameworkCore.PostgreSQL
+10.0.1` against `Microsoft.EntityFrameworkCore.InMemory 10.0.7`.)*
