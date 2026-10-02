@@ -6,6 +6,7 @@ import { X, Minus, Plus, Crosshair, Trash2, Check, Download } from 'lucide-react
 import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia, originalUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 import { formatDetailDate } from '../utils/mediaDate'
+import { MAP_TILE_URL, MAP_TILE_ATTRIBUTION, MAP_TILE_CLASS } from '../utils/mapTiles'
 
 function Resizer() {
   const map = useMap()
@@ -151,8 +152,9 @@ export function Lightbox() {
                 style={{ height: '100%', width: '100%' }}
               >
                 <TileLayer
-                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                  attribution="© OpenStreetMap © CARTO"
+                  url={MAP_TILE_URL}
+                  attribution={MAP_TILE_ATTRIBUTION}
+                  className={MAP_TILE_CLASS}
                   maxZoom={19}
                 />
                 <CircleMarker

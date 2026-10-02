@@ -325,6 +325,8 @@ body {
 /* ── Geo page ────────────────────── */
 .geo-map-wrap { height: 480px; border-radius: var(--r); overflow: hidden; box-shadow: var(--shd); }
 .leaflet-container { background: #1a1a2e !important; }
+/* OSM tiles are light; invert to a dark basemap. hue-rotate puts water back to blue. */
+.map-tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.4); }
 .leaflet-control-attribution {
   background: rgba(20,20,20,.7) !important;
   color: var(--label3) !important;
