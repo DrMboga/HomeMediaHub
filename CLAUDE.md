@@ -235,16 +235,22 @@ its duplicate.** 167 of the 515 completed jobs were archive files that had each 
 its twin elsewhere on disk stopped matching any hash and ingested as a new photo. Dedup was
 behaving as defined; "delete" in Review means *this file*, the user means *this photo*.
 
-**Fixed the same day by `deleted_hashes` — on `main`, NOT DEPLOYED.** A table keyed by
+**Fixed the same day by `deleted_hashes` — deployed to prod 2026-08-29** (`AddDeletedHashes`
+applied; 1,830 hashes recorded through Review by 2026-09-16). A table keyed by
 `file_hash`, written by `BulkDeleteMediaHandler` (via `DeletedHashRecorder`) and read by
 `DedupService.WasDeletedAsync`, which `IngestConsumer` consults **after** the live-duplicate lookup
 — a live photo with that hash is the stronger answer. A match becomes the new terminal status
 **`skipped_deleted`** (no `MediaFileId`: there is nothing to point at, and that absence is the
 distinction from `skipped_duplicate`). `SoftDeleteMediaHandler` deliberately does not record —
 its row stays and already shadows duplicates. The file is left on disk, so every scan rediscovers
-it and lands on `skipped_deleted` again. **Deploying needs the `AddDeletedHashes` migration plus a
-rebuild of api, media-worker and frontend**; after that, re-deleting the 167 through Review makes
-them stay gone. There is no un-delete UI — remove the row by hand if a photo is ever wanted back.
+it and lands on `skipped_deleted` again. There is no un-delete UI — remove the row by hand if a
+photo is ever wanted back.
+
+**Map tiles are OpenStreetMap, darkened in CSS (since 2026-10-02).** CARTO's `dark_all` basemap
+started requiring an API key and served every tile as an "API KEY REQUIRED" watermark (HTTP 200,
+so nothing errors). Both maps (Geo page, Lightbox map tab) read the URL from
+`Frontend/src/utils/mapTiles.ts`; the `.map-tiles-dark` filter sits on the tile layer only, so
+markers keep their colours. To go back to CARTO, get a key and change `MAP_TILE_URL`.
 
 `${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
 (`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding

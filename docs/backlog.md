@@ -128,9 +128,8 @@ Review with that code live. The four options that were weighed:
 Option 2 won because it matches the user's intent without touching disk twice, and because it is
 the only one that also covers a copy added to the library *later*.
 
-**Still outstanding:** the fix is on `main` but **not deployed** — it needs the `AddDeletedHashes`
-migration plus a rebuild of api, media-worker and frontend. Until then, every scan keeps promoting
-whatever has been deleted since.
+**Deployed to prod 2026-08-29** (`AddDeletedHashes` applied, api/media-worker/frontend rebuilt).
+By 2026-09-16, 1,830 hashes had been recorded through Review.
 
 Related: the 992-duplicate rediscovery below is what makes this reachable at all.
 

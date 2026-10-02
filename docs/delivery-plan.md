@@ -2765,9 +2765,9 @@ batch, an empty batch, and rows with a blank hash. `IngestConsumerTests` gains t
 hash marks `skipped_deleted` and saves **no** media row; `Reprocess: true` does not smuggle a
 deleted photo back in; and a live duplicate beats a deleted hash for the same content.
 
-**Not deployed.** Needs `dotnet ef database update` (or the Api's startup migration) plus a rebuild
-of api, media-worker and frontend. Once it is live, re-deleting the 167 through Review records
-their hashes and they stop coming back.
+**Deployed to prod 2026-08-29** — `AddDeletedHashes` applied by the Api's startup migration,
+api/media-worker/frontend rebuilt. Checked 2026-10-02: 1,830 hashes recorded through Review
+between 2026-08-31 and 2026-09-16.
 
 **Not built, deliberately:** any way to *un*-delete a hash. If Mike ever wants a photo back after
 deleting it, the row has to be removed by hand — `delete from deleted_hashes where file_hash = …`.
