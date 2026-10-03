@@ -252,6 +252,17 @@ so nothing errors). Both maps (Geo page, Lightbox map tab) read the URL from
 `Frontend/src/utils/mapTiles.ts`; the `.map-tiles-dark` filter sits on the tile layer only, so
 markers keep their colours. To go back to CARTO, get a key and change `MAP_TILE_URL`.
 
+**The Lightbox steps through the grid it was opened from (since 2026-10-03)** — previous / next
+buttons and `←` / `→`, stopping at the ends of the current page. A grid gets this by wrapping its
+`PhotoCard`s in `<LightboxList ids={…}>` (`Frontend/src/context/LightboxContext.tsx`); without the
+wrapper a card opens a single photo, which is deliberate for Geo-page markers and the Photo of the
+Day tile. A photo that is still loading shows a spinner rather than the previous photo. Decisions
+and the non-obvious parts are in `docs/backlog.md` → "Lightbox: previous / next".
+
+**Journeys (travel timeline) is planned, not built.** The glossary terms are in `CONTEXT.md`; the
+spec, architecture and delivery plan are in `.tracker/journeys/`, which is **gitignored** and
+exists only on Mike's Windows machine.
+
 `${PHOTO_DIR}/iPhone` is **not a photo folder — it is Immich's entire media root**
 (`IMMICH_MEDIA_LOCATION`, `docker-compose.yml:63`) sitting inside our scan root, holding
 `library/` · `upload/` · `thumbs/` · `encoded-video/` · `backups/` · `profile/`. **Only `library/`
