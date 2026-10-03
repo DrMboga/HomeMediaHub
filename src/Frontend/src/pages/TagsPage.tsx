@@ -4,6 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Tags, X } from 'lucide-react'
 import { getTagMedia, getTags } from '../api/tags'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 
 const PAGE_SIZE = 50
 
@@ -175,11 +176,13 @@ export function TagsPage() {
 
       {selected.length > 0 && media && media.items.length > 0 && (
         <>
-          <div className="gallery-grid">
-            {media.items.map(item => (
-              <PhotoCard key={item.id} item={item} className="gallery-card" />
-            ))}
-          </div>
+          <LightboxList ids={media.items.map(m => m.id)}>
+            <div className="gallery-grid">
+              {media.items.map(item => (
+                <PhotoCard key={item.id} item={item} className="gallery-card" />
+              ))}
+            </div>
+          </LightboxList>
 
           {totalPages > 1 && (
             <div className="gallery-pager">

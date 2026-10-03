@@ -1,7 +1,7 @@
 import { Play } from 'lucide-react'
 import type { MediaListItem } from '../types/api'
 import { thumbnailUrl } from '../api/media'
-import { useLightbox } from '../context/LightboxContext'
+import { useLightbox, useLightboxList } from '../context/LightboxContext'
 import { formatGridDate } from '../utils/mediaDate'
 
 function formatDuration(sec: number): string {
@@ -18,9 +18,10 @@ interface Props {
 
 export function PhotoCard({ item, className = 'gallery-card', durationSec }: Props) {
   const { open } = useLightbox()
+  const listIds = useLightboxList()
 
   return (
-    <div className={`photo-card ${className}`} onClick={() => open(item.id)}>
+    <div className={`photo-card ${className}`} onClick={() => open(item.id, listIds)}>
       {/* loading="lazy" only works because every card class is a fixed-size box — the layout
           is stable before any image loads, so the browser fetches just what is on screen.
           On This Day renders up to ~2,250 of these on one page. Do not make them intrinsic. */}

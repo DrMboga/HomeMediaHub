@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 
 export function VideosPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -36,11 +37,13 @@ export function VideosPage() {
 
       {data && data.items.length > 0 && (
         <>
-          <div className="videos-grid">
-            {data.items.map(item => (
-              <PhotoCard key={item.id} item={item} className="video-card" />
-            ))}
-          </div>
+          <LightboxList ids={data.items.map(m => m.id)}>
+            <div className="videos-grid">
+              {data.items.map(item => (
+                <PhotoCard key={item.id} item={item} className="video-card" />
+              ))}
+            </div>
+          </LightboxList>
 
           <div className="gallery-pager">
             <button

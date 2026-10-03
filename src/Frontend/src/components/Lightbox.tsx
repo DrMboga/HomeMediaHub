@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Minus, Plus, Crosshair, Trash2, Check, Download } from 'lucide-react'
+import { X, Minus, Plus, Crosshair, Trash2, Check, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getMediaDetail, displayUrl, streamUrl, thumbnailUrl, softDeleteMedia, originalUrl } from '../api/media'
 import { useLightbox } from '../context/LightboxContext'
 import { formatDetailDate } from '../utils/mediaDate'
@@ -15,7 +15,7 @@ function Resizer() {
 }
 
 export function Lightbox() {
-  const { mediaId, close } = useLightbox()
+  const { mediaId, close, prev, next, hasPrev, hasNext } = useLightbox()
   const queryClient = useQueryClient()
   const [zoom, setZoom] = useState(1)
   const [tab, setTab] = useState<'info' | 'map'>('info')
@@ -100,10 +100,16 @@ export function Lightbox() {
       if (e.key === 'Escape') close()
       if (e.key === '+') setZoom(z => Math.min(4, z + 0.25))
       if (e.key === '-') setZoom(z => Math.max(0.5, z - 0.25))
+      // A focused <video> uses the arrows to seek and a focused map uses them to pan — leave
+      // them to the player / map there; the on-screen buttons still step.
+      if (e.target instanceof HTMLVideoElement) return
+      if (e.target instanceof Element && e.target.closest('.leaflet-container')) return
+      if (e.key === 'ArrowLeft') prev()
+      if (e.key === 'ArrowRight') next()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [mediaId, close])
+  }, [mediaId, close, prev, next])
 
   // Stop video on close
   useEffect(() => {
@@ -170,7 +176,7 @@ export function Lightbox() {
               {/* key forces a remount so the element re-requests; the failed response is not
                   cached, so the same URL is fetched again. */}
               <video
-                key={videoAttempt}
+                key={`${mediaId}-${videoAttempt}`}
                 ref={videoRef}
                 className="lb-video"
                 src={streamUrl(mediaId)}
@@ -205,6 +211,18 @@ export function Lightbox() {
           <button className="lb-close" onClick={close} aria-label="Close">
             <X size={16} />
           </button>
+
+          {/* Hidden at the ends of the list — no wrap-around. */}
+          {hasPrev && (
+            <button className="lb-nav lb-nav-prev" onClick={prev} aria-label="Previous photo">
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          {hasNext && (
+            <button className="lb-nav lb-nav-next" onClick={next} aria-label="Next photo">
+              <ChevronRight size={20} />
+            </button>
+          )}
         </div>
 
         {/* Info bar — contact-sheet edge markings */}

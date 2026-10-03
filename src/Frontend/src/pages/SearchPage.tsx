@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { semanticSearch } from '../api/search'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -99,11 +100,13 @@ export function SearchPage() {
           <div className="search-hint" style={{ padding: '4px 0', textAlign: 'left' }}>
             Found {results.length} result{results.length !== 1 ? 's' : ''} for "{debouncedQuery}"
           </div>
-          <div className="gallery-grid">
-            {results.map(item => (
-              <PhotoCard key={item.id} item={item} className="gallery-card" />
-            ))}
-          </div>
+          <LightboxList ids={results.map(m => m.id)}>
+            <div className="gallery-grid">
+              {results.map(item => (
+                <PhotoCard key={item.id} item={item} className="gallery-card" />
+              ))}
+            </div>
+          </LightboxList>
         </>
       )}
     </div>

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Images } from 'lucide-react'
 import { getMediaList } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 
 const MONTHS = [
   'January','February','March','April','May','June',
@@ -145,11 +146,13 @@ export function GalleryPage() {
 
       {data && data.items.length > 0 && (
         <>
-          <div className="gallery-grid">
-            {data.items.map(item => (
-              <PhotoCard key={item.id} item={item} className="gallery-card" />
-            ))}
-          </div>
+          <LightboxList ids={data.items.map(m => m.id)}>
+            <div className="gallery-grid">
+              {data.items.map(item => (
+                <PhotoCard key={item.id} item={item} className="gallery-card" />
+              ))}
+            </div>
+          </LightboxList>
 
           <div className="gallery-pager">
             <button

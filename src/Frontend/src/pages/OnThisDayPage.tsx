@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getOnThisDay } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 
 interface CalendarDay { year: number; month: number; day: number }
 
@@ -101,6 +102,12 @@ export function OnThisDayPage() {
     [groups],
   )
 
+  // The lightbox steps through the whole page in display order, across year blocks.
+  const pageIds = useMemo(
+    () => sortedGroups?.flatMap(g => g.items.map(i => i.id)) ?? [],
+    [sortedGroups],
+  )
+
   return (
     <div className="page">
       <div className="sec-head" style={{ marginBottom: 0 }}>
@@ -172,23 +179,25 @@ export function OnThisDayPage() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
-        {sortedGroups?.map(group => (
-          <div key={group.year} className="otd-section">
-            <div className="otd-section-title">
-              {sectionLabel(group.year, selected.month, selected.day)}
-              <span className="otd-count">
-                {group.items.length} photo{group.items.length !== 1 ? 's' : ''}
-              </span>
+      <LightboxList ids={pageIds}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+          {sortedGroups?.map(group => (
+            <div key={group.year} className="otd-section">
+              <div className="otd-section-title">
+                {sectionLabel(group.year, selected.month, selected.day)}
+                <span className="otd-count">
+                  {group.items.length} photo{group.items.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="otd-section-row">
+                {group.items.map(item => (
+                  <PhotoCard key={item.id} item={item} className="otd-full-photo" />
+                ))}
+              </div>
             </div>
-            <div className="otd-section-row">
-              {group.items.map(item => (
-                <PhotoCard key={item.id} item={item} className="otd-full-photo" />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </LightboxList>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { getAlbums, getAlbumDetail } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
+import { LightboxList } from '../context/LightboxContext'
 import { useState } from 'react'
 
 function AlbumDetail({ id, onBack }: { id: string; onBack: () => void }) {
@@ -35,11 +36,13 @@ function AlbumDetail({ id, onBack }: { id: string; onBack: () => void }) {
       )}
 
       {data && data.media.length > 0 && (
-        <div className="gallery-grid">
-          {data.media.map(item => (
-            <PhotoCard key={item.id} item={item} className="gallery-card" />
-          ))}
-        </div>
+        <LightboxList ids={data.media.map(m => m.id)}>
+          <div className="gallery-grid">
+            {data.media.map(item => (
+              <PhotoCard key={item.id} item={item} className="gallery-card" />
+            ))}
+          </div>
+        </LightboxList>
       )}
     </div>
   )

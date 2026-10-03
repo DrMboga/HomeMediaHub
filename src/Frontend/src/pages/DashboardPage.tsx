@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMediaList, getStats, getOnThisDay, thumbnailUrl, displayUrl } from '../api/media'
 import { PhotoCard } from '../components/PhotoCard'
-import { useLightbox } from '../context/LightboxContext'
+import { LightboxList, useLightbox } from '../context/LightboxContext'
 import { formatLongDate, formatMonthYear } from '../utils/mediaDate'
 
 export function DashboardPage() {
@@ -175,22 +175,24 @@ export function DashboardPage() {
             <span className="sec-title">On This Day</span>
             <Link to="/on-this-day" className="sec-link">See all</Link>
           </div>
-          <div className="otd-scroll">
-            {otdGroups.map(group => (
-              <div key={group.year} className="otd-group">
-                <div className="otd-year-lbl">{group.year}</div>
-                <div className="otd-photos">
-                  {group.items.slice(0, 4).map(item => (
-                    <PhotoCard
-                      key={item.id}
-                      item={item}
-                      className="otd-photo"
-                    />
-                  ))}
+          <LightboxList ids={otdGroups.flatMap(g => g.items.slice(0, 4).map(i => i.id))}>
+            <div className="otd-scroll">
+              {otdGroups.map(group => (
+                <div key={group.year} className="otd-group">
+                  <div className="otd-year-lbl">{group.year}</div>
+                  <div className="otd-photos">
+                    {group.items.slice(0, 4).map(item => (
+                      <PhotoCard
+                        key={item.id}
+                        item={item}
+                        className="otd-photo"
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </LightboxList>
         </div>
       )}
     </div>

@@ -444,6 +444,18 @@ body.lb-open { overflow: hidden; }
 }
 .lb-close:hover { color: var(--accent); border-color: var(--accent); }
 
+/* Previous / next — sit over the photo, so they carry their own backdrop. */
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 700;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(0, 0, 0, .45); border: 1px solid var(--line-18); color: var(--ink-70);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: color .15s, border-color .15s;
+}
+.lb-nav:hover { color: var(--accent); border-color: var(--accent); }
+.lb-nav-prev { left: 28px; }
+.lb-nav-next { right: 28px; }
+
 .lb-info {
   background: var(--surface);
   display: flex; flex-direction: column; flex-shrink: 0; gap: 8px;
