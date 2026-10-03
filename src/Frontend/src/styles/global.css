@@ -444,6 +444,14 @@ body.lb-open { overflow: hidden; }
 }
 .lb-close:hover { color: var(--accent); border-color: var(--accent); }
 
+/* Shown in place of a photo that is still loading. */
+.lb-spinner {
+  position: absolute; top: 50%; left: 50%; width: 36px; height: 36px; margin: -18px 0 0 -18px;
+  border: 2px solid var(--line-18); border-top-color: var(--accent); border-radius: 50%;
+  animation: lb-spin .8s linear infinite;
+}
+@keyframes lb-spin { to { transform: rotate(360deg); } }
+
 /* Previous / next — sit over the photo, so they carry their own backdrop. */
 .lb-nav {
   position: absolute; top: 50%; transform: translateY(-50%); z-index: 700;

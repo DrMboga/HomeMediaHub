@@ -19,7 +19,10 @@ export function Lightbox() {
   const queryClient = useQueryClient()
   const [zoom, setZoom] = useState(1)
   const [tab, setTab] = useState<'info' | 'map'>('info')
-  const [imgFailed, setImgFailed] = useState(false)
+  // Both keyed by media id rather than reset in an effect: when stepping to the next photo the
+  // effect runs a render too late, and the new photo would briefly inherit the old one's state.
+  const [failedId, setFailedId] = useState<string | null>(null)
+  const [loadedId, setLoadedId] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   // A video that has never been streamed is transcoded on demand. An H.264 .MOV remuxes in
   // seconds, but a real re-encode outlives the element's patience — it used to fail once and
@@ -55,7 +58,6 @@ export function Lightbox() {
       document.body.classList.add('lb-open')
       setZoom(1)
       setTab('info')
-      setImgFailed(false)
       setDeleteConfirm(false)
       setVideoAttempt(0)
       setVideoWaiting(false)
@@ -139,6 +141,8 @@ export function Lightbox() {
   }
 
   const isVideo = detail?.durationSec != null
+  const imgFailed = failedId === mediaId
+  const imgLoaded = loadedId === mediaId
   const imgSrc = imgFailed ? thumbnailUrl(mediaId) : displayUrl(mediaId)
   const camera = [detail?.cameraMake, detail?.cameraModel].filter(Boolean).join(' ')
   const dims = detail?.width && detail?.height ? `${detail.width}×${detail.height}` : ''
@@ -199,13 +203,21 @@ export function Lightbox() {
               )}
             </>
           ) : (
-            <img
-              className="lb-img"
-              src={imgSrc}
-              alt=""
-              style={{ transform: `scale(${zoom})` }}
-              onError={() => setImgFailed(true)}
-            />
+            <>
+              {/* Keyed so stepping drops the old photo at once instead of leaving it up until the
+                  next one has loaded; hidden until then, with the spinner in its place. */}
+              <img
+                key={mediaId}
+                className="lb-img"
+                src={imgSrc}
+                alt=""
+                style={{ transform: `scale(${zoom})`, visibility: imgLoaded ? 'visible' : 'hidden' }}
+                onLoad={() => setLoadedId(mediaId)}
+                // The thumbnail fallback failing too ends the wait — nothing more will arrive.
+                onError={() => (imgFailed ? setLoadedId(mediaId) : setFailedId(mediaId))}
+              />
+              {!imgLoaded && <div className="lb-spinner" role="status" aria-label="Loading" />}
+            </>
           )}
 
           <button className="lb-close" onClick={close} aria-label="Close">
