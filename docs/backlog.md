@@ -11,6 +11,53 @@ Ordered newest first.
 
 ---
 
+## Lightbox: previous / next buttons and arrow keys — 2026-10-03
+
+**Feature request from Mike.** While the Lightbox is open, show a button on the left and on the
+right to step to the previous / next photo **of the list the Lightbox was opened from**, and step
+with the `←` / `→` keys too.
+
+**Why it isn't a one-liner: the Lightbox doesn't know there is a list.** `LightboxContext` holds a
+single `mediaId` and `open(id)` takes only that id (`src/Frontend/src/context/LightboxContext.tsx`).
+Every caller — `PhotoCard` (Gallery, Videos, Search, Tags, Albums, On This Day, Dashboard strips),
+the Dashboard's Photo-of-the-Day tile, and the Geo page's map markers — passes one id and nothing
+else. The Lightbox itself is mounted once in `App.tsx`.
+
+**What would need to change:**
+
+1. **Context carries the sequence.** `open(id, ids?)` — the caller passes the ordered ids of what
+   is on screen; the context keeps `ids` + current index and exposes `prev()` / `next()` /
+   `hasPrev` / `hasNext`. Callers that pass no list (Photo of the Day tile) simply get no buttons.
+2. **`PhotoCard` needs the list.** It renders one item and calls `open(item.id)`; each grid page
+   would pass its items' ids down (a prop, or a small "lightbox list" provider wrapping the grid so
+   the cards don't each take an array). On This Day renders several year blocks — the sequence
+   should be the whole page in display order, not one block.
+3. **Lightbox UI.** Two buttons on the left and right edges (lucide `ChevronLeft`/`ChevronRight`,
+   as the Darkroom pilot already uses lucide), hidden at the ends of the list.
+4. **Keys.** Extend the existing `keydown` handler (Escape / `+` / `-`, `Lightbox.tsx` ~line 97)
+   with `ArrowLeft` / `ArrowRight`. Per-photo state must reset on step: zoom/pan, the active tab
+   (info / map), and the video retry counters — today they reset because closing unmounts; stepping
+   won't close.
+5. **Video caveat.** A focused `<video>` uses `←`/`→` to seek. Either ignore arrow keys when the
+   event target is the video element, or always step and let the player's own controls do seeking.
+
+**Decided by Mike (2026-10-03):**
+- **The list is what is on screen; the page end is the end.** On paged views (Gallery 50/page,
+  Search, Tags) stepping stops at the last photo of the current page — no loading of the next page.
+- **No wrap-around.** The previous button is hidden on the first photo, the next button on the
+  last; the arrow keys do nothing there.
+- **Geo page: no list.** A map marker opens its single photo with no buttons — same as the Photo of
+  the Day tile.
+- **No swipe gestures.** Buttons and keys only.
+- Not yet answered: point 5 (arrow keys while a video has focus). Default unless Mike says
+  otherwise — leave the keys to the player when the event target is the `<video>`.
+
+**Also relevant to Journeys** (`.tracker/journeys/`): the Journey page reuses the Lightbox, and
+stepping through a trip's photos is the obvious way to browse one. If both get built, do this
+first.
+
+---
+
 ## Nothing notices when a file vanishes from the library — 2026-08-29
 
 **Scoped as Phase 14 Step 5, then dropped and re-filed here** once its stated motivation turned out

@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Claude Design input kit (screenshots contain personal photos)
 design-kit/
+
+# Local task tracker / research notes
+.tracker/

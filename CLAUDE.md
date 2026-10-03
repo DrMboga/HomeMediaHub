@@ -575,6 +575,12 @@ RAW files (CR2/ARW/NEF) · per-user library separation · Telegram dead-letter/e
 resurrected workflow. See `docs/architecture.md` §14, `docs/telegram-potd-setup.md`, and
 `docs/delivery-plan.md`.
 
+## Agent skills
+
+The domain glossary is `CONTEXT.md` at the repo root — name domain concepts with its terms, not
+the synonyms it lists under _Avoid_. ADRs live in `docs/adr/`; read the ones covering an area
+before touching it.
+
 ## Prior Art
 
 Previous attempt in `C:/Users/Mike/Projects/PhotoLibrary` (Raspberry Pi 4, .NET, ML.NET):
