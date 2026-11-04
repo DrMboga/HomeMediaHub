@@ -173,6 +173,7 @@ services:
       - "127.0.0.1:8001:8001"
     networks:
       - homemediahub
+      - homemedia
     depends_on:
       geoservice-postgres:
         condition: service_healthy
